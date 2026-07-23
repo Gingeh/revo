@@ -137,7 +137,9 @@ erevo_vm_destroy(vm);
 # installing
 binary releases are not yet available
 
-you will need [the latest **stable** version of zig](https://ziglang.org/download) to build revo (`0.16.0` at the moment)
+i highly recommend using [anyzig](https://github.com/marler8997/anyzig)
+
+you will need [zig](https://ziglang.org/download) version `0.17.0-dev.1442+972627084` or later to build revo
 
 available on most package managers as `zig`
 
