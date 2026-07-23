@@ -96,6 +96,14 @@ async function runTests() {
 		assert(r.value.length > 140, `expected >140 chars, got ${r.value.length}`);
 	});
 
+	await runTest('reduce bug', async () => {
+		const revo = await Revo.fromBuffer(wasmBuffer);
+		const r = revo.eval('reduce((0,1,2,3,4), fn(a,b) a + b, 0)');
+		assert(r.ok);
+		assert(r.value === '10');
+		revo.destroy();
+	});
+
 	await runTest('multiple evals', async () => {
 		const revo = await Revo.fromBuffer(wasmBuffer);
 		assert(revo.eval('1 + 2').value === '3', 'first eval');
