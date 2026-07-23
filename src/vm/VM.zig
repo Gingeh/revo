@@ -1733,15 +1733,19 @@ pub fn returnRegister(
     instr: Instruction,
 ) EvalError!void {
     const fiber = self.currentFiber();
-    const result = regRead(
-        fiber.registers,
-        fiber.frames_hot.items[
-            fiber.frames_hot.items.len - 1
-        ].base,
-        instr.a,
-    );
-    const frame_hot = fiber.frames_hot.pop() orelse unreachable;
-    const frame_cold = fiber.frames_cold.pop() orelse unreachable;
+    const read_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+    const reg_slot = read_base + @as(usize, instr.a);
+    const byte_addr = @as(u64, @intFromPtr(fiber.registers.ptr)) + reg_slot * @sizeOf(Data);
+    var result: Data = undefined;
+    @memcpy(@as(*[8]u8, @ptrCast(&result)), @as(*const [8]u8, @ptrFromInt(byte_addr)));
+
+    const frame_hot_idx = fiber.frames_hot.items.len - 1;
+    const frame_hot = fiber.frames_hot.items[frame_hot_idx];
+    fiber.frames_hot.items.len = frame_hot_idx;
+
+    const frame_cold_idx = fiber.frames_cold.items.len - 1;
+    const frame_cold = fiber.frames_cold.items[frame_cold_idx];
+    fiber.frames_cold.items.len = frame_cold_idx;
 
     if (fiber.open_upvalues.items.len > 0)
         try self.closeUpvalues(frame_hot.base);
@@ -1749,13 +1753,10 @@ pub fn returnRegister(
     fiber.pc = frame_hot.return_addr;
     fiber.program = frame_hot.program;
 
-    // check if returning to exit frame
-    // 0 or 1 frames left after pop means we're exiting (or at) module level
     const returning_to_exit =
         self.sched.current_fiber == 0 and
         fiber.frames_hot.items.len <= 1;
 
-    // toplevel :err tuple should panic
     if (returning_to_exit) {
         if (result.asTuple()) |result_tid| {
             const tuple = try self.tuples.get(result_tid);
@@ -1798,8 +1799,8 @@ pub fn returnRegister(
         return;
     }
 
-    const parent_hot = try self.currentFrame();
-    const parent_cold = try self.currentFrameCold();
+    const parent_hot = &fiber.frames_hot.items[fiber.frames_hot.items.len - 1];
+    const parent_cold = &fiber.frames_cold.items[fiber.frames_hot.items.len - 1];
     const result_slot = parent_hot.base +
         frame_cold.result_register;
     const parent_end = parent_hot.base +

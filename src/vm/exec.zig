@@ -131,18 +131,19 @@ pub inline fn execFiber(self: *VM) !?VM.EvalFailure {
 
 /// runs dispatch until fiber.frames_hot.items.len <= target_depth
 pub inline fn execFiberUntilDepth(self: *VM, target_depth: usize) !?VM.EvalFailure {
-    return execFiberGeneric(self, true, target_depth);
+    return execFiberGenericWithAlloc(self, self.runtime.alloc, true, target_depth);
 }
 
 fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
+    return execFiberGenericWithAlloc(self, self.runtime.alloc, use_depth, target_depth);
+}
+
+fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
     @setEvalBranchQuota(2000);
     var fiber = self.currentFiber();
-    const alloc = self.runtime.alloc;
-
     if (fiber.pc >= fiber.program.len) return null;
     var instr = fiber.program[fiber.pc];
     fiber.pc += 1;
-
     var base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
     var regs = fiber.registers[0..fiber.registers_len];
 
