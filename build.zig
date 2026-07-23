@@ -129,7 +129,7 @@ pub fn build(b: *Build) !void {
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp") orelse
         // isocline needs libc, lsp is untested on freestanding
-        if (is_freestanding) "lsp" else "isocline,lsp";
+        if (is_freestanding) "" else "isocline,lsp";
 
     const test_filters = b.option(
         []const []const u8,
