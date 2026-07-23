@@ -57,6 +57,7 @@ fn wasmIoOperate(_: ?*anyopaque, operation: std.Io.Operation) std.Io.Cancelable!
         .file_read_streaming => .{ .file_read_streaming = error.InputOutput },
         .device_io_control => .{ .device_io_control = -1 },
         .net_receive => .{ .net_receive = .{ error.NetworkDown, 0 } },
+        .net_read => .{ .net_read = error.NetworkDown },
     };
 }
 fn wasmIoLockStderr(_: ?*anyopaque, mode: ?std.Io.Terminal.Mode) std.Io.Cancelable!std.Io.LockedStderr {

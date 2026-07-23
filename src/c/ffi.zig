@@ -17,8 +17,8 @@ const CFnPtr = functions.CFnPtr;
 
 // for error/missing returns
 const nil_val = CRevoData{
-    .tag = @intFromEnum(memory.Type.atom),
-    .value = @intFromEnum(revo.core_atoms.nil),
+    .tag = @backingInt(memory.Type.atom),
+    .value = @backingInt(revo.core_atoms.nil),
 };
 
 /// intern a byte slice, returns stable string id (0 on failure)
@@ -50,7 +50,7 @@ pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize)
         return nil_val;
 
     // getGlobal returns :undef for missing names instead of null
-    if (value.tag() == .atom and value.asAtom().? == @intFromEnum(revo.core_atoms.undef))
+    if (value.tag() == .atom and value.asAtom().? == @backingInt(revo.core_atoms.undef))
         return nil_val;
 
     return CRevoData.fromData(value);
@@ -71,7 +71,7 @@ pub export fn revo_table_create(vm_ptr: *anyopaque) callconv(.c) CRevoData {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const tid = v.tables.create() catch
         return nil_val;
-    return .{ .tag = @intFromEnum(memory.Type.table), .value = @intCast(tid) };
+    return .{ .tag = @backingInt(memory.Type.table), .value = @intCast(tid) };
 }
 
 /// return the number of entries in a table (0 on failure)
@@ -132,7 +132,7 @@ pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const 
     const tid = v.tuples.create(data_list.items) catch
         return nil_val;
     v.noteGCPressure(@sizeOf(Tuple) + @sizeOf(Data) * count);
-    return .{ .tag = @intFromEnum(memory.Type.tuple), .value = @intCast(tid) };
+    return .{ .tag = @backingInt(memory.Type.tuple), .value = @intCast(tid) };
 }
 
 /// get element at index from a tuple, nil if out of bounds or on error
@@ -196,7 +196,7 @@ pub export fn revo_foreign_new(ptr: ?*anyopaque) callconv(.c) CRevoData {
 
 /// extract the raw pointer from a foreign value (null if not foreign)
 pub export fn revo_foreign_ptr(val: CRevoData) callconv(.c) ?*anyopaque {
-    if (val.tag != @intFromEnum(memory.Type.foreign)) return null;
+    if (val.tag != @backingInt(memory.Type.foreign)) return null;
     return @ptrFromInt(@as(usize, @intCast(val.value)));
 }
 

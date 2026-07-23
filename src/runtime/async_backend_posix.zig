@@ -33,7 +33,7 @@ pub fn deinit(bs: *BackendState) void {
 }
 
 fn wakeTuple(vm: *revo.VM, fiber_id: revo.VM.FiberID, tag: revo.core_atoms, payload: revo.Data) !void {
-    const items = [_]revo.Data{ revo.Data.new.atom(@intFromEnum(tag)), payload };
+    const items = [_]revo.Data{ revo.Data.new.atom(@backingInt(tag)), payload };
     try vm.sched.wakeFiber(fiber_id, revo.Data.new.tuple(try vm.tuples.create(&items)));
 }
 
@@ -64,7 +64,7 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
                 if (rc >= 0) {
                     bytes = @intCast(rc);
                 } else {
-                    status = @as(i32, @intFromEnum(std.posix.errno(rc)));
+                    status = @as(i32, @backingInt(std.posix.errno(rc)));
                 }
             } else {
                 status = -1;
@@ -76,7 +76,7 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
                 if (rc >= 0)
                     bytes = @intCast(rc)
                 else
-                    status = @as(i32, @intFromEnum(std.posix.errno(rc)));
+                    status = @as(i32, @backingInt(std.posix.errno(rc)));
             } else {
                 status = -1;
             }
@@ -84,19 +84,19 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
         .socket_accept => {
             const old_flags = std.c.fcntl(job.handle, std.posix.F.GETFL, @as(c_int, 0));
             if (old_flags == -1) {
-                status = @as(i32, @intFromEnum(std.posix.errno(old_flags)));
+                status = @as(i32, @backingInt(std.posix.errno(old_flags)));
             } else {
                 var set_rc: c_int = 0;
                 const block_flags: c_int = old_flags & ~@as(c_int, @bitCast(std.posix.O{ .NONBLOCK = true }));
                 set_rc = std.c.fcntl(job.handle, std.posix.F.SETFL, block_flags);
                 if (set_rc == -1) {
-                    status = @as(i32, @intFromEnum(std.posix.errno(set_rc)));
+                    status = @as(i32, @backingInt(std.posix.errno(set_rc)));
                 } else {
                     const rc = std.c.accept(job.handle, null, null);
                     if (rc >= 0) {
                         bytes = @intCast(rc);
                     } else {
-                        status = @as(i32, @intFromEnum(std.posix.errno(rc)));
+                        status = @as(i32, @backingInt(std.posix.errno(rc)));
                     }
                     _ = std.c.fcntl(job.handle, std.posix.F.SETFL, old_flags);
                 }
@@ -104,7 +104,7 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
         },
     }
 
-    var rec: CompletionRecord = .{ .job_ptr = job, .fiber_id = job.fiber_id, .kind = @as(u8, @intFromEnum(job.kind)), .status = status, .bytes = bytes };
+    var rec: CompletionRecord = .{ .job_ptr = job, .fiber_id = job.fiber_id, .kind = @as(u8, @backingInt(job.kind)), .status = status, .bytes = bytes };
     // write record to pipe; best-effort but log if odd
     const written = std.c.write(wfd, @ptrCast(@alignCast(&rec)), @sizeOf(CompletionRecord));
     _ = written;

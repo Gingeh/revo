@@ -195,14 +195,15 @@ fn parsePermissions(vm: *VM, value: Data) !File.Permissions {
             const n = value.asNum().?;
             if (!std.math.isFinite(n) or @floor(n) != n) return error.InvalidPermissions;
             const raw: PermTag = @intFromFloat(n);
-            return @as(File.Permissions, @enumFromInt(raw));
+            return @as(File.Permissions, @fromBackingInt(@intCast(raw)));
         },
         .atom => {
             const id = value.asAtom().?;
             const name = vm.atomName(id);
-            inline for (@typeInfo(File.Permissions).@"enum".fields) |field| {
-                if (std.mem.eql(u8, field.name, name)) {
-                    return @as(File.Permissions, @enumFromInt(field.value));
+            const perm_enum = comptime @typeInfo(File.Permissions).@"enum";
+            inline for (perm_enum.field_names, perm_enum.field_values) |field_name, field_value| {
+                if (std.mem.eql(u8, field_name, name)) {
+                    return @as(File.Permissions, @fromBackingInt(@intCast(field_value)));
                 }
             }
             return error.InvalidPermissions;
@@ -217,7 +218,7 @@ fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
 
     try t.putRaw(try vm.dataAtom("size"), Data.new.num(stat.size));
     try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(@tagName(stat.kind)));
-    try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@intFromEnum(stat.permissions)));
+    try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@backingInt(stat.permissions)));
     try t.putRaw(try vm.dataAtom("mtime"), Data.new.num(stat.mtime.toSeconds()));
     try t.putRaw(try vm.dataAtom("atime"), Data.new.num((stat.atime orelse stat.mtime).toSeconds()));
     try t.putRaw(try vm.dataAtom("ctime"), Data.new.num(stat.ctime.toSeconds()));
@@ -399,7 +400,7 @@ fn mkdir_fn(args: []const Data, vm: *VM) !NativeResult {
         parsePermissions(vm, args[1]) catch return try NativeResult.Err(vm, "InvalidPermissions")
     else if (builtin.target.os.tag == .windows)
         // windows doesn't have a sepaarte directory perm
-        @as(File.Permissions, @enumFromInt(0))
+        @as(File.Permissions, @fromBackingInt(@intCast(0)))
     else
         .default_dir;
 

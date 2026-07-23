@@ -165,7 +165,7 @@ loading_stack: std.ArrayList([]const u8),
 
 /// matches type enum order
 metatables: [
-    @typeInfo(memory.Type).@"enum".fields.len
+    @typeInfo(memory.Type).@"enum".field_names.len
 ]?mem.TableID = @splat(null),
 module_cache: ModuleCache,
 package_path: std.ArrayList([]const u8),
@@ -1062,7 +1062,7 @@ pub fn getMetatableId(
                     break :blk mt_id;
             } else |_| {}
             break :blk self.metatables[
-                @intFromEnum(
+                @backingInt(
                     mem.Type.table,
                 )
             ];
@@ -1074,12 +1074,12 @@ pub fn getMetatableId(
                     break :blk mt_id;
             } else |_| {}
             break :blk self.metatables[
-                @intFromEnum(
+                @backingInt(
                     mem.Type.tuple,
                 )
             ];
         },
-        else => |e| self.metatables[@intFromEnum(e)],
+        else => |e| self.metatables[@backingInt(e)],
     };
 }
 
@@ -1665,7 +1665,7 @@ fn structFieldValueMatches(
             false;
     }
     for (&[_]revo.core_atoms{ .num, .number, .int, .integer, .float }) |at| {
-        if (expected_atom == at.atom_id())
+        if (expected_atom == @backingInt(at))
             return value.isNumber();
     }
     // some amount of work is done at compile-time to ignore complex types
@@ -1737,7 +1737,7 @@ pub fn returnRegister(
     const reg_slot = read_base + @as(usize, instr.a);
     const byte_addr = @as(u64, @intFromPtr(fiber.registers.ptr)) + reg_slot * @sizeOf(Data);
     var result: Data = undefined;
-    @memcpy(@as(*[8]u8, @ptrCast(&result)), @as(*const [8]u8, @ptrFromInt(byte_addr)));
+    @memcpy((@as(*[8]u8, @ptrCast(&result)))[0..8], (@as(*const [8]u8, @ptrFromInt(byte_addr)))[0..8]);
 
     const frame_hot_idx = fiber.frames_hot.items.len - 1;
     const frame_hot = fiber.frames_hot.items[frame_hot_idx];

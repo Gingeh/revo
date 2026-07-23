@@ -68,10 +68,10 @@ pub const core_atoms = enum(usize) {
     number,
     num,
 
-    pub const lastFalse = @intFromEnum(@This().false);
+    pub const lastFalse = @backingInt(@This().false);
 
     pub inline fn atom_id(comptime a: @This()) usize {
-        return @intFromEnum(a);
+        return @backingInt(a);
     }
 
     pub inline fn str(comptime a: @This()) []const u8 {

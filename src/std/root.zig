@@ -1292,7 +1292,7 @@ pub const NativeResult = union(enum) {
         return .{ .ok = d };
     }
     pub fn okCa(a: revo.core_atoms) NativeResult {
-        return .{ .ok = Data.new.atom(a.atom_id()) };
+        return .{ .ok = Data.new.atom(@backingInt(a)) };
     }
     pub fn other(message: []const u8) NativeResult {
         return .{ .err = .{ .other = message } };
@@ -1313,11 +1313,12 @@ pub const NativeResult = union(enum) {
 
 // type utils
 pub fn typeUtils(vm: *VM) !void {
-    inline for (@typeInfo(revo.memory.Type).@"enum".fields) |field| {
+    const type_enum = comptime @typeInfo(revo.memory.Type).@"enum";
+    inline for (type_enum.field_names) |field_name| {
         const func = struct {
             fn is_of(args: []const Data, _: *VM) !NativeResult {
                 for (args) |arg| {
-                    if (arg.tag() != @field(revo.memory.Type, field.name)) {
+                    if (arg.tag() != @field(revo.memory.Type, field_name)) {
                         return .okBool(false);
                     }
                 }
@@ -1328,7 +1329,7 @@ pub fn typeUtils(vm: *VM) !void {
             &[1]TypeSpec{.any},
             func,
         ) });
-        const atom = try vm.internAtom(field.name ++ "?");
+        const atom = try vm.internAtom(field_name ++ "?");
         const val = Data.new.function(id);
         try vm.globals.put(atom, val);
         try vm.stdlib_globals.put(atom, val);

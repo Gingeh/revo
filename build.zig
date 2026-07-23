@@ -65,15 +65,18 @@ fn getFeatures(features: []const u8) Features {
     while (it.next()) |token| {
         if (emptyStr(token)) continue;
 
-        inline for (@typeInfo(Features).@"struct".fields) |field| {
-            if (std.mem.eql(u8, token, field.name)) {
-                if (@field(ret, field.name)) {
+        const features_info = comptime @typeInfo(Features).@"struct";
+        var matched = false;
+        inline for (features_info.field_names) |field_name| {
+            if (std.mem.eql(u8, token, field_name)) {
+                if (@field(ret, field_name)) {
                     std.log.warn("Duplicate feature: {s}", .{token});
                 }
-                @field(ret, field.name) = true;
-                break;
+                @field(ret, field_name) = true;
+                matched = true;
             }
-        } else std.log.warn("Unknown feature: {s}", .{token});
+        }
+        if (!matched) std.log.warn("Unknown feature: {s}", .{token});
     }
     return ret;
 }
@@ -311,7 +314,7 @@ pub fn build(b: *Build) !void {
         const run_step = b.step("run", "run the cli");
         {
             const run_exe = b.addRunArtifact(exe);
-            run_exe.addArgs(b.args orelse &.{});
+            run_exe.addPassthruArgs();
             run_step.dependOn(&run_exe.step);
         }
 

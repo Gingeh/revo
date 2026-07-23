@@ -154,7 +154,7 @@ pub fn registerAll(
             const mt_id = try vm.tables.create();
             for (methods) |m| {
                 if (m.core_atom) |core| {
-                    try vm.putInTableAtom(mt_id, @intFromEnum(core), m.fn_id);
+                    try vm.putInTableAtom(mt_id, @backingInt(core), m.fn_id);
                 } else {
                     try vm.putInTable(mt_id, m.name, m.fn_id);
                 }

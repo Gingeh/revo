@@ -24,15 +24,15 @@ pub fn init(alloc: std.mem.Allocator) !Interner {
         .dead = .empty,
         .by_name = std.StringHashMap(memory.StringID).init(alloc),
     };
-    const core_atoms_fields = @typeInfo(revo.core_atoms).@"enum".fields;
+    const core_atoms_info = comptime @typeInfo(revo.core_atoms).@"enum";
 
-    self.slots = try std.ArrayList(?[]u8).initCapacity(alloc, core_atoms_fields.len);
+    self.slots = try std.ArrayList(?[]u8).initCapacity(alloc, core_atoms_info.field_names.len);
     errdefer self.slots.deinit(alloc);
     self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
     errdefer self.marks.deinit();
 
-    inline for (core_atoms_fields) |field| {
-        _ = try self.own(field.name);
+    inline for (core_atoms_info.field_names) |field_name| {
+        _ = try self.own(field_name);
     }
     return self;
 }

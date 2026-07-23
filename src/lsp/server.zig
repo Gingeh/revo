@@ -425,7 +425,7 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
                 .context => T.Diagnostic.Severity.Information,
                 .trace => T.Diagnostic.Severity.Hint,
             },
-            .message = if (report.message.len > 0) report.message else if (sp.message.len > 0) sp.message else "error",
+            .message = .{ .string = if (report.message.len > 0) report.message else if (sp.message.len > 0) sp.message else "error" },
             .source = "revo",
             .tags = &.{},
             .relatedInformation = &.{},
@@ -437,7 +437,7 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
         out.appendAssumeCapacity(.{
             .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
             .severity = T.Diagnostic.Severity.Error,
-            .message = if (report.message.len > 0) report.message else "error",
+            .message = .{ .string = if (report.message.len > 0) report.message else "error" },
             .source = "revo",
             .tags = &.{},
             .relatedInformation = &.{},

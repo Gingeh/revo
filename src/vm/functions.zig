@@ -44,9 +44,9 @@ pub const CRevoData = extern struct {
     value: u64,
 
     pub fn toData(self: *const CRevoData, _: *revo.VM) !Data {
-        const tag: mem.Type = @enumFromInt(
+        const tag: mem.Type = @fromBackingInt(@intCast(
             @as(@typeInfo(mem.Type).@"enum".tag_type, @intCast(self.tag)),
-        );
+        ));
         return switch (tag) {
             .number => Data.numberRaw(@bitCast(self.value)),
             // low bits hold the id; high bits are tag bits it can discard
@@ -63,7 +63,7 @@ pub const CRevoData = extern struct {
     pub fn fromData(data: Data) CRevoData {
         const tag = data.tag();
         return .{
-            .tag = @intFromEnum(tag),
+            .tag = @backingInt(tag),
             .value = switch (tag) {
                 .number => @bitCast(data.asNum().?),
                 .string => data.asString().?,

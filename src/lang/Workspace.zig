@@ -1399,8 +1399,9 @@ fn entryPtr(self: *Workspace, id: FileId) !*FileEntry {
 //
 
 fn sameOpts(a: lang.BuildOptions, b: lang.BuildOptions) bool {
-    inline for (std.meta.fields(lang.BuildOptions)) |f| {
-        if (@field(a, f.name) != @field(b, f.name)) return false;
+    const opts_info = comptime @typeInfo(lang.BuildOptions).@"struct";
+    inline for (opts_info.field_names) |field_name| {
+        if (@field(a, field_name) != @field(b, field_name)) return false;
     }
     return true;
 }

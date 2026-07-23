@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { Revo, run } from './revo.js';
 
-const wasmBuffer = readFileSync('examples/wasm/revo.wasm');
+const wasmBuffer = readFileSync('zig-out/bin/revo.wasm');
 
 async function runTests() {
 	let failures = 0, tests = 0;

@@ -63,7 +63,7 @@ fn serializeTuple(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, tid
 
     try writeIntLE(buffer, allocator, u32, @intCast(tuple.items.len));
     for (tuple.items) |item| {
-        try writeIntLE(buffer, allocator, u8, @intFromEnum(item.tag()));
+        try writeIntLE(buffer, allocator, u8, @backingInt(item.tag()));
         switch (item.tag()) {
             .number => try writeIntLE(buffer, allocator, u64, @bitCast(item.asNum().?)),
             .string => {
@@ -117,7 +117,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
     try writeIntLE(&buffer, allocator, u32, header.prototypes_count);
 
     for (artifact.instructions) |instr| {
-        try writeIntLE(&buffer, allocator, u8, @intFromEnum(instr.op));
+        try writeIntLE(&buffer, allocator, u8, @backingInt(instr.op));
         try writeIntLE(&buffer, allocator, u8, @intCast(instr.a));
         try writeIntLE(&buffer, allocator, u8, @intCast(instr.b));
         try writeIntLE(&buffer, allocator, u8, @intCast(instr.c));
@@ -132,7 +132,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
     }
 
     for (vm.constants.items) |constant| {
-        try writeIntLE(&buffer, allocator, u8, @intFromEnum(constant.tag()));
+        try writeIntLE(&buffer, allocator, u8, @backingInt(constant.tag()));
         switch (constant.tag()) {
             .number => try writeIntLE(&buffer, allocator, u64, @bitCast(constant.asNum().?)),
             .string => {
@@ -193,30 +193,30 @@ fn deserializeTuple(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) !memo
     for (items) |*item| {
         const tag = (try reader.takeArray(1))[0];
         item.* = switch (tag) {
-            @intFromEnum(memory.Type.number) => blk: {
+            @backingInt(memory.Type.number) => blk: {
                 const bits = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.num(@as(f64, @bitCast(bits)));
             },
-            @intFromEnum(memory.Type.string) => blk: {
+            @backingInt(memory.Type.string) => blk: {
                 const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 const str = try reader.take(len);
                 break :blk try vm.ownDataString(str);
             },
-            @intFromEnum(memory.Type.atom) => blk: {
+            @backingInt(memory.Type.atom) => blk: {
                 const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 const str = try reader.take(len);
                 const id = try vm.internAtom(str);
                 break :blk memory.Data.new.atom(id);
             },
-            @intFromEnum(memory.Type.function) => blk: {
+            @backingInt(memory.Type.function) => blk: {
                 const fid = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.function(@intCast(fid));
             },
-            @intFromEnum(memory.Type.table) => blk: {
+            @backingInt(memory.Type.table) => blk: {
                 const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.table(@intCast(tid));
             },
-            @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, reader, allocator),
+            @backingInt(memory.Type.tuple) => try deserializeTuple(vm, reader, allocator),
             else => blk: {
                 _ = try reader.takeArray(8);
                 break :blk memory.Data.new.nil();
@@ -244,7 +244,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
 
     for (instructions) |*instr| {
         instr.* = .{
-            .op = @enumFromInt((try reader.takeArray(1))[0]),
+            .op = @fromBackingInt(@intCast((try reader.takeArray(1))[0])),
             .a = (try reader.takeArray(1))[0],
             .b = (try reader.takeArray(1))[0],
             .c = (try reader.takeArray(1))[0],
@@ -270,30 +270,30 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     for (0..constants_count) |_| {
         const tag = (try reader.takeArray(1))[0];
         const constant: memory.Data = switch (tag) {
-            @intFromEnum(memory.Type.number) => blk: {
+            @backingInt(memory.Type.number) => blk: {
                 const bits = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.num(@as(f64, @bitCast(bits)));
             },
-            @intFromEnum(memory.Type.string) => blk: {
+            @backingInt(memory.Type.string) => blk: {
                 const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 const str = try reader.take(len);
                 break :blk try vm.ownDataString(str);
             },
-            @intFromEnum(memory.Type.atom) => blk: {
+            @backingInt(memory.Type.atom) => blk: {
                 const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 const str = try reader.take(len);
                 const id = try vm.internAtom(str);
                 break :blk memory.Data.new.atom(id);
             },
-            @intFromEnum(memory.Type.function) => blk: {
+            @backingInt(memory.Type.function) => blk: {
                 const fid = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.function(@intCast(fid));
             },
-            @intFromEnum(memory.Type.table) => blk: {
+            @backingInt(memory.Type.table) => blk: {
                 const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
                 break :blk memory.Data.new.table(@intCast(tid));
             },
-            @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, &reader, allocator),
+            @backingInt(memory.Type.tuple) => try deserializeTuple(vm, &reader, allocator),
             else => blk: {
                 _ = try reader.takeArray(8); // skip u64 payload
                 break :blk memory.Data.new.nil();

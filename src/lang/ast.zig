@@ -924,14 +924,14 @@ pub fn walkAST(comptime Visitor: type, visitor: *Visitor, node: *const Node) voi
                 return;
             }
 
-            const type_info = @typeInfo(ExprType);
+            const type_info = comptime @typeInfo(ExprType);
             if (type_info != .@"struct" and type_info != .@"union") return;
 
-            inline for (std.meta.fields(ExprType)) |field| {
+            const fields_info = if (type_info == .@"struct") type_info.@"struct" else type_info.@"union";
+            inline for (fields_info.field_names, fields_info.field_types) |field_name, FieldType| {
                 if (@hasField(Visitor, "found") and visitor.found) return;
 
-                const FieldType = field.type;
-                const value = @field(payload, field.name);
+                const value = @field(payload, field_name);
 
                 switch (FieldType) {
                     *Node => {
