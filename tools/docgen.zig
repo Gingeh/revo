@@ -119,20 +119,16 @@ fn renderMethods(w: *Writer, specs: []*const FnSpec, alloc: std.mem.Allocator) !
 }
 
 fn renderFn(w: *Writer, spec: FnSpec) !void {
-    try w.writeAll("#### `");
-    try w.writeAll(spec.name);
-    try w.writeAll("`\n\n");
-
     try w.writeAll("```rb\n");
     try api.renderSignature(w, spec);
+    if (spec.variadic) {
+        try w.writeAll("# variadic");
+    }
     try w.writeAll("\n```\n");
 
     if (spec.doc.len > 0) {
         try w.writeAll("\n");
         try renderDoc(w, spec.doc);
-    }
-    if (spec.variadic) {
-        try w.writeAll("\n_(variadic)_\n");
     }
     try w.writeAll("\n");
 }
