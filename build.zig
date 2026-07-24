@@ -14,10 +14,12 @@ const release_targets: []const []const u8 = &.{
     // "x86_64-macos",
     "aarch64-macos",
     "x86_64-windows",
+    "wasm64-freestanding",
 };
 
 const release_target_queries = blk: {
-    @setEvalBranchQuota(10_000);
+    // zig master's target-query parse path can exceed the default comptime quota???
+    @setEvalBranchQuota(200_000);
     // pre-computes queries
     var arr: [release_targets.len]std.Target.Query = undefined;
     var bad_targets: []const u8 = &.{};
@@ -408,34 +410,96 @@ pub fn build(b: *Build) !void {
             const release_is_fs = release_target.result.os.tag == .freestanding or
                 release_target.result.cpu.arch == .wasm64;
 
+            const release_lsp_enabled = features.lsp and !release_is_fs;
+            const release_isocline_enabled = features.isocline and !release_is_fs;
+
+            const rel_options = b.addOptions();
+            rel_options.addOption(bool, "is_freestanding", release_is_fs);
+            rel_options.addOption(bool, "isocline", release_isocline_enabled);
+            rel_options.addOption([]const u8, "version", VERSION);
+            rel_options.addOption(bool, "lsp_enabled", release_lsp_enabled);
+            const rel_options_mod = rel_options.createModule();
+
+            const rel_vm_mod = b.createModule(.{
+                .root_source_file = b.path("src/vm/root.zig"),
+                .target = release_target,
+                .optimize = .fast,
+                .link_libc = !release_is_fs,
+            });
+            const rel_revo_mod = b.createModule(.{
+                .root_source_file = b.path("src/root.zig"),
+                .target = release_target,
+                .optimize = .fast,
+                .link_libc = !release_is_fs,
+            });
+            const rel_c_mod = b.createModule(.{
+                .root_source_file = b.path("src/c/root.zig"),
+                .target = release_target,
+                .optimize = .fast,
+                .link_libc = !release_is_fs,
+            });
+
+            const rel_core_mods: []const *Module = &.{ rel_vm_mod, rel_revo_mod, rel_c_mod };
+            for (rel_core_mods) |mod| {
+                mod.addImport("revo", rel_revo_mod);
+                mod.addImport("vm", rel_vm_mod);
+                mod.addImport("c", rel_c_mod);
+                mod.addImport("build_options", rel_options_mod);
+            }
+
+            const rel_isocline_mod = blk: {
+                if (release_isocline_enabled) {
+                    if (b.lazyDependency("isocline", .{})) |isocline_dep| {
+                        const isocline_c = b.addTranslateC(.{
+                            .root_source_file = isocline_dep.path("include/isocline.h"),
+                            .target = release_target,
+                            .optimize = .fast,
+                        });
+                        isocline_c.addIncludePath(isocline_dep.path("include/"));
+                        const mod = isocline_c.createModule();
+                        mod.addCSourceFile(.{
+                            .file = isocline_dep.path("src/isocline.c"),
+                            .flags = &.{},
+                        });
+                        break :blk mod;
+                    }
+                }
+                break :blk b.createModule(.{
+                    .root_source_file = b.addWriteFiles().add(
+                        b.fmt("no_isocline_release_{s}.zig", .{target_str}),
+                        "",
+                    ),
+                });
+            };
+
             const rel_revolt_mod = b.createModule(.{
-                .root_source_file = if (features.lsp)
+                .root_source_file = if (release_lsp_enabled)
                     b.path("src/lsp/server.zig")
                 else
                     b.path("src/lsp/noop.zig"),
                 .target = release_target,
                 .optimize = .fast,
                 .link_libc = !release_is_fs,
-                .imports = &[_]Module.Import{
-                    .{ .name = "revo", .module = revo_mod },
-                    .{ .name = "vm", .module = vm_mod },
-                    .{ .name = "c", .module = c_mod },
-                    .{ .name = "build_options", .module = release_options_mod },
+                .imports = if (release_lsp_enabled) &[_]Module.Import{
+                    .{ .name = "revo", .module = rel_revo_mod },
+                    .{ .name = "vm", .module = rel_vm_mod },
+                    .{ .name = "c", .module = rel_c_mod },
+                    .{ .name = "build_options", .module = rel_options_mod },
                     .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
-                },
+                } else &.{},
             });
 
             const release_mod = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
+                .root_source_file = b.path(if (release_is_fs) "src/main_wasm.zig" else "src/main.zig"),
                 .target = release_target,
                 .optimize = .fast,
                 .link_libc = !release_is_fs,
                 .imports = &[_]Module.Import{
-                    .{ .name = "revo", .module = revo_mod },
-                    .{ .name = "vm", .module = vm_mod },
-                    .{ .name = "c", .module = c_mod },
-                    .{ .name = "build_options", .module = release_options_mod },
-                    .{ .name = "isocline", .module = isocline_mod },
+                    .{ .name = "revo", .module = rel_revo_mod },
+                    .{ .name = "vm", .module = rel_vm_mod },
+                    .{ .name = "c", .module = rel_c_mod },
+                    .{ .name = "build_options", .module = rel_options_mod },
+                    .{ .name = "isocline", .module = rel_isocline_mod },
                     .{ .name = "lsp_main", .module = rel_revolt_mod },
                 },
             });
@@ -444,6 +508,7 @@ pub fn build(b: *Build) !void {
                 .name = binName(b, target_str, .nightly),
                 .root_module = release_mod,
             });
+            if (release_is_fs) release_exe.entry = .disabled;
             release_exe.rdynamic = true;
 
             release_step.dependOn(&b.addInstallArtifact(release_exe, install_options).step);
