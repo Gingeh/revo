@@ -133,7 +133,7 @@ const Handler = struct {
             lsp.basic_server.validateServerCapabilities(Handler, caps);
         }
         return .{
-            .serverInfo = .{ .name = "revolt", .version = "0.0.1" },
+            .serverInfo = .{ .name = "revolt", .version = @import("build_options").version },
             .capabilities = caps,
         };
     }

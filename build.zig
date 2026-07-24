@@ -6,7 +6,7 @@ const Build = std.Build;
 const Module = Build.Module;
 const logger = std.log.scoped(.@"build/revo");
 
-const VERSION = "0.0.0";
+const VERSION = "0.1.0a";
 
 const release_targets: []const []const u8 = &.{
     "x86_64-linux-musl",

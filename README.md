@@ -8,7 +8,7 @@
 
 an expressive, dynamically-typed language for the joy of programming
 
-![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange)  ![version 0.0.0](https://img.shields.io/badge/version-0.0.1a-navy)
+![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange)  ![version 0.1.0a](https://img.shields.io/badge/version-0.1.0a-navy)
 
 - [introduction](#introduction)
 - [installing](#installing)
@@ -20,6 +20,8 @@ an expressive, dynamically-typed language for the joy of programming
 - [license](#license)
 
 # introduction
+
+(see [the introduction](https://gills.pages.dev/revo/docs))
 
 ```ruby
 # =======================
