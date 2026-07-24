@@ -47,15 +47,15 @@ fn compileProgram(inner: *revo.VM, name: []const u8, source: []const u8) ?*Progr
         const msg = std.fmt.allocPrint(self.alloc, "{}", .{err}) catch return null;
         defer self.alloc.free(msg);
 
-        self.last_error = self.alloc.dupeZ(u8, msg) catch null;
+        self.last_error = self.alloc.dupeSentinel(u8, msg, 0) catch null;
         return null;
     };
 
     return switch (result) {
         .ok => |artifact| blk: {
             const program = self.alloc.create(Program) catch return null;
-            const name_z = self.alloc.dupeZ(u8, name) catch return null;
-            const source_z = self.alloc.dupeZ(u8, source) catch return null;
+            const name_z = self.alloc.dupeSentinel(u8, name, 0) catch return null;
+            const source_z = self.alloc.dupeSentinel(u8, source, 0) catch return null;
             program.* = .{
                 .alloc = self.alloc,
                 .name = name_z,
@@ -68,11 +68,11 @@ fn compileProgram(inner: *revo.VM, name: []const u8, source: []const u8) ?*Progr
             var buf = std.Io.Writer.Allocating.init(self.alloc);
             defer buf.deinit();
             revo.lang.renderError(self.alloc, &buf.writer, .{ .name = name, .text = source }, failure) catch {
-                self.last_error = self.alloc.dupeZ(u8, "compile error") catch null;
+                self.last_error = self.alloc.dupeSentinel(u8, "compile error", 0) catch null;
                 inner.runtime.resetDiagArena();
                 break :blk null;
             };
-            self.last_error = self.alloc.dupeZ(u8, buf.written()) catch null;
+            self.last_error = self.alloc.dupeSentinel(u8, buf.written(), 0) catch null;
             inner.runtime.resetDiagArena();
             break :blk null;
         },
@@ -87,14 +87,14 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
     inner.setProgramDebugInfo(program.artifact.spans, program.source, program.name) catch |err| {
         const msg = std.fmt.allocPrint(self.alloc, "{}", .{err}) catch return false;
         defer self.alloc.free(msg);
-        self.last_error = self.alloc.dupeZ(u8, msg) catch null;
+        self.last_error = self.alloc.dupeSentinel(u8, msg, 0) catch null;
         return false;
     };
 
     const result = revo.module.runCompiledModuleReport(inner, program.name, program.artifact.instructions) catch |err| {
         const msg = std.fmt.allocPrint(self.alloc, "{}", .{err}) catch return false;
         defer self.alloc.free(msg);
-        self.last_error = self.alloc.dupeZ(u8, msg) catch null;
+        self.last_error = self.alloc.dupeSentinel(u8, msg, 0) catch null;
         return false;
     };
 
@@ -110,11 +110,11 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
             var buf = std.Io.Writer.Allocating.init(self.alloc);
             defer buf.deinit();
             failure.render(self.alloc, &buf.writer, program.source) catch {
-                self.last_error = self.alloc.dupeZ(u8, "runtime error") catch null;
+                self.last_error = self.alloc.dupeSentinel(u8, "runtime error", 0) catch null;
                 inner.runtime.resetDiagArena();
                 break :blk false;
             };
-            self.last_error = self.alloc.dupeZ(u8, buf.written()) catch null;
+            self.last_error = self.alloc.dupeSentinel(u8, buf.written(), 0) catch null;
             inner.runtime.resetDiagArena();
             break :blk false;
         },
