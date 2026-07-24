@@ -500,7 +500,7 @@ pub inline fn writeRegisterUnsafe(self: *VM, slot: usize, value: Data) void {
 
 /// register read using a cached slots pointer (avoids currentFiber call)
 pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Data {
-    if (builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .fast) {
         const slot = base + reg;
         if (slot >= slots.len)
             return revo.Data.new.core(.missing);
@@ -510,7 +510,7 @@ pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Da
 
 /// register write using a cached slots pointer (avoids currentFiber call)
 pub inline fn regWrite(slots: []Data, base: usize, reg: opcode.Register, value: Data) void {
-    if (builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .fast) {
         const slot = base + reg;
         if (slot >= slots.len)
             @panic("register write out of bounds; this is a compiler bug, report at https://codeberg.org/lung/revo/issues");
@@ -1106,7 +1106,7 @@ pub inline fn tableFast(
     self: *VM,
     id: mem.TableID,
 ) !*root.table.Table {
-    if (builtin.mode == .ReleaseFast) {
+    if (builtin.mode == .fast) {
         std.debug.assert(id < self.tables.tables.items.len);
         std.debug.assert(
             self.tables.tables.items[id] != null,
@@ -1120,7 +1120,7 @@ inline fn functionFast(
     self: *VM,
     id: mem.FunctionID,
 ) !*root.functions.Function {
-    if (builtin.mode == .ReleaseFast) {
+    if (builtin.mode == .fast) {
         std.debug.assert(
             id < self.functions.functions.items.len,
         );

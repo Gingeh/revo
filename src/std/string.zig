@@ -232,9 +232,9 @@ pub const specs: []const api.FnSpec = &.{
         },
         .ret = "string",
         .doc =
-        \\creates string from ASCII code(s)
-        \\string_of(97) => "a"
-        \\string_of({97, 98}) => "ab"
+        \\ creates string from ASCII code(s)
+        \\   string_of(97) => "a"
+        \\   string_of({97, 98}) => "ab"
         ,
         .f = root.define(&.{.any}, string_of),
     },

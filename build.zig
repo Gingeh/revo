@@ -126,7 +126,7 @@ pub fn build(b: *Build) !void {
     // botch: wasm64 has a codegen bug in Debug mode that causes "memory access out of
     // bounds" at runtime for some reason
     // force ReleaseFast for ALL modules linked into the wasm binary, so the VM code gets the fix too
-    const effective_optimize = if (is_freestanding) .ReleaseSmall else optimize;
+    const effective_optimize = if (is_freestanding) .small else optimize;
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
@@ -253,7 +253,7 @@ pub fn build(b: *Build) !void {
         .{ .name = "vm", .module = vm_mod },
         .{ .name = "c", .module = c_mod },
     };
-    const shared_build_options = if (optimize == .Debug) debug_options_mod else release_options_mod;
+    const shared_build_options = if (optimize == .debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
         for (imports) |imp| {
             mod.addImport(imp.name, imp.module);
@@ -287,7 +287,7 @@ pub fn build(b: *Build) !void {
         const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
         const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod.? });
 
-        if (optimize == .Debug) exe.lto = .none;
+        if (optimize == .debug) exe.lto = .none;
         exe.rdynamic = true;
         if (builtin.os.tag == .linux and with_glibc) {
             exe.use_llvm = true;
@@ -316,6 +316,26 @@ pub fn build(b: *Build) !void {
             const run_exe = b.addRunArtifact(exe);
             run_exe.addPassthruArgs();
             run_step.dependOn(&run_exe.step);
+        }
+
+        //
+        // docs step
+        //
+        const docs_step = b.step("docs", "generate stdlib reference markdown");
+        {
+            const docgen_mod = b.createModule(.{
+                .root_source_file = b.path("tools/docgen.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = !is_freestanding,
+            });
+            for (imports) |imp| {
+                docgen_mod.addImport(imp.name, imp.module);
+            }
+            docgen_mod.addImport("build_options", shared_build_options);
+            const docgen_exe = b.addExecutable(.{ .name = "docgen", .root_module = docgen_mod });
+            const run_docgen = b.addRunArtifact(docgen_exe);
+            docs_step.dependOn(&run_docgen.step);
         }
 
         //
@@ -394,7 +414,7 @@ pub fn build(b: *Build) !void {
                 else
                     b.path("src/lsp/noop.zig"),
                 .target = release_target,
-                .optimize = .ReleaseFast,
+                .optimize = .fast,
                 .link_libc = !release_is_fs,
                 .imports = &[_]Module.Import{
                     .{ .name = "revo", .module = revo_mod },
@@ -408,7 +428,7 @@ pub fn build(b: *Build) !void {
             const release_mod = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
                 .target = release_target,
-                .optimize = .ReleaseFast,
+                .optimize = .fast,
                 .link_libc = !release_is_fs,
                 .imports = &[_]Module.Import{
                     .{ .name = "revo", .module = revo_mod },

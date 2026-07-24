@@ -798,7 +798,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
         .load_local, .bind_local => {
             const dst = base + instr.a;
             const src = base + instr.b;
-            if (builtin.mode != .ReleaseFast and src >= regs.len) {
+            if (builtin.mode != .fast and src >= regs.len) {
                 regWrite(regs, base, instr.a, revo.Data.new.core(.missing));
             } else {
                 regs[dst] = regs[src];
@@ -817,7 +817,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             }
             const dst = base + instr.a;
             const src = base + instr.b;
-            if (builtin.mode != .ReleaseFast and src >= regs.len) {
+            if (builtin.mode != .fast and src >= regs.len) {
                 regWrite(regs, base, instr.a, revo.Data.new.core(.missing));
             } else {
                 regs[dst] = regs[src];
