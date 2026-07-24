@@ -274,7 +274,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             };
 
             // general: convert both to strings and concat
-            //          same pattern as stdlib's tostring
+            //          same pattern as stdlib's string()
             const l_src = blk: {
                 if (try self.getMetamethod(lhs, "__tostring")) |mm| {
                     const call_result = revo.std_lib.callUnaryMetamethod(mm, lhs, self);

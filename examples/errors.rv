@@ -14,7 +14,7 @@ fn boom() do
 	unwrap(res())
 	(:err, :Unlucky) |> unwrap
 
-	tonumber("a")?
+	number("a")?
 end
 
 boom():unwrap()

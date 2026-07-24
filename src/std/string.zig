@@ -261,6 +261,17 @@ pub const specs: []const api.FnSpec = &.{
         .doc = "joins table elements into string with separator",
         .f = root.define(&.{ .table, .string }, join),
     },
+    .{
+        .name = "__call",
+        .placements = &.{api.mod("string")},
+        .params = &.{
+            .{ "value", "any" },
+        },
+        .ret = "string",
+        .doc = "converts value to string: string(x)",
+        .core_key = revo.core_atoms.__call,
+        .f = root.define(&.{ .any, .any }, string_call),
+    },
 };
 
 //
@@ -529,13 +540,20 @@ fn string_of(args: []const Data, vm: *VM) !NativeResult {
     return .errType(0, "number or tuple", root.dataToString(args[0]));
 }
 
+/// __call handler for the string module table
+/// string(x) converts any value to its string representation
+fn string_call(args: []const Data, vm: *VM) !root.NativeResult {
+    _ = args[0]; // self (the string module table)
+    return root.string_(args[1..], vm);
+}
+
 test "string metatable" {
     try testing.top_string("\"hello\":sub(0, 2)", "he");
 
     try testing.top_number("len(\"asdf\")", 4);
     try testing.top_number("\"asdf\":len()", 4);
     try testing.top_string("\"asdf\":with(1, \"y\")", "aydf");
-    try testing.top_string("tostring(\"asdf\")", "asdf");
+    try testing.top_string("string(\"asdf\")", "asdf");
     try testing.top_string("\"asdf\"[2]", "d");
     try testing.top_string("\"asdf\" ~ \"qwer\"", "asdfqwer");
     try testing.top_string("\"ab\" * 3", "ababab");

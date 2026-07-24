@@ -693,7 +693,7 @@ test "metatable __tostring works on tables" {
     try testing.top_string(
         \\ const mt = {__tostring = fn(self) "custom"}
         \\ const t = set_metatable({a = 1}, mt)
-        \\ tostring(t)
+        \\ string(t)
     , "custom");
 }
 
@@ -744,7 +744,7 @@ test "metamethod failures are runtime errors" {
     try testing.expectRuntimeFailureWithMessage(
         \\ const mt = {__tostring = fn(self) panic("boom")}
         \\ const t = set_metatable({}, mt)
-        \\ tostring(t)
+        \\ string(t)
     , .Panic, "boom");
 }
 

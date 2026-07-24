@@ -39,7 +39,7 @@ end do
 	if (line != :nil)
 		line
 			|> _:split(",")
-			|> _:map(fn (n) tonumber(n) orelse 0)
+			|> _:map(fn (n) number(n) orelse 0)
 			|> append(data, _)
 end
 

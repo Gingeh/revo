@@ -105,7 +105,7 @@ fn control_flow() do
 
   # match on tuples: pattern matching extracts values
   const result = match (10, "ok")
-    | (n, "ok") when n > 5 => "success: " ~ tostring(n)
+    | (n, "ok") when n > 5 => "success: " ~ string(n)
     | (n, "ok") => "small success"
     | (_, err) => "error: " ~ err
   print(result)
@@ -375,8 +375,8 @@ fn stdlib() do
   print("\nstdlib")
 
   # conversion functions
-  print(tonumber("42"), tonumber(3.14))
-  print(tostring(42), tostring(:ok))
+  print(number("42"), number(3.14))
+  print(string(42), string(:ok))
 
   # type checking
   print(typeof(42), typeof("hi"), typeof(:atom), typeof((1,2,3)), typeof({}))

@@ -86,24 +86,14 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
-        .name = "tostring",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "value", "any" },
-        },
-        .ret = "string",
-        .doc = "converts value to string",
-        .f = define(&[_]TypeSpec{.any}, tostring),
-    },
-    .{
-        .name = "tonumber",
+        .name = "number",
         .placements = &.{api.g},
         .params = &.{
             .{ "value", "string" },
         },
         .ret = "!number/string",
         .doc = "converts string to number",
-        .f = define(&[_]TypeSpec{.any}, tonumber),
+        .f = define(&[_]TypeSpec{.any}, number_),
     },
     .{
         .name = "expect",
@@ -530,7 +520,7 @@ pub fn fmt(args: []const Data, vm: *VM) !NativeResult {
                     else if (args[arg_idx].asString()) |id|
                         Data.new.num(try std.fmt.parseFloat(f64, vm.stringValue(id)))
                     else if (args[arg_idx].isAtom())
-                        try vm.ownDataString("<un-tonumber-able>")
+                        try vm.ownDataString("<un-number-able>")
                     else
                         Data.new.num(0);
                     try append_data(&result.writer, v, vm, .display);
@@ -571,7 +561,7 @@ test "fmt %d formats numbers" {
     , "10.5");
     try testing.top_string(
         \\ fmt("%d", :hello)
-    , "<un-tonumber-able>");
+    , "<un-number-able>");
 }
 
 test "fmt %? uses debug rendering" {
@@ -723,10 +713,10 @@ pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.atom(try vm.internAtom(typeof(args[0]))));
 }
 
-/// > tostring(arg0: any) -> string
+/// > string(arg0: any) -> string
 /// converts value to string representation
 /// uses __tostring or __display metamethod if available
-pub fn tostring(args: []const Data, vm: *VM) !NativeResult {
+pub fn string_(args: []const Data, vm: *VM) !NativeResult {
     const mm = try vm.getMetamethod(args[0], "__tostring");
     if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
@@ -828,7 +818,7 @@ pub fn chan_recv(args: []const Data, vm: *VM) !NativeResult {
 /// converts value to number
 /// accepts number (passthrough) or string (parsed)
 /// errors on other types
-pub fn tonumber(args: []const Data, vm: *VM) !NativeResult {
+pub fn number_(args: []const Data, vm: *VM) !NativeResult {
     if (args[0].isNumber()) return .Ok(vm, args[0]);
     if (args[0].asString()) |id| {
         const parsed = try std.fmt.parseFloat(f64, vm.stringValue(id));
@@ -1444,12 +1434,12 @@ test "meatballs are distinct" {
     try testing.top_string(
         \\ const a = set_metatable({}, {__tostring = fn(self) "foo"})
         \\ const b = set_metatable({}, {__tostring = fn(self) "bar"})
-        \\ tostring(a)
+        \\ string(a)
     , "foo");
 
     try testing.top_string(
         \\ const a = set_metatable(:true, {__tostring = fn(self) "foo"})
-        \\ tostring(1 == 1)
+        \\ string(1 == 1)
     , "foo");
 }
 
@@ -1474,7 +1464,7 @@ test "bullshit: metatable constructors closures and method chaining" {
 
 test "natives register as functions" {
     try testing.top_type("len", .function);
-    try testing.top_type("tonumber", .function);
+    try testing.top_type("number", .function);
     try testing.top_type("assert", .function);
     try testing.top_true("assert(type(len) == :function)");
 }

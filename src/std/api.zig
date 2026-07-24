@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const revo = @import("../root.zig");
+const Data = revo.Data;
 const root = @import("root.zig");
 
 pub const root_specs = @import("root.zig").root_specs;
@@ -101,6 +102,7 @@ pub fn registerAll(
     prototype: PrototypeFn,
 ) !void {
     var module_funcs: std.StringHashMapUnmanaged(std.ArrayList(ModuleEntry)) = .empty;
+    var module_calls: std.StringHashMapUnmanaged(revo.memory.FunctionID) = .empty;
     var methods_by_target: std.AutoHashMapUnmanaged(TypeSpec, std.ArrayList(MethodEntry)) = .empty;
     var global_funcs: std.ArrayList(GlobalEntry) = .empty;
 
@@ -108,6 +110,7 @@ pub fn registerAll(
         var mit = module_funcs.iterator();
         while (mit.next()) |e| e.value_ptr.deinit(vm.runtime.alloc);
         module_funcs.deinit(vm.runtime.alloc);
+        module_calls.deinit(vm.runtime.alloc);
         var tit = methods_by_target.iterator();
         while (tit.next()) |e| e.value_ptr.deinit(vm.runtime.alloc);
         methods_by_target.deinit(vm.runtime.alloc);
@@ -120,8 +123,12 @@ pub fn registerAll(
             for (spec.placements) |p| switch (p.kind) {
                 .global => try global_funcs.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id }),
                 .module => {
-                    const gop = try module_funcs.getOrPutValue(vm.runtime.alloc, p.module.?, .empty);
-                    try gop.value_ptr.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id });
+                    if (spec.core_key == .__call) {
+                        try module_calls.put(vm.runtime.alloc, p.module.?, fn_id);
+                    } else {
+                        const gop = try module_funcs.getOrPutValue(vm.runtime.alloc, p.module.?, .empty);
+                        try gop.value_ptr.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id });
+                    }
                 },
                 .method => {
                     const gop = try methods_by_target.getOrPutValue(vm.runtime.alloc, p.target.?, .empty);
@@ -142,6 +149,12 @@ pub fn registerAll(
         while (it.next()) |entry| {
             const table_id = try vm.ensureModule(entry.key_ptr.*);
             for (entry.value_ptr.items) |f| try vm.putInTable(table_id, f.name, f.fn_id);
+
+            if (module_calls.get(entry.key_ptr.*)) |call_fn_id| {
+                const mt_id = try vm.tables.create();
+                try vm.putInTableAtom(mt_id, @intFromEnum(revo.core_atoms.__call), call_fn_id);
+                try vm.setMetatable(Data.new.table(table_id), mt_id);
+            }
         }
     }
 
@@ -154,7 +167,7 @@ pub fn registerAll(
             const mt_id = try vm.tables.create();
             for (methods) |m| {
                 if (m.core_atom) |core| {
-                    try vm.putInTableAtom(mt_id, @backingInt(core), m.fn_id);
+                    try vm.putInTableAtom(mt_id, @intFromEnum(core), m.fn_id);
                 } else {
                     try vm.putInTable(mt_id, m.name, m.fn_id);
                 }

@@ -544,12 +544,12 @@ test "string conversion metamethods __tostring" {
     try t.top_string(
         \\ const mt = {__tostring = fn(self) "custom"}
         \\ const t = set_metatable({a = 1}, mt)
-        \\ tostring(t)
+        \\ string(t)
     , "custom");
     try t.top_string(
         \\ const mt = {__tostring = fn(self) "42"}
         \\ const t = set_metatable({}, mt)
-        \\ tostring(t)
+        \\ string(t)
     , "42");
 }
 
@@ -587,7 +587,7 @@ test "metamethod failures are runtime errors not host panics" {
     try t.expectRuntimeFailureWithMessage(
         \\ const mt = {__tostring = fn(self) panic("boom")}
         \\ const t = set_metatable({}, mt)
-        \\ tostring(t)
+        \\ string(t)
     , .Panic, "boom");
 }
 
@@ -700,12 +700,12 @@ test "non-table values can use plain metatable fields as methods" {
 //
 
 test "result predicates work" {
-    try t.top_string("tostring((:ok, 42))", "(:ok, 42)");
-    try t.top_string("tostring((:err, :Bad))", "(:err, :Bad)");
+    try t.top_string("string((:ok, 42))", "(:ok, 42)");
+    try t.top_string("string((:err, :Bad))", "(:err, :Bad)");
 }
 
 test "error helpers build and classify tagged errors" {
-    try t.top_string("tostring((:err, :FileNotFound))", "(:err, :FileNotFound)");
+    try t.top_string("string((:err, :FileNotFound))", "(:err, :FileNotFound)");
     try t.top_true("err?!((:err, :Bad))");
     try t.top_true("err?!((:err, :FileNotFound))");
     try t.top_false("err?!((:ok, :Bad))");
@@ -2438,9 +2438,9 @@ test "multiple spawned joins survive nested calls" {
         \\ let a = spawn worker(1)
         \\ let b = spawn worker(2)
         \\ let c = spawn worker(3)
-        \\ let ra = tonumber(tostring(join(a))):unwrap()
-        \\ let rb = tonumber(tostring(join(b))):unwrap()
-        \\ let rc = tonumber(tostring(join(c))):unwrap()
+        \\ let ra = number(string(join(a))):unwrap()
+        \\ let rb = number(string(join(b))):unwrap()
+        \\ let rc = number(string(join(c))):unwrap()
         \\ ra + rb + rc
     , 36);
 }
@@ -2701,7 +2701,7 @@ test "pipe: implicit match subject" {
 
 test "pipe: explicit placeholder arg position" {
     try t.top_string(
-        \\ fn f(a, b) tostring(a) ~ tostring(b)
+        \\ fn f(a, b) string(a) ~ string(b)
         \\ "asdf" |> f("got ", _)
     , "got asdf");
 }
@@ -2736,7 +2736,7 @@ test "pipe: explicit placeholder in nested call arg" {
 test "pipe: explicit placeholder in expr" {
     try t.top_string(
         \\ const x = "asdf"
-        \\ x |> do tostring(_) end
+        \\ x |> do string(_) end
     , "asdf");
 }
 

@@ -4,7 +4,7 @@ struct Version {
 	fn is_beta(self) self.major < 1,
 	fn of_string(str) do
 		const res = str:split(".")
-			|> map(fn(c) tonumber(c))
+			|> map(fn(c) number(c))
 		# res is still three tuples
 
 		return (:ok, Version{major = res[0]?, minor = res[1]?})
