@@ -102,7 +102,7 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
         .ok => blk: {
             if (out_value) |out| {
                 const crd = revo.functions.CRevoData.fromData(inner.currentResult());
-                out.* = @bitCast(crd);
+                out.* = .{ .tag = crd.tag, .value = crd.value };
             }
             break :blk true;
         },
