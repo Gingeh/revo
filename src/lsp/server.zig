@@ -129,7 +129,7 @@ const Handler = struct {
             },
         };
         // sanity check in debug builds
-        if (builtin.mode == .Debug) {
+        if (builtin.mode == .debug) {
             lsp.basic_server.validateServerCapabilities(Handler, caps);
         }
         return .{

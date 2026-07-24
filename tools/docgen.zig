@@ -122,7 +122,7 @@ fn renderFn(w: *Writer, spec: FnSpec) !void {
     try w.writeAll("```rb\n");
     try api.renderSignature(w, spec);
     if (spec.variadic) {
-        try w.writeAll("# variadic");
+        try w.writeAll(" # variadic");
     }
     try w.writeAll("\n```\n");
 
