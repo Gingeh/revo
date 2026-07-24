@@ -645,23 +645,24 @@ const SemanticChecker = struct {
                 }
             }
             try self.table_field_map.put(name, fields);
+            const table_type = types_mod.inferExprType(self, binding.value);
             if (binding.type_name) |type_expr| {
                 try self.typed_names.put(name, {});
                 const expected = try type_parser.evalTypeExpr(self, type_expr);
-                if (!types_mod.canCoerce(.{ .struct_type = "table" }, expected)) {
+                if (!types_mod.canCoerce(table_type, expected)) {
                     const name_str = try types_mod.formatType(self.alloc, expected);
                     try self.appendTypeMismatch(
                         binding.target.span,
                         name,
                         name_str,
-                        .{ .struct_type = "table" },
+                        table_type,
                     );
                 }
                 try self.declare(name, expected);
                 return expected;
             }
-            try self.declare(name, .{ .struct_type = "table" });
-            return .{ .struct_type = "table" };
+            try self.declare(name, table_type);
+            return table_type;
         }
         // propagate table fields through variable references
         if (binding.value.expr == .ident and !ast.isDiscardName(binding.value.expr.ident)) {

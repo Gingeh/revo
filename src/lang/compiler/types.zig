@@ -135,6 +135,16 @@ pub fn isNumeric(T: TypeInfo) bool {
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
     if (from.eql(to) or to == .any or from == .any or from == .type_var or to == .type_var) return true;
+    if (from == .table and to == .struct_type and std.mem.eql(u8, to.struct_type, "table")) return true;
+    if (to == .table and from == .struct_type and std.mem.eql(u8, from.struct_type, "table")) return true;
+    if (from == .table and to == .table) {
+        const from_table = from.table;
+        const to_table = to.table;
+        if (!canCoerce(from_table.value.*, to_table.value.*)) return false;
+        if (to_table.key == null) return from_table.key == null;
+        if (from_table.key == null) return false;
+        return canCoerce(from_table.key.?.*, to_table.key.?.*);
+    }
     // function subtyping: contravariant params, covariant return
     if (to == .function and from == .function) {
         const to_sig = to.function;
@@ -347,7 +357,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .and_expr, .or_expr => .bool,
         .if_expr => |v| inferIfType(inferExprType(ctx, v.then_expr), if (v.else_expr) |e| inferExprType(ctx, e) else null),
         .tuple => |items| inferTupleType(ctx, items),
-        .table => .{ .struct_type = "table" },
+        .table => |entries| inferTableType(ctx, entries),
         .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args),
         .field => |field| ctx.inferFieldType(field.object, field.name),
         .index => |index| inferIndexType(ctx, index.object, index.key),
@@ -370,6 +380,54 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .any,
         .struct_def => |def| .{ .struct_type = def.name },
     };
+}
+
+fn inferTableType(ctx: anytype, entries: []const ast.TableEntry) TypeInfo {
+    var value_type: TypeInfo = .any;
+    var key_type: TypeInfo = .any;
+    var saw_explicit_key = false;
+    var saw_implicit_key = false;
+
+    for (entries) |entry| {
+        value_type = mergeInferredType(value_type, inferExprType(ctx, entry.value));
+        if (entry.key) |key| {
+            const inferred_key = inferTableKeyType(ctx, key, entry.computed);
+            key_type = if (saw_explicit_key) mergeInferredType(key_type, inferred_key) else inferred_key;
+            saw_explicit_key = true;
+        } else {
+            saw_implicit_key = true;
+        }
+    }
+
+    const value_ptr = ctx.alloc.create(TypeInfo) catch return .any;
+    value_ptr.* = value_type;
+
+    if (!saw_explicit_key) {
+        return .{ .table = .{ .key = null, .value = value_ptr } };
+    }
+
+    if (saw_implicit_key) key_type = mergeInferredType(key_type, .int);
+    const key_ptr = ctx.alloc.create(TypeInfo) catch return .any;
+    key_ptr.* = key_type;
+    return .{ .table = .{ .key = key_ptr, .value = value_ptr } };
+}
+
+fn inferTableKeyType(ctx: anytype, key: *const ast.Node, computed: bool) TypeInfo {
+    if (!computed) {
+        return switch (key.expr) {
+            .ident, .hash => .string,
+            else => inferExprType(ctx, key),
+        };
+    }
+    return inferExprType(ctx, key);
+}
+
+fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
+    if (current == .any) return next;
+    if (next == .any) return current;
+    if (current.eql(next)) return current;
+    if ((current == .int and next == .float) or (current == .float and next == .int)) return .float;
+    return .any;
 }
 
 pub fn inferTupleType(ctx: anytype, items: []const *ast.Node) TypeInfo {
@@ -531,6 +589,20 @@ test "typed binding rejects int for string" {
     try t.expectCompileError(
         \\ let x: string = 42
     , .ParseError);
+}
+
+test "typed binding table<int> accepts positional table literal" {
+    try t.top_number(
+        \\ let nums: table<int> = { 1, 2, 3 }
+        \\ 1
+    , 1);
+}
+
+test "typed binding table<string, int> accepts keyed table literal" {
+    try t.top_number(
+        \\ let pairs: table<string, int> = { a = 1, b = 2 }
+        \\ 1
+    , 1);
 }
 
 test "typed function params accept correct types" {

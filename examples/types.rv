@@ -28,29 +28,41 @@ print(acc)
 
 const id = fn(x: int, y: int) x * 2
 
-# if :true 1 else "asdf"
-# type A = (:ok, any) | (:err, atom)
-#
-# fn pick(how: A) -> any do
-#   print(how)
-#   match how
-#   | (:ok, v) print("ok: ", v)
-#   | (:err, e) print("err: ", e)
-# end
-#
-# fn is_len(what) do
-#   const length, str = what
-#   len(str) == length
-# end
-#
-# let pred1: A = (:err, :UhOh)
-# pick(pred1)
-#
-# let pred2: A = (:ok, "asdf")
-# pick(pred2)
-#
-# # should infer
-# pick((:err, :Boom))
+# optional: T? expands to T | :nil
+let maybe: int? = 42
+let nothing: int? = :nil
+# let bad: int? = "str"   # expected int | :nil, got string
+
+# union types with |
+const num_or_str: int | string = 42
+const other: int | string = "hi"
+
+let nums: table<int> = { 1, 2, 3 }
+let pairs: table<string, int> = { a = 1, b = 2 }
+
+if :true 1 else "asdf"
+type A = (:ok, any) | (:err, atom)
+
+fn pick(how: A) -> any do
+  print(how)
+  match how
+  | (:ok, v) => print("ok: ", v)
+  | (:err, e) => print("err: ", e)
+end
+
+fn is_len(what) do
+  const length, str = what
+  len(str) == length
+end
+
+let pred1: A = (:err, :UhOh)
+pick(pred1)
+
+let pred2: A = (:ok, "asdf")
+pick(pred2)
+
+# should infer
+pick((:err, :Boom))
 
 # let pred3: A = (:eee, "asdf") # must crash
 # pick(pred3)
@@ -207,18 +219,3 @@ let c = a + b
 
 # tuple binding error showcase
 # const first, second = (1,)
-
-# type expression syntax
-
-# optional: T? expands to T | :nil
-let maybe: int? = 42
-let nothing: int? = :nil
-# let bad: int? = "str"   # expected int | :nil, got string
-
-# union types with |
-# const num_or_str: int | string = 42
-# const other: int | string = "hi"
-
-# parameterized table types are parsed but literals infer as plain `table`
-# let nums: table<int> = { 1, 2, 3 }       # wants table<int>, got table
-# let pairs: table<string, int> = { a = 1, b = 2 }
