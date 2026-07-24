@@ -269,7 +269,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         },
         .ret = ":nil",
         .doc = "loads a C extension lib and registers its functions",
-        .f = define(&[_]TypeSpec{.string}, cload),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, cload),
     },
     .{
         .name = "read",
@@ -285,7 +285,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         \\  - path:      string or nothing
         ,
         .variadic = true,
-        .f = defineVariadic(&[_]TypeSpec{}, read),
+        .f = if (revo.is_freestanding) defineStubVariadic(&[_]TypeSpec{}) else defineVariadic(&[_]TypeSpec{}, read),
     },
     .{
         .name = "cwd",
@@ -293,7 +293,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         .params = &.{},
         .ret = "string",
         .doc = "returns current working directory path",
-        .f = define(&[_]TypeSpec{}, cwd),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{}) else define(&[_]TypeSpec{}, cwd),
     },
     .{
         .name = "system",
@@ -303,7 +303,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         },
         .ret = "(:stdout, :stderr)",
         .doc = "runs a subprocess and returns (stdout, stderr)",
-        .f = define(&[_]TypeSpec{.table}, system_),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.table}) else define(&[_]TypeSpec{.table}, system_),
     },
     .{
         .name = "import",
@@ -313,7 +313,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         },
         .ret = "any",
         .doc = "imports a revo module by path",
-        .f = define(&[_]TypeSpec{.string}, import),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, import),
     },
     .{
         .name = "@dotest",
@@ -324,7 +324,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         },
         .ret = ":ok",
         .doc = "internal, do not use unless you know what you're doing. runs a test",
-        .f = define(&[_]TypeSpec{ .string, .function }, dotest),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dotest),
     },
     .{
         .name = "@dosuite",
@@ -335,7 +335,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         },
         .ret = ":ok",
         .doc = "internal, pls dont use. runs a test suite",
-        .f = define(&[_]TypeSpec{ .string, .function }, dosuite),
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dosuite),
     },
 };
 
@@ -363,7 +363,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         @import("fs.zig").specs,
         @import("revo.zig").specs,
         @import("compress.zig").specs,
-        if (!revo.is_freestanding) root_specs_os else &.{},
+        root_specs_os,
     };
     try api.registerAll(vm, &all, mtPrototype);
 
@@ -1310,6 +1310,28 @@ pub const NativeResult = union(enum) {
         return resultTuple(vm, .err, Data.new.atom(tag));
     }
 };
+
+pub fn wasm_stub(_: []const Data, _: *VM) anyerror!NativeResult {
+    return NativeResult.other("function unavailable on this platform");
+}
+
+pub fn defineStub(comptime types: []const TypeSpec) NativeFunc {
+    return .{
+        .arity = types.len,
+        .variadic = false,
+        .param_types = types,
+        .func = wasm_stub,
+    };
+}
+
+pub fn defineStubVariadic(comptime types: []const TypeSpec) NativeFunc {
+    return .{
+        .arity = types.len,
+        .variadic = true,
+        .param_types = types,
+        .func = wasm_stub,
+    };
+}
 
 // type utils
 pub fn typeUtils(vm: *VM) !void {

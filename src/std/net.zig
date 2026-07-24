@@ -1,4 +1,4 @@
-pub const specs: []const api.FnSpec = if (@import("build_options").is_freestanding) &.{} else &.{
+pub const specs: []const api.FnSpec = &.{
     // net module
     .{
         .name = "connect",
@@ -9,7 +9,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         },
         .ret = "!table/atom",
         .doc = "connects to a remote host and port, returns a socket handle",
-        .f = root.define(&.{ .string, .number }, connect_fn),
+        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .string, .number }) else root.define(&.{ .string, .number }, connect_fn),
     },
     .{
         .name = "listen",
@@ -21,7 +21,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .ret = "!table/atom",
         .doc = "listens for incoming connections on the given port, returns server socket",
         .variadic = true,
-        .f = root.defineVariadic(&.{.number}, listen_fn),
+        .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{.number}) else root.defineVariadic(&.{.number}, listen_fn),
     },
     // socket module (used as __index for socket handle mts)
     .{
@@ -32,7 +32,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         },
         .ret = "!table/atom",
         .doc = "accepts an incoming client connection on a server socket",
-        .f = root.define(&.{.table}, accept_fn),
+        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, accept_fn),
     },
     .{
         .name = "send",
@@ -43,7 +43,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         },
         .ret = "!number/atom",
         .doc = "sends data over the socket, returns number of bytes sent",
-        .f = root.define(&.{ .table, .string }, send_fn),
+        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .string }) else root.define(&.{ .table, .string }, send_fn),
     },
     .{
         .name = "recv",
@@ -54,7 +54,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         },
         .ret = "!string/atom",
         .doc = "receives data according to opts.mode (:read_some | :read_all | :read_line)",
-        .f = root.define(&.{ .table, .table }, recv),
+        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .table }) else root.define(&.{ .table, .table }, recv),
     },
     .{
         .name = "close",
@@ -64,7 +64,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         },
         .ret = "!atom/atom",
         .doc = "closes the socket",
-        .f = root.define(&.{.table}, socket_close_fn),
+        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, socket_close_fn),
     },
 };
 
