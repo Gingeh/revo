@@ -2142,7 +2142,7 @@ test "markov take body" {
         \\ fn pref(a, b) fmt("%v %v", a, b)
         \\ const NOWORD = string_of(10)
         \\ struct Chain {
-        \\   state = {},
+        \\   state: table<string, table> = {},
         \\   fn take(self, count: num) -> string do
         \\     let out = ""
         \\     let w1 = NOWORD

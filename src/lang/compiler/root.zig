@@ -955,6 +955,7 @@ pub const Compiler = struct {
         )) {
             .string => "string",
             .tuple => "tuple",
+            .table => "table",
             .struct_type => |name| if (std.mem.eql(u8, name, "table")) "table" else return false,
             else => return false,
         };

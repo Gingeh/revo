@@ -142,6 +142,7 @@ pub const TokenType = enum {
 pub const Token = struct {
     type: TokenType,
     text: []const u8,
+    has_interpolation: bool = false,
     line: u32,
     column: u32,
     start: usize,
@@ -162,6 +163,7 @@ pub const testing = struct {
     pub const ExpectedToken = struct {
         t: TokenType,
         v: ?[]const u8 = null,
+        interpolation: ?bool = null,
     };
 
     pub fn expectTokens(source: []const u8, expected: []const ExpectedToken) !void {
@@ -180,6 +182,9 @@ pub const testing = struct {
             try std.testing.expectEqual(want.t, got.type);
             if (want.v) |text| {
                 try std.testing.expectEqualStrings(text, got.text);
+            }
+            if (want.interpolation) |has| {
+                try std.testing.expectEqual(has, got.has_interpolation);
             }
             _ = i;
         }
@@ -497,6 +502,7 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
     self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
+    var has_interpolation = false;
     while (!self.atEnd()) {
         const c = self.advance();
         if (c == '\\') {
@@ -525,12 +531,14 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
             return .{
                 .type = .string,
                 .text = text,
+                .has_interpolation = has_interpolation,
                 .line = line,
                 .column = column,
                 .start = start,
                 .end = self.pos,
             };
         }
+        if (c == '{') has_interpolation = true;
         try buf.append(self.alloc, c);
     }
     return error.UnterminatedString;
@@ -568,6 +576,7 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
     self.pending_error_span = .{ .start = start, .end = start + 3, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 64);
     defer buf.deinit(self.alloc);
+    var has_interpolation = false;
     while (!self.atEnd()) {
         if (self.peek() == '"' and self.peekN(1) == '"' and self.peekN(2) == '"') {
             _ = self.advance();
@@ -580,13 +589,16 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             return .{
                 .type = .multiline_string,
                 .text = text,
+                .has_interpolation = has_interpolation,
                 .line = line,
                 .column = column,
                 .start = start,
                 .end = self.pos,
             };
         }
-        try buf.append(self.alloc, self.advance());
+        const c = self.advance();
+        if (c == '{') has_interpolation = true;
+        try buf.append(self.alloc, c);
     }
     return error.UnterminatedString;
 }
@@ -787,6 +799,21 @@ test "lexes multiline strings" {
         \\hello
         \\world
     , tokens[0].text);
+}
+
+test "marks strings containing interpolation" {
+    try testing.expectTokens("\"hello {name}\"", &.{
+        .{ .t = .string, .v = "hello {name}", .interpolation = true },
+        .{ .t = .eof, .v = "" },
+    });
+    try testing.expectTokens("\"hello \\{name}\"", &.{
+        .{ .t = .string, .v = "hello \\{name}", .interpolation = false },
+        .{ .t = .eof, .v = "" },
+    });
+    try testing.expectTokens("'hello {name}'", &.{
+        .{ .t = .string, .v = "hello {name}", .interpolation = false },
+        .{ .t = .eof, .v = "" },
+    });
 }
 
 test "lexes float numbers and range without conflict" {
