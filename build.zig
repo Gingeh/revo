@@ -127,7 +127,7 @@ pub fn build(b: *Build) !void {
 
     // botch: wasm64 has a codegen bug in Debug mode that causes "memory access out of
     // bounds" at runtime for some reason
-    // force ReleaseFast for ALL modules linked into the wasm binary, so the VM code gets the fix too
+    // force ReleaseSmall for ALL modules linked into the wasm binary, so the VM code gets the fix too
     const effective_optimize = if (is_freestanding) .small else optimize;
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
@@ -409,6 +409,7 @@ pub fn build(b: *Build) !void {
             const release_target = b.resolveTargetQuery(query);
             const release_is_fs = release_target.result.os.tag == .freestanding or
                 release_target.result.cpu.arch == .wasm64;
+            const release_optimize: std.builtin.OptimizeMode = if (release_is_fs) .small else .fast;
 
             const release_lsp_enabled = features.lsp and !release_is_fs;
             const release_isocline_enabled = features.isocline and !release_is_fs;
@@ -423,19 +424,19 @@ pub fn build(b: *Build) !void {
             const rel_vm_mod = b.createModule(.{
                 .root_source_file = b.path("src/vm/root.zig"),
                 .target = release_target,
-                .optimize = .fast,
+                .optimize = release_optimize,
                 .link_libc = !release_is_fs,
             });
             const rel_revo_mod = b.createModule(.{
                 .root_source_file = b.path("src/root.zig"),
                 .target = release_target,
-                .optimize = .fast,
+                .optimize = release_optimize,
                 .link_libc = !release_is_fs,
             });
             const rel_c_mod = b.createModule(.{
                 .root_source_file = b.path("src/c/root.zig"),
                 .target = release_target,
-                .optimize = .fast,
+                .optimize = release_optimize,
                 .link_libc = !release_is_fs,
             });
 
@@ -453,7 +454,7 @@ pub fn build(b: *Build) !void {
                         const isocline_c = b.addTranslateC(.{
                             .root_source_file = isocline_dep.path("include/isocline.h"),
                             .target = release_target,
-                            .optimize = .fast,
+                            .optimize = release_optimize,
                         });
                         isocline_c.addIncludePath(isocline_dep.path("include/"));
                         const mod = isocline_c.createModule();
@@ -478,7 +479,7 @@ pub fn build(b: *Build) !void {
                 else
                     b.path("src/lsp/noop.zig"),
                 .target = release_target,
-                .optimize = .fast,
+                .optimize = release_optimize,
                 .link_libc = !release_is_fs,
                 .imports = if (release_lsp_enabled) &[_]Module.Import{
                     .{ .name = "revo", .module = rel_revo_mod },
@@ -492,7 +493,7 @@ pub fn build(b: *Build) !void {
             const release_mod = b.createModule(.{
                 .root_source_file = b.path(if (release_is_fs) "src/main_wasm.zig" else "src/main.zig"),
                 .target = release_target,
-                .optimize = .fast,
+                .optimize = release_optimize,
                 .link_libc = !release_is_fs,
                 .imports = &[_]Module.Import{
                     .{ .name = "revo", .module = rel_revo_mod },
