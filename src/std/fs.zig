@@ -361,7 +361,7 @@ fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
 
     const result_table = try vm.tables.create();
     var t = try vm.tables.get(result_table);
-    for (entries.items, 1..) |entry, i| {
+    for (entries.items, 0..) |entry, i| {
         try t.putRaw(Data.new.num(i), entry);
     }
 
@@ -453,7 +453,7 @@ fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
 
     const result_table = try vm.tables.create();
     var t = try vm.tables.get(result_table);
-    for (entries.items, 1..) |entry, i| {
+    for (entries.items, 0..) |entry, i| {
         try t.putRaw(Data.new.num(i), entry);
     }
 
