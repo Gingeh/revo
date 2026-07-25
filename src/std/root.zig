@@ -342,24 +342,8 @@ pub fn register_stdlib(vm: *revo.VM) !void {
     try vm.globals.put(try vm.internAtom("argv"), argv_val);
     try vm.stdlib_globals.put(try vm.internAtom("argv"), argv_val);
 
-    // later specs merge into earlier metatables, not overwrite
-    const all = [_][]const api.FnSpec{
-        root_specs,
-        @import("string.zig").specs,
-        @import("table.zig").specs,
-        @import("tuple.zig").specs,
-        @import("iter.zig").specs,
-        @import("math.zig").specs,
-        @import("json.zig").specs,
-        @import("time.zig").specs,
-        @import("net.zig").specs,
-        @import("fs.zig").specs,
-        @import("revo.zig").specs,
-        @import("compress.zig").specs,
-        @import("regex.zig").specs,
-        root_specs_os,
-    };
-    try api.registerAll(vm, &all, mtPrototype);
+    const all = api.all_specs ++ [_][]const api.FnSpec{root_specs_os};
+    try api.registerAll(vm, all, mtPrototype);
 
     try attachMathPi(vm);
     try typeUtils(vm);

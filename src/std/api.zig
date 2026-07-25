@@ -3,36 +3,27 @@
 // methods added by later specs merge into earlier ones
 
 const std = @import("std");
+
 const revo = @import("../root.zig");
 const Data = revo.Data;
 const root = @import("root.zig");
-
-pub const root_specs = @import("root.zig").root_specs;
-pub const string_specs = @import("string.zig").specs;
-pub const table_specs = @import("table.zig").specs;
-pub const tuple_specs = @import("tuple.zig").specs;
-pub const iter_specs = @import("iter.zig").specs;
-pub const math_specs = @import("math.zig").specs;
-pub const json_specs = @import("json.zig").specs;
-pub const time_specs = @import("time.zig").specs;
-pub const net_specs = @import("net.zig").specs;
-pub const fs_specs = @import("fs.zig").specs;
-pub const revo_specs = @import("revo.zig").specs;
-pub const compress_specs = @import("compress.zig").specs;
+const TypeSpec = root.TypeSpec;
+const NativeFunc = root.NativeFunc;
 
 pub const all_specs: []const []const FnSpec = &.{
-    root_specs,
-    string_specs,
-    table_specs,
-    tuple_specs,
-    iter_specs,
-    math_specs,
-    json_specs,
-    time_specs,
-    net_specs,
-    fs_specs,
-    revo_specs,
-    compress_specs,
+    @import("root.zig").root_specs,
+    @import("string.zig").specs,
+    @import("table.zig").specs,
+    @import("tuple.zig").specs,
+    @import("iter.zig").specs,
+    @import("math.zig").specs,
+    @import("json.zig").specs,
+    @import("time.zig").specs,
+    @import("net.zig").specs,
+    @import("fs.zig").specs,
+    @import("revo.zig").specs,
+    @import("compress.zig").specs,
+    @import("regex.zig").specs,
 };
 
 /// look up a function by name across all spec tables.
@@ -56,9 +47,6 @@ pub fn renderSignature(w: *std.Io.Writer, spec: FnSpec) !void {
         try w.print(" -> {s}", .{spec.ret});
     }
 }
-
-const TypeSpec = root.TypeSpec;
-const NativeFunc = root.NativeFunc;
 
 pub const Kind = enum { global, module, method };
 
