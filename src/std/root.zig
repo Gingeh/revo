@@ -20,7 +20,10 @@ pub const root_specs: []const api.FnSpec = &.{
             .{ "args", "any..." },
         },
         .ret = "string",
-        .doc = "format string with %v, %d, %? specifiers",
+        .doc =
+        \\ format string with %v, %d, %?, %p specifiers
+        \\ string literals also support `{expr}`, `{expr:?}`, and `{expr:p}` interpolation
+        ,
         .variadic = true,
         .f = defineVariadic(&[_]TypeSpec{.string}, fmt),
     },
@@ -353,6 +356,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         @import("fs.zig").specs,
         @import("revo.zig").specs,
         @import("compress.zig").specs,
+        @import("regex.zig").specs,
         root_specs_os,
     };
     try api.registerAll(vm, &all, mtPrototype);

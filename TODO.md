@@ -58,7 +58,7 @@ x for done
   - [ ] move cold code into revo (slightly slower before jit, acceptable)
   - [ ] core libs: *(TBD)*
   - [ ] std libs: *(TBD)*
-- [ ] regex
+- [x] regex
 - [ ] rng
 - [ ] http
 - [ ] dns

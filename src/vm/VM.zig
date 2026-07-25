@@ -315,7 +315,6 @@ pub fn deinit(self: *VM) void {
     self.clearPanicMessage();
     self.clearRuntimeMessage();
     revo.async_backend_impl.deinit(&self.runtime.async_backend);
-    self.sched.deinit();
     self.constants.deinit(self.runtime.alloc);
     self.globals.deinit();
     self.const_globals.deinit();
@@ -325,20 +324,21 @@ pub fn deinit(self: *VM) void {
         self.runtime.alloc.free(path);
     self.loading_stack.deinit(self.runtime.alloc);
 
+    // run pending gc finalizers while scheduler + pools are alive
     {
         var it = self.gc_finalizers.iterator();
         while (it.next()) |entry| {
             const id = entry.key_ptr.*;
             const func = entry.value_ptr.*;
             if (id < self.tables.tables.items.len) {
-                if (self.tables.tables.items[id]) |tbl| {
+                if (self.tables.tables.items[id] != null) {
                     _ = self.callFunction(func, &.{Data.new.table(id)}) catch {};
-                    _ = tbl; // silence unused
                 }
             }
         }
     }
     self.gc_finalizers.deinit();
+    self.sched.deinit();
     self.tables.deinit();
     self.tuples.deinit();
     self.functions.deinit();
