@@ -1,3 +1,4 @@
+const std = @import("std");
 const revo = @import("revo");
 const VM = @import("VM.zig");
 
@@ -17,6 +18,7 @@ pub inline fn noteGCPressure(self: *VM, bytes: usize) void {
 pub fn maybeCollectGarbage(self: *VM) void {
     if (!self.gc_enabled or !self.gc_pending) return;
     if (self.host_call_depth > 0) return;
+    if (self.gc_in_finalizer) return;
 
     self.gc_bytes_allocated = 0;
     self.tables.clearMarks();
@@ -28,11 +30,25 @@ pub fn maybeCollectGarbage(self: *VM) void {
     markRoots(self);
     processMarkStack(self);
 
+    const finalizer_pending = collectFinalizers(self);
+
     self.tables.sweep();
     self.tuples.sweep();
     self.functions.sweep();
     self.struct_instances.sweep();
     self.strings.sweep();
+
+    if (finalizer_pending) |pending| {
+        self.gc_in_finalizer = true;
+        defer self.gc_in_finalizer = false;
+        var pending_list = pending;
+        for (pending_list.items) |id| {
+            const entry = self.gc_finalizers.fetchRemove(id) orelse continue;
+            const table_val = revo.Data.new.table(id);
+            _ = self.callFunction(entry.value, &.{table_val}) catch {};
+        }
+        pending_list.deinit(self.runtime.alloc);
+    }
 
     self.gc_pending = false;
     const live_bytes = self.tables.bytes() +
@@ -41,6 +57,31 @@ pub fn maybeCollectGarbage(self: *VM) void {
         self.strings.bytes();
 
     self.gc_threshold = @max(32 * 1024, live_bytes * self.gc_pause_factor);
+}
+
+fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
+    const alloc = self.runtime.alloc;
+    var pending: ?std.ArrayList(revo.memory.TableID) = null;
+    var to_remove: ?std.ArrayList(revo.memory.TableID) = null;
+    var it = self.gc_finalizers.iterator();
+    while (it.next()) |entry| {
+        const id = entry.key_ptr.*;
+        if (id >= self.tables.tables.items.len or self.tables.tables.items[id] == null) {
+            if (to_remove == null)
+                to_remove = std.ArrayList(revo.memory.TableID).initCapacity(alloc, 4) catch @panic("OOM in GC");
+            to_remove.?.append(alloc, id) catch @panic("OOM in GC");
+            continue;
+        }
+        if (self.tables.marks.isSet(id)) continue;
+        if (pending == null) pending = std.ArrayList(revo.memory.TableID).initCapacity(alloc, 4) catch @panic("OOM in GC");
+        pending.?.append(alloc, id) catch @panic("OOM in GC");
+        self.tables.marks.set(id);
+    }
+    if (to_remove) |*remove_list| {
+        for (remove_list.items) |id| _ = self.gc_finalizers.remove(id);
+        remove_list.deinit(alloc);
+    }
+    return pending;
 }
 
 pub fn processMarkStack(self: *VM) void {

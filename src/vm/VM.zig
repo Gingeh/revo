@@ -193,6 +193,8 @@ gc_nursery_threshold: usize = 64 * 1024,
 icache: [256]ICacheEntry = undefined,
 
 gc_mark_stack: std.ArrayList(MarkItem),
+gc_finalizers: std.AutoHashMap(mem.TableID, Data),
+gc_in_finalizer: bool = false,
 
 const MarkItem = union(enum) {
     data: Data,
@@ -230,6 +232,7 @@ pub fn init(runtime: revo.Runtime) !VM {
         .loading_stack = undefined,
         .loaded_extensions = .empty,
         .gc_mark_stack = undefined,
+        .gc_finalizers = std.AutoHashMap(mem.TableID, Data).init(rt.alloc),
     };
     try revo.async_backend_impl.init(&vm.runtime.async_backend);
     errdefer revo.async_backend_impl.deinit(&vm.runtime.async_backend);
@@ -322,6 +325,20 @@ pub fn deinit(self: *VM) void {
         self.runtime.alloc.free(path);
     self.loading_stack.deinit(self.runtime.alloc);
 
+    {
+        var it = self.gc_finalizers.iterator();
+        while (it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const func = entry.value_ptr.*;
+            if (id < self.tables.tables.items.len) {
+                if (self.tables.tables.items[id]) |tbl| {
+                    _ = self.callFunction(func, &.{Data.new.table(id)}) catch {};
+                    _ = tbl; // silence unused
+                }
+            }
+        }
+    }
+    self.gc_finalizers.deinit();
     self.tables.deinit();
     self.tuples.deinit();
     self.functions.deinit();
@@ -354,6 +371,14 @@ pub fn deinit(self: *VM) void {
     self.loaded_extensions.deinit(self.runtime.alloc);
     self.gc_mark_stack.deinit(self.runtime.alloc);
     self.runtime.deinitDiagArena();
+}
+
+pub fn registerFinalizer(self: *VM, table_id: mem.TableID, func: Data) !void {
+    try self.gc_finalizers.put(table_id, func);
+}
+
+pub fn unregisterFinalizer(self: *VM, table_id: mem.TableID) void {
+    _ = self.gc_finalizers.remove(table_id);
 }
 
 pub fn moduleStamp(self: *VM, path: []const u8) !ModuleStamp {

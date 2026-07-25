@@ -4,12 +4,10 @@ p for planned,
 x for done
 ```
 
-## 0.1 completeness
-
 ### core
 
 - [ ] variable arguments in user code
-- [ ] default function arguments
+- [x] default function arguments
 - [ ] ambient type declarations
   - [ ] maybe via ambient `.d.rv` declaration files that are not parse-only without side-effects?
 - [x] predictable type inference and typechecker
@@ -24,7 +22,7 @@ x for done
   - [ ] crystal-ish macros
     - [x] quasiquoting
   - [x] macros importable on the compiler's side
-    - [ ] clearly scoped instead of global: namespace and restrict based on current module name
+    - [x] clearly scoped instead of global: namespace and restrict based on current module name
 
 ### tests & docs
 
@@ -60,6 +58,18 @@ x for done
   - [ ] move cold code into revo (slightly slower before jit, acceptable)
   - [ ] core libs: *(TBD)*
   - [ ] std libs: *(TBD)*
+- [ ] regex
+- [ ] rng
+- [ ] http
+- [ ] dns
+- [ ] crypto (unsure)
+- [ ] datetime
+- [ ] os.getenv/os.setenv
+- [ ] path
+- [ ] general-purpose serialization/deserialization
+- [ ] log
+- [ ] cli argument parsing, termios
+- [ ] random data structures
 
 ### extensions & interop
 
