@@ -143,6 +143,7 @@ pub fn build(b: *Build) !void {
     ) orelse &.{};
 
     const lsp_kit_dep = b.dependency("lsp_kit", .{});
+    const mvzr_dep = b.dependency("mvzr", .{});
 
     const features = getFeatures(features_str);
 
@@ -250,10 +251,16 @@ pub fn build(b: *Build) !void {
         c_mod,   revolt_mod,
         exe_mod, erevo_mod.?,
     };
+    const mvzr_mod = b.createModule(.{
+        .root_source_file = mvzr_dep.path("src/mvzr.zig"),
+        .target = target,
+        .optimize = effective_optimize,
+    });
     const imports = [_]Module.Import{
         .{ .name = "revo", .module = revo_mod },
         .{ .name = "vm", .module = vm_mod },
         .{ .name = "c", .module = c_mod },
+        .{ .name = "mvzr", .module = mvzr_mod },
     };
     const shared_build_options = if (optimize == .debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
@@ -440,11 +447,17 @@ pub fn build(b: *Build) !void {
                 .link_libc = !release_is_fs,
             });
 
+            const rel_mvzr_mod = b.createModule(.{
+                .root_source_file = mvzr_dep.path("src/mvzr.zig"),
+                .target = release_target,
+                .optimize = release_optimize,
+            });
             const rel_core_mods: []const *Module = &.{ rel_vm_mod, rel_revo_mod, rel_c_mod };
             for (rel_core_mods) |mod| {
                 mod.addImport("revo", rel_revo_mod);
                 mod.addImport("vm", rel_vm_mod);
                 mod.addImport("c", rel_c_mod);
+                mod.addImport("mvzr", rel_mvzr_mod);
                 mod.addImport("build_options", rel_options_mod);
             }
 
