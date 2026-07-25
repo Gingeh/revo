@@ -447,8 +447,14 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
                 try self.recordError(.InvalidNumber, "number over 2^48 (281474976710655)", token.span());
             break :blk self.allocExpr(token.span(), .{ .number = .{ .value = value, .is_float = is_float } });
         },
-        .string => self.allocExpr(token.span(), .{ .string = token.text }),
-        .multiline_string => self.allocExpr(token.span(), .{ .multiline_string = token.text }),
+        .string => if (token.has_interpolation)
+            self.parseInterpolatedString(token)
+        else
+            self.allocExpr(token.span(), .{ .string = token.text }),
+        .multiline_string => if (token.has_interpolation)
+            self.parseInterpolatedString(token)
+        else
+            self.allocExpr(token.span(), .{ .multiline_string = token.text }),
         .hash => self.allocExpr(token.span(), .{ .hash = token.text[1..] }),
         .ident => if (std.mem.eql(u8, token.text, "@doc"))
             self.parseDocAttr(token)
@@ -1641,6 +1647,139 @@ const infix_binding_table: InfixBindingTable = blk: {
     break :blk table;
 };
 
+const InterpolationMode = enum { display, debug, pretty };
+
+fn interpolationMode(suffix: []const u8) ?InterpolationMode {
+    if (suffix.len != 2 or suffix[0] != ':') return null;
+    return switch (suffix[1]) {
+        'v' => .display,
+        '?' => .debug,
+        'p' => .pretty,
+        else => null,
+    };
+}
+
+fn appendFormatLiteral(out: *std.ArrayList(u8), alloc: std.mem.Allocator, text: []const u8) !void {
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == '%') try out.append(alloc, '%');
+        try out.append(alloc, text[i]);
+        i += 1;
+    }
+}
+
+fn interpolationEnd(raw: []const u8, start: usize) ?usize {
+    var depth: usize = 1;
+    var quote: u8 = 0;
+    var escaped = false;
+    var i = start + 1;
+    while (i < raw.len) : (i += 1) {
+        const c = raw[i];
+        if (quote != 0) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == quote) {
+                quote = 0;
+            }
+            continue;
+        }
+        if (c == '"' or c == '\'' or c == '`') {
+            quote = c;
+        } else if (c == '{') {
+            depth += 1;
+        } else if (c == '}') {
+            depth -= 1;
+            if (depth == 0) return i;
+        }
+    }
+    return null;
+}
+
+fn parseInterpolatedString(self: *Parser, token: Token) anyerror!*Node {
+    var format = try std.ArrayList(u8).initCapacity(self.alloc, token.text.len + 8);
+    var args = try std.ArrayList(*Node).initCapacity(self.alloc, 4);
+    errdefer {
+        format.deinit(self.alloc);
+        args.deinit(self.alloc);
+    }
+
+    var literal_start: usize = 0;
+    var i: usize = 0;
+    while (i < token.text.len) {
+        if (token.text[i] == '\\') {
+            i += @min(@as(usize, 2), token.text.len - i);
+            continue;
+        }
+        if (token.text[i] == '{' and i + 1 < token.text.len and token.text[i + 1] == '{') {
+            try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
+            try format.append(self.alloc, '{');
+            i += 2;
+            literal_start = i;
+            continue;
+        }
+        if (token.text[i] == '}' and i + 1 < token.text.len and token.text[i + 1] == '}') {
+            try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
+            try format.append(self.alloc, '}');
+            i += 2;
+            literal_start = i;
+            continue;
+        }
+        if (token.text[i] != '{') {
+            i += 1;
+            continue;
+        }
+
+        const end = interpolationEnd(token.text, i) orelse {
+            try self.recordError(.UnexpectedToken, "unterminated string interpolation", token.span());
+            return self.allocExpr(token.span(), .{ .string = token.text });
+        };
+        try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
+
+        var body = std.mem.trim(u8, token.text[i + 1 .. end], " \t\r\n");
+        var mode: InterpolationMode = .display;
+        if (body.len >= 2) {
+            if (interpolationMode(body[body.len - 2 ..])) |found| {
+                mode = found;
+                body = std.mem.trim(u8, body[0 .. body.len - 2], " \t\r\n");
+            }
+        }
+        if (body.len == 0) {
+            try self.recordError(.UnexpectedToken, "empty string interpolation", token.span());
+            return self.allocExpr(token.span(), .{ .string = token.text });
+        }
+
+        const embedded_tokens = try lexer.lex(self.alloc, body);
+        const value = try parseTokens(self.alloc, embedded_tokens);
+        try args.append(self.alloc, value);
+        try format.appendSlice(self.alloc, switch (mode) {
+            .display => "%v",
+            .debug => "%?",
+            .pretty => "%p",
+        });
+        i = end + 1;
+        literal_start = i;
+    }
+
+    try appendFormatLiteral(&format, self.alloc, token.text[literal_start..]);
+    if (args.items.len == 0) {
+        const text = try format.toOwnedSlice(self.alloc);
+        args.deinit(self.alloc);
+        return self.allocExpr(token.span(), .{ .string = text });
+    }
+
+    var call_args = try std.ArrayList(*Node).initCapacity(self.alloc, args.items.len + 1);
+    try call_args.append(self.alloc, try self.allocExpr(token.span(), .{ .string = try format.toOwnedSlice(self.alloc) }));
+    try call_args.appendSlice(self.alloc, args.items);
+    args.deinit(self.alloc);
+    const callee = try self.allocExpr(token.span(), .{ .ident = "fmt" });
+    return self.allocExpr(token.span(), .{ .call = .{
+        .callee = callee,
+        .args = try call_args.toOwnedSlice(self.alloc),
+    } });
+}
+
 const LogicalBindingTable = std.EnumArray(TokenType, ?LogicalBinding);
 const logical_binding_table: LogicalBindingTable = blk: {
     var table = LogicalBindingTable.initFill(null);
@@ -1733,6 +1872,12 @@ pub const testing = struct {
         try std.testing.expectEqualStrings(expected, rendered);
     }
 };
+
+test "parses string interpolation as fmt calls" {
+    try testing.expectPrinted("\"hello {name}\"", "(call fmt \"hello %v\" name)");
+    try testing.expectPrinted("\"{value:?} {value:p}\"", "(call fmt \"%? %p\" value value)");
+    try testing.expectPrinted("\"literal {{brace}}\"", "\"literal {brace}\"");
+}
 
 test "parses @doc annotation on function declaration" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -567,6 +567,22 @@ test "display formatting uses __display and falls back to __tostring" {
     , "fallback");
 }
 
+test "string interpolation uses formatting modes" {
+    try t.top_string(
+        \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
+        \\ const value = set_metatable({}, mt)
+        \\ "value = {value}"
+    , "value = visible");
+    try t.top_string(
+        \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
+        \\ const value = set_metatable({}, mt)
+        \\ "value = {value:?}"
+    , "value = \"debug\"");
+    try t.top_string(
+        \\ "100% complete: {42:p}"
+    , "100% complete: \x1b[33m42\x1b[0m");
+}
+
 test "metamethod __index for field access" {
     try t.top_number(
         \\ const mt = {__index = fn(self, key) 42}

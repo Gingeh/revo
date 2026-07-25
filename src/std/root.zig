@@ -501,6 +501,10 @@ pub fn fmt(args: []const Data, vm: *VM) !NativeResult {
     while (i < format.len) {
         if (i + 1 < format.len and format[i] == '%') {
             switch (format[i + 1]) {
+                '%' => {
+                    try result.writer.writeByte('%');
+                    i += 2;
+                },
                 'v' => {
                     if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
                     try append_data(&result.writer, args[arg_idx], vm, .display);
@@ -560,6 +564,12 @@ test "fmt %d formats numbers" {
     try testing.top_string(
         \\ fmt("%d", :hello)
     , "<un-number-able>");
+}
+
+test "fmt escapes literal percent" {
+    try testing.top_string(
+        \\ fmt("100%%")
+    , "100%");
 }
 
 test "fmt %? uses debug rendering" {
