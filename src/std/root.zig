@@ -515,21 +515,19 @@ pub fn fmt(args: []const Data, vm: *VM) !NativeResult {
                 },
                 'd' => {
                     if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
-                    const v = if (args[arg_idx].isNumber())
-                        args[arg_idx]
-                    else if (args[arg_idx].asString()) |id|
-                        Data.new.num(try std.fmt.parseFloat(f64, vm.stringValue(id)))
-                    else if (args[arg_idx].isAtom())
-                        try vm.ownDataString("<un-number-able>")
-                    else
-                        Data.new.num(0);
-                    try append_data(&result.writer, v, vm, .display);
+                    try append_data(&result.writer, args[arg_idx], vm, .decimal);
                     arg_idx += 1;
                     i += 2;
                 },
                 '?' => {
                     if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
                     try append_data(&result.writer, args[arg_idx], vm, .debug);
+                    arg_idx += 1;
+                    i += 2;
+                },
+                'p' => {
+                    if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
+                    try append_data(&result.writer, args[arg_idx], vm, .pretty);
                     arg_idx += 1;
                     i += 2;
                 },
@@ -569,7 +567,15 @@ test "fmt %? uses debug rendering" {
         \\ const mt = {__debug = fn(self) "custom-debug"}
         \\ const t = set_metatable({}, mt)
         \\ fmt("%?", t)
-    , "custom-debug");
+    , "\"custom-debug\"");
+}
+
+test "fmt rendering is recursive" {
+    try testing.top_string(
+        \\ const mt = {__display = fn(self) "shown", __debug = fn(self) "debug"}
+        \\ const t = set_metatable({}, mt)
+        \\ fmt("%v|%?|%d", {x = t}, {x = t}, {x = t})
+    , "{ :x: shown, }|{ :x: \"debug\", }|{ <un-number-able>: { }, }");
 }
 
 /// internal, do not use pls
@@ -1202,35 +1208,8 @@ fn tryRealPath(raw_path: []const u8, base_dir: ?[]const u8, io: std.Io, alloc: s
     return try alloc.dupe(u8, buf[0..n]);
 }
 
-const RenderMode = enum { display, debug };
-
-fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: RenderMode) !void {
-    switch (mode) {
-        .display => {
-            const mm = try vm.getMetamethod(val, "__display");
-            if (mm) |m| {
-                const rendered = callUnaryMetamethod(m, val, vm);
-                const str = switch (rendered) {
-                    .ok => |r| if (r.asString()) |id| vm.stringValue(id) else "",
-                    .err => "",
-                };
-                try writer.writeAll(str);
-                return;
-            }
-            const mm2 = try vm.getMetamethod(val, "__tostring");
-            if (mm2) |m| {
-                const rendered = callUnaryMetamethod(m, val, vm);
-                const str = switch (rendered) {
-                    .ok => |r| if (r.asString()) |id| vm.stringValue(id) else "",
-                    .err => "",
-                };
-                try writer.writeAll(str);
-                return;
-            }
-            try val.write(writer, vm, .display);
-        },
-        .debug => try val.write(writer, vm, .debug),
-    }
+fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode) !void {
+    try val.write(writer, vm, mode);
 }
 
 pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {

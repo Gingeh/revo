@@ -12,7 +12,7 @@ pub fn isColorSupported(env: *std.process.Environ.Map, io: std.Io) bool {
     return true;
 }
 
-fn style(writer: *std.Io.Writer, code: []const u8) !void {
+pub fn style(writer: *std.Io.Writer, code: []const u8) !void {
     if (supports_color) {
         try writer.writeAll(code);
     }
