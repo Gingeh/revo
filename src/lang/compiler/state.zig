@@ -83,30 +83,41 @@ pub const FunctionState = struct {
     }
 };
 
+pub const LoopFrame = struct {
+    label: ?[]const u8,
+    continue_target: usize,
+    result_reg: Register,
+    break_jumps: std.ArrayList(usize),
+};
+
 pub const Temps = struct { pipe: usize = 0, match_subject: usize = 0, bind: usize = 0, match_temp: usize = 0 };
 
 pub fn LoopScope(comptime T: type) type {
     return struct {
         compiler: *T,
-        break_start: usize,
         prev_in_loop: usize,
-        pub fn init(compiler: *T) !@This() {
+        pub fn init(compiler: *T, label: ?[]const u8) !@This() {
             const prev = compiler.in_loop_depth;
             compiler.in_loop_depth += 1;
             const result_reg = try pushRegister(compiler);
             try compiler.spans.append(compiler.alloc, compiler.active_span);
             try compiler.recordLoad(.load_nil, result_reg, 0);
-            try compiler.loop_result_regs.append(compiler.alloc, result_reg);
-            return .{ .compiler = compiler, .break_start = compiler.break_jumps.items.len, .prev_in_loop = prev };
+            try compiler.loop_stack.append(compiler.alloc, .{
+                .label = label,
+                .continue_target = 0,
+                .result_reg = result_reg,
+                .break_jumps = try std.ArrayList(usize).initCapacity(compiler.alloc, 4),
+            });
+            return .{ .compiler = compiler, .prev_in_loop = prev };
         }
         pub fn deinit(self: *@This()) void {
             const c = self.compiler;
-            _ = c.loop_result_regs.pop();
+            var frame = c.loop_stack.pop().?;
             const exit_addr: usize = c.irLen();
-            while (c.break_jumps.items.len > self.break_start) {
-                const idx = c.break_jumps.pop() orelse unreachable;
+            while (frame.break_jumps.pop()) |idx| {
                 c.patchJumpToLabel(idx, exit_addr);
             }
+            frame.break_jumps.deinit(c.alloc);
             c.in_loop_depth = self.prev_in_loop;
         }
     };

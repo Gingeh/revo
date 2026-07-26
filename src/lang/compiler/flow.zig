@@ -25,39 +25,38 @@ pub const VarStorage = union(enum) {
     global: revo.AtomID,
 };
 
-pub fn compileLoop(self: *Compiler, body: *const Node) !void {
+pub fn compileLoop(self: *Compiler, body: *const Node, label: ?[]const u8) !void {
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
-    var loop = try LoopScopeT.init(self);
+    var loop = try LoopScopeT.init(self, label);
     defer loop.deinit();
 
     const loop_start: ProgramCounter = @intCast(self.irLen());
-    try self.continue_targets.append(self.alloc, loop_start);
-    defer _ = self.continue_targets.pop();
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = loop_start;
     try self.compile(body, true);
     try self.regRelease();
     try self.emit(.jump, loop_start);
     // result visible to next binding
-    self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
+    self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
 
 pub fn compileWhile(
     self: *Compiler,
     predicate: *const Node,
     body: *const Node,
+    label: ?[]const u8,
 ) !void {
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
-    var loop = try LoopScopeT.init(self);
+    var loop = try LoopScopeT.init(self, label);
     defer loop.deinit();
 
     const loop_start: ProgramCounter = @intCast(self.irLen());
-    try self.continue_targets.append(self.alloc, loop_start);
-    defer _ = self.continue_targets.pop();
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = loop_start;
     try self.compile(predicate, true);
     const exit_jump = try self.jump(.jump_if_false);
     try self.compile(body, true);
 
     const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = @intCast(self.loop_result_regs.items[self.loop_result_regs.items.len - 1]);
+    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
     if (body_result_reg != loop_result_reg) {
         try self.spans.append(self.alloc, self.active_span);
         _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
@@ -67,7 +66,7 @@ pub fn compileWhile(
 
     self.patchJump(exit_jump);
     // same as compileLoop
-    self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
+    self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
 
 pub fn compileForRange(
@@ -77,9 +76,10 @@ pub fn compileForRange(
     start_expr: *const Node,
     step_expr: *const Node,
     end_expr: *const Node,
+    label: ?[]const u8,
 ) !void {
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
-    var loop = try LoopScopeT.init(self);
+    var loop = try LoopScopeT.init(self, label);
     defer loop.deinit();
 
     try self.compile(start_expr, true); // contiguous triple for range_init
@@ -94,7 +94,7 @@ pub fn compileForRange(
 
     try compileRangeLoopBody(self, params, body, base_reg, needs_index);
     // collapse to result
-    self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
+    self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
 
 pub fn compileRangeLoopBody(
@@ -142,8 +142,7 @@ pub fn compileRangeLoopBody(
     }
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
-    try self.continue_targets.append(self.alloc, loop_check);
-    defer _ = self.continue_targets.pop();
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = loop_check;
 
     const value_reg = try toRegister(self.active_registers);
     const index_reg = if (needs_index) try toRegister(self.active_registers + 1) else 0;
@@ -182,7 +181,7 @@ pub fn compileRangeLoopBody(
 
     // normalise into loop result slot so break and natural exit agree
     const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = @intCast(self.loop_result_regs.items[self.loop_result_regs.items.len - 1]);
+    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
     if (body_result_reg != loop_result_reg) {
         try self.spans.append(self.alloc, self.active_span);
         _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
@@ -205,6 +204,7 @@ pub fn compileFor(
     params: []const ast.FnParam,
     body: *const Node,
     iter: *const Node,
+    label: ?[]const u8,
 ) !void {
     if (params.len == 0 or params.len > 2) {
         const msg = try std.fmt.allocPrint(
@@ -217,11 +217,11 @@ pub fn compileFor(
 
     if (iter.expr == .range_literal) {
         const range_info = iter.expr.range_literal;
-        return compileForRange(self, params, body, range_info.start, range_info.step, range_info.end);
+        return compileForRange(self, params, body, range_info.start, range_info.step, range_info.end, label);
     }
 
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
-    var loop = try LoopScopeT.init(self);
+    var loop = try LoopScopeT.init(self, label);
     defer loop.deinit();
 
     // wrap expression with to_iter
@@ -252,8 +252,7 @@ pub fn compileFor(
     state.reserveLocalSlots(self);
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
-    try self.continue_targets.append(self.alloc, loop_check);
-    defer _ = self.continue_targets.pop();
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = loop_check;
 
     // it() -> value | :none
     try self.emit(.load_local, it_slot);
@@ -288,7 +287,7 @@ pub fn compileFor(
 
     // normalise result into loop result slot
     const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = @intCast(self.loop_result_regs.items[self.loop_result_regs.items.len - 1]);
+    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
     if (body_result_reg != loop_result_reg) {
         try self.spans.append(self.alloc, self.active_span);
         try self.recordMove(loop_result_reg);
@@ -305,7 +304,7 @@ pub fn compileFor(
 
     self.patchJump(end_jump);
 
-    self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
+    self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
 
 pub fn emitStorageLoad(self: *Compiler, storage: VarStorage) !void {
@@ -787,32 +786,63 @@ pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
     try self.value_stack.append(self.alloc, left_inst);
 }
 
-pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node) !void {
-    if (self.in_loop_depth == 0) {
-        return self.fail(.UnsupportedSyntax, expr, "break is only valid inside loop");
+fn findLoopFrame(self: *Compiler, label: ?[]const u8) !?*state.LoopFrame {
+    if (label) |lbl| {
+        var i: usize = self.loop_stack.items.len;
+        while (i > 0) {
+            i -= 1;
+            const frame = &self.loop_stack.items[i];
+            if (std.mem.eql(u8, frame.label orelse "", lbl)) return frame;
+        }
+        return null;
     }
-    if (self.loop_result_regs.items.len <= 0) return;
+    if (self.loop_stack.items.len == 0) return null;
+    return &self.loop_stack.items[self.loop_stack.items.len - 1];
+}
+
+pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, label: ?[]const u8) !void {
+    const frame = try findLoopFrame(self, label) orelse {
+        const msg = if (label) |lbl| try std.fmt.allocPrint(self.alloc, "no matching label for break/{s}", .{lbl}) else "break is only valid inside loop";
+        return self.fail(.UnsupportedSyntax, expr, msg);
+    };
 
     if (value) |v| try self.compile(v, true) else try self.pushNil();
 
     const r = self.active_registers - 1;
-    const loop_res = self.loop_result_regs.items[self.loop_result_regs.items.len - 1];
     // round-trip: value must be in both the result slot and the stack top callers expect
     try self.spans.append(self.alloc, self.active_span);
-    _ = try self.record(.move, &.{.{ .reg = try toRegister(r) }}, true, try toRegister(loop_res), 0);
+    _ = try self.record(.move, &.{.{ .reg = try toRegister(r) }}, true, try toRegister(frame.result_reg), 0);
     try self.spans.append(self.alloc, self.active_span);
-    _ = try self.record(.move, &.{.{ .reg = try toRegister(loop_res) }}, true, try toRegister(r), 0);
+    _ = try self.record(.move, &.{.{ .reg = try toRegister(frame.result_reg) }}, true, try toRegister(r), 0);
     const jump_idx = try self.jump(.jump);
-    try self.break_jumps.append(self.alloc, jump_idx);
+    try frame.break_jumps.append(self.alloc, jump_idx);
 }
 
-pub fn compileContinue(self: *Compiler, expr: *const Node, value: ?*const Node) !void {
+pub fn compileContinue(self: *Compiler, expr: *const Node, value: ?*const Node, label: ?[]const u8) !void {
     _ = value;
-    if (self.in_loop_depth == 0) {
-        return self.fail(.UnsupportedSyntax, expr, "continue is only valid inside loop");
-    }
-    if (self.loop_result_regs.items.len <= 0) return;
+    const frame = try findLoopFrame(self, label) orelse {
+        const msg = if (label) |lbl| try std.fmt.allocPrint(self.alloc, "no matching label for continue/{s}", .{lbl}) else "continue is only valid inside loop";
+        return self.fail(.UnsupportedSyntax, expr, msg);
+    };
 
-    const target = self.continue_targets.items[self.continue_targets.items.len - 1];
-    try self.emit(.jump, @intCast(target));
+    try self.emit(.jump, @intCast(frame.continue_target));
+}
+
+pub fn compileLabeledBlock(self: *Compiler, label: []const u8, body: *const Node) !void {
+    const LoopScopeT = state.LoopScope(@TypeOf(self.*));
+    var loop = try LoopScopeT.init(self, label);
+    defer loop.deinit();
+
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = self.irLen();
+    try self.compile(body, true);
+
+    const body_result_reg: Register = @intCast(self.active_registers - 1);
+    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
+    if (body_result_reg != loop_result_reg) {
+        try self.spans.append(self.alloc, self.active_span);
+        _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
+    }
+    try self.regRelease();
+
+    self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }

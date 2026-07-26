@@ -426,12 +426,16 @@ const SemanticChecker = struct {
                 const t = try self.analyzeNode(v.expr);
                 break :blk t;
             },
-            .break_expr => |val| blk: {
-                if (val) |v| _ = try self.analyzeNode(v);
+            .break_expr => |b| blk: {
+                if (b.value) |v| _ = try self.analyzeNode(v);
                 break :blk types_mod.inferExprType(self, node);
             },
-            .continue_expr => |val| blk: {
-                if (val) |v| _ = try self.analyzeNode(v);
+            .continue_expr => |c| blk: {
+                if (c.value) |v| _ = try self.analyzeNode(v);
+                break :blk types_mod.inferExprType(self, node);
+            },
+            .labeled_block => |lb| blk: {
+                _ = try self.analyzeNode(lb.body);
                 break :blk types_mod.inferExprType(self, node);
             },
             .for_loop => |v| blk: {

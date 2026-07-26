@@ -171,7 +171,7 @@ fn renderDoc(w: *Writer, doc: []const u8) !void {
         }
         if (min_indent == std.math.maxInt(usize)) min_indent = 0;
 
-        try w.writeAll("\n```rb\n");
+        try w.writeAll("\n```revo\n");
         var it = std.mem.splitScalar(u8, code, '\n');
         var first = true;
         while (it.next()) |line| {

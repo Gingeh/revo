@@ -286,12 +286,13 @@ pub const Expr = union(enum) {
     // ill probably ignore node's span field for now just do its expr
     // (:assign_expr, (:ident, "aaa"), (:ident, "bbb"))
     assign_expr: struct { target: *Node, value: *Node },
-    loop_expr: struct { body: *Node },
-    for_loop: struct { params: []FnParam, iter: *Node, body: *Node },
+    loop_expr: struct { body: *Node, label: ?[]const u8 = null },
+    for_loop: struct { params: []FnParam, iter: *Node, body: *Node, label: ?[]const u8 = null },
     comp_block: struct { expr: *Node, is_macro: bool = false },
-    while_loop: struct { predicate: *Node, body: *Node },
-    break_expr: ?*Node,
-    continue_expr: ?*Node,
+    while_loop: struct { predicate: *Node, body: *Node, label: ?[]const u8 = null },
+    break_expr: struct { value: ?*Node, label: ?[]const u8 },
+    continue_expr: struct { value: ?*Node, label: ?[]const u8 },
+    labeled_block: struct { label: []const u8, body: *Node },
     return_expr: ?*Node,
     range_literal: struct {
         start: *Node,
@@ -498,14 +499,22 @@ pub const Node = struct {
                 try assign.value.printAt(writer, child(depth));
                 try close(writer, depth);
             },
-            .loop_expr => |loop_expr| {
-                try writer.writeAll("(loop");
+            .loop_expr => |v| {
+                if (v.label) |lbl| {
+                    try writer.print("(loop/{s}", .{lbl});
+                } else {
+                    try writer.writeAll("(loop");
+                }
                 try sep(writer, depth, 1);
-                try loop_expr.body.printAt(writer, child(depth));
+                try v.body.printAt(writer, child(depth));
                 try close(writer, depth);
             },
             .while_loop => |w| {
-                try writer.writeAll("(while");
+                if (w.label) |lbl| {
+                    try writer.print("(while/{s}", .{lbl});
+                } else {
+                    try writer.writeAll("(while");
+                }
                 try sep(writer, depth, 1);
                 try w.predicate.print(writer);
                 try sep(writer, depth, 1);
@@ -513,7 +522,11 @@ pub const Node = struct {
                 try close(writer, depth);
             },
             .for_loop => |v| {
-                try writer.writeAll("(for (");
+                if (v.label) |lbl| {
+                    try writer.print("(for/{s} (", .{lbl});
+                } else {
+                    try writer.writeAll("(for (");
+                }
                 for (v.params, 0..) |param, i| {
                     if (i != 0) try writer.writeByte(' ');
                     try writer.writeAll(param.name);
@@ -523,32 +536,39 @@ pub const Node = struct {
                     }
                 }
                 try writer.writeAll(" in ");
-                // iter is inline with the header in both modes
                 try v.iter.printAt(writer, if (pretty) child(depth) else null);
                 try writer.writeByte(')');
                 try sep(writer, depth, 1);
                 try v.body.printAt(writer, child(depth));
                 try close(writer, depth);
             },
-            .break_expr => |value| {
-                if (value) |expr| {
-                    try writer.writeAll("(break");
+            .break_expr => |b| {
+                try writer.writeAll("(break");
+                if (b.label) |lbl| {
+                    try writer.print("/{s}", .{lbl});
+                }
+                if (b.value) |expr| {
                     try sep(writer, depth, 1);
                     try expr.printAt(writer, child(depth));
-                    try close(writer, depth);
-                } else {
-                    try writer.writeAll("(break)");
                 }
+                try close(writer, depth);
             },
-            .continue_expr => |value| {
-                if (value) |expr| {
-                    try writer.writeAll("(continue");
+            .continue_expr => |c| {
+                try writer.writeAll("(continue");
+                if (c.label) |lbl| {
+                    try writer.print("/{s}", .{lbl});
+                }
+                if (c.value) |expr| {
                     try sep(writer, depth, 1);
                     try expr.printAt(writer, child(depth));
-                    try close(writer, depth);
-                } else {
-                    try writer.writeAll("(continue)");
                 }
+                try close(writer, depth);
+            },
+            .labeled_block => |lb| {
+                try writer.print("(label/{s}", .{lb.label});
+                try sep(writer, depth, 1);
+                try lb.body.printAt(writer, child(depth));
+                try close(writer, depth);
             },
             .return_expr => |value| {
                 if (value) |expr| {
@@ -848,8 +868,8 @@ test "prints break and return empty and valued forms" {
     const one = try arena.allocator().create(Node);
     one.* = .{ .span = span, .expr = .{ .number = .{ .value = 1 } } };
 
-    const break_empty = Node{ .span = span, .expr = .{ .break_expr = null } };
-    const break_value = Node{ .span = span, .expr = .{ .break_expr = one } };
+    const break_empty = Node{ .span = span, .expr = .{ .break_expr = .{ .value = null, .label = null } } };
+    const break_value = Node{ .span = span, .expr = .{ .break_expr = .{ .value = one, .label = null } } };
     const return_empty = Node{ .span = span, .expr = .{ .return_expr = null } };
     const return_value = Node{ .span = span, .expr = .{ .return_expr = one } };
 
@@ -1146,21 +1166,36 @@ pub fn walkExpr(
         } }),
         .loop_expr => |v| allocNode(allocator, expr.span, .{ .loop_expr = .{
             .body = try ctx.walk(allocator, v.body, ctx),
+            .label = v.label,
         } }),
         .for_loop => |v| allocNode(allocator, expr.span, .{ .for_loop = .{
             .params = v.params,
             .iter = try ctx.walk(allocator, v.iter, ctx),
             .body = try ctx.walk(allocator, v.body, ctx),
+            .label = v.label,
         } }),
         .while_loop => |v| allocNode(allocator, expr.span, .{ .while_loop = .{
             .predicate = v.predicate,
             .body = try ctx.walk(allocator, v.body, ctx),
+            .label = v.label,
         } }),
         .break_expr => |v| allocNode(allocator, expr.span, .{
-            .break_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,
+            .break_expr = .{
+                .value = if (v.value) |inner| try ctx.walk(allocator, inner, ctx) else null,
+                .label = v.label,
+            },
         }),
         .continue_expr => |v| allocNode(allocator, expr.span, .{
-            .continue_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,
+            .continue_expr = .{
+                .value = if (v.value) |inner| try ctx.walk(allocator, inner, ctx) else null,
+                .label = v.label,
+            },
+        }),
+        .labeled_block => |v| allocNode(allocator, expr.span, .{
+            .labeled_block = .{
+                .label = v.label,
+                .body = try ctx.walk(allocator, v.body, ctx),
+            },
         }),
         .return_expr => |v| allocNode(allocator, expr.span, .{
             .return_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,

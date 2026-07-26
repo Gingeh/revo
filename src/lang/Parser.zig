@@ -472,8 +472,8 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_loop => self.parseLoop(token),
         .kw_for => self.parseFor(token),
         .kw_while => self.parseWhile(token),
-        .kw_break => self.parseExitExpr(.break_expr, token),
-        .kw_continue => self.allocExpr(token.span(), .{ .continue_expr = null }),
+        .kw_break => self.parseBreak(token),
+        .kw_continue => self.parseContinue(token),
         .kw_return => self.parseExitExpr(.return_expr, token),
         .kw_comp => self.parseComp(token),
         .kw_import => self.parseImport(token),
@@ -827,25 +827,36 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
     };
 }
 
+fn parseOptionalLabel(self: *Parser) ?[]const u8 {
+    if (self.match(.slash)) {
+        const ident = self.expectIdent() catch return null;
+        return ident.text;
+    }
+    return null;
+}
+
 /// loop do expr end
 fn parseLoop(self: *Parser, start: Token) anyerror!*Node {
+    const label = self.parseOptionalLabel();
     const body = try self.parseExpression(0);
     return self.allocExpr(
         Span.merge(start.span(), body.span),
-        .{ .loop_expr = .{ .body = body } },
+        .{ .loop_expr = .{ .body = body, .label = label } },
     );
 }
 
 /// while <cond> <expr>
 fn parseWhile(self: *Parser, start: Token) anyerror!*Node {
+    const label = self.parseOptionalLabel();
     const predicate = try self.parseExpression(25);
     const body = try self.parseExpression(0);
     return self.allocExpr(Span.merge(start.span(), body.span), .{
-        .while_loop = .{ .predicate = predicate, .body = body },
+        .while_loop = .{ .predicate = predicate, .body = body, .label = label },
     });
 }
 
 fn parseFor(self: *Parser, start: Token) anyerror!*Node {
+    const label = self.parseOptionalLabel();
     var params = try std.ArrayList(ast.FnParam).initCapacity(self.alloc, 2);
     errdefer params.deinit(self.alloc);
     const first = try self.expectIdent();
@@ -858,7 +869,7 @@ fn parseFor(self: *Parser, start: Token) anyerror!*Node {
     const iter = try self.parseExpression(0);
     const body = try self.parseExpression(0);
     return self.allocExpr(Span.merge(start.span(), body.span), .{
-        .for_loop = .{ .params = try params.toOwnedSlice(self.alloc), .iter = iter, .body = body },
+        .for_loop = .{ .params = try params.toOwnedSlice(self.alloc), .iter = iter, .body = body, .label = label },
     });
 }
 
@@ -869,6 +880,22 @@ fn parseExitExpr(self: *Parser, comptime tag: std.meta.Tag(Expr), start: Token) 
         if (value) |expr| Span.merge(start.span(), expr.span) else start.span();
 
     return self.allocExpr(span, @unionInit(Expr, @tagName(tag), value));
+}
+
+fn parseBreak(self: *Parser, start: Token) anyerror!*Node {
+    const label = self.parseOptionalLabel();
+    const value = try self.parseOptionalTrailingExpr();
+    const span = if (value) |expr| Span.merge(start.span(), expr.span) else start.span();
+    return self.allocExpr(span, .{
+        .break_expr = .{ .value = value, .label = label },
+    });
+}
+
+fn parseContinue(self: *Parser, start: Token) anyerror!*Node {
+    const label = self.parseOptionalLabel();
+    return self.allocExpr(start.span(), .{
+        .continue_expr = .{ .value = null, .label = label },
+    });
 }
 
 /// pub prefix on declarations
@@ -1171,6 +1198,14 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
 
 /// do expr end
 fn parseBlock(self: *Parser, start: Token) anyerror!*Node {
+    if (self.match(.slash)) {
+        const ident = try self.expectIdent();
+        const body = try self.parseDoBody();
+        body.span = Span.merge(start.span(), body.span);
+        return self.allocExpr(Span.merge(start.span(), body.span), .{
+            .labeled_block = .{ .label = ident.text, .body = body },
+        });
+    }
     const body = try self.parseDoBody();
     body.span = Span.merge(start.span(), body.span);
     return body;
@@ -1501,7 +1536,7 @@ fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bo
     return switch (left.expr) {
         .number => next == .lparen and !self.isTightSuffix(left),
         .decl => expr_start_tokens.get(next),
-        .assign_expr, .return_expr, .break_expr, .continue_expr => expr_start_tokens.get(next),
+        .assign_expr, .return_expr, .break_expr, .continue_expr, .labeled_block => expr_start_tokens.get(next),
         .call => call_stmt_boundary_tokens.get(next),
         else => false,
     };

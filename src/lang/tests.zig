@@ -3442,3 +3442,96 @@ test "duplicate import name is rejected at compile time" {
         \\ import "./mod"
     );
 }
+
+test "labeled loops break from outer loop via label" {
+    try t.top_number(
+        \\ let r = 0
+        \\ loop/a do
+        \\   for i in 0..5 do
+        \\     if i == 3 break/a(99)
+        \\     r += 1
+        \\   end
+        \\ end
+        \\ r
+    , 3);
+    try t.top_number(
+        \\ let r = 0
+        \\ while/a 1 == 1 do
+        \\   r += 1
+        \\   if r == 5 break/a(r)
+        \\ end
+    , 5);
+    try t.top_number(
+        \\ for/a i in 0..10 do
+        \\   if i == 4 break/a(i * 10)
+        \\ end
+    , 40);
+}
+
+test "labeled continue targets outer while loop" {
+    try t.top_number(
+        \\ let r = 0
+        \\ let i = 0
+        \\ while/a i < 5 do
+        \\   i += 1
+        \\   if i == 3 continue/a
+        \\   r += i
+        \\ end
+        \\ r
+    , 12);
+}
+
+test "labeled do block" {
+    try t.top_number(
+        \\ do/a
+        \\   break/a(42)
+        \\   0
+        \\ end
+    , 42);
+    try t.top_atom(
+        \\ do/a
+        \\   let x = 10
+        \\   if x > 5 break/a(:ok)
+        \\   :never
+        \\ end
+    , "ok");
+    try t.top_number(
+        \\ let x = do/a
+        \\   let y = 2
+        \\   break/a(y * 21)
+        \\ end
+        \\ x
+    , 42);
+}
+
+test "labeled loop: unlabeled break targets innermost" {
+    try t.top_number(
+        \\ let r = 0
+        \\ loop/a do
+        \\   for i in 0..3 do
+        \\     if i == 2 break
+        \\     r += 1
+        \\   end
+        \\   break
+        \\ end
+        \\ r
+    , 2);
+}
+
+test "labeled break/continue label not found errors" {
+    try t.expectCompileError("break/no_such", .UnsupportedSyntax);
+    try t.expectCompileError("continue/no_such", .UnsupportedSyntax);
+}
+
+test "labeled goto unlabeled break outside loop" {
+    try t.expectCompileError("break", .UnsupportedSyntax);
+    try t.expectCompileError("continue", .UnsupportedSyntax);
+}
+
+test "labeled break with unknown label is rejected" {
+    try t.expectCompileError(
+        \\ loop do
+        \\   break/no_such
+        \\ end
+    , .UnsupportedSyntax);
+}

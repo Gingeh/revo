@@ -318,19 +318,31 @@ pub const AstSubstituter = struct {
                 });
             },
             .loop_expr => |l| try self.alloc(node.span, .{
-                .loop_expr = .{ .body = try self.substitute(l.body) },
+                .loop_expr = .{ .body = try self.substitute(l.body), .label = l.label },
             }),
             .for_loop => |f| try self.alloc(node.span, .{
-                .for_loop = .{ .params = f.params, .iter = try self.substitute(f.iter), .body = try self.substitute(f.body) },
+                .for_loop = .{ .params = f.params, .iter = try self.substitute(f.iter), .body = try self.substitute(f.body), .label = f.label },
             }),
             .while_loop => |w| try self.alloc(node.span, .{
-                .while_loop = .{ .predicate = try self.substitute(w.predicate), .body = try self.substitute(w.body) },
+                .while_loop = .{ .predicate = try self.substitute(w.predicate), .body = try self.substitute(w.body), .label = w.label },
             }),
-            .break_expr => |v| try self.alloc(node.span, .{
-                .break_expr = if (v) |inner| try self.substitute(inner) else null,
+            .break_expr => |b| try self.alloc(node.span, .{
+                .break_expr = .{
+                    .value = if (b.value) |inner| try self.substitute(inner) else null,
+                    .label = b.label,
+                },
             }),
-            .continue_expr => |v| try self.alloc(node.span, .{
-                .continue_expr = if (v) |inner| try self.substitute(inner) else null,
+            .continue_expr => |c| try self.alloc(node.span, .{
+                .continue_expr = .{
+                    .value = if (c.value) |inner| try self.substitute(inner) else null,
+                    .label = c.label,
+                },
+            }),
+            .labeled_block => |lb| try self.alloc(node.span, .{
+                .labeled_block = .{
+                    .label = lb.label,
+                    .body = try self.substitute(lb.body),
+                },
             }),
             .return_expr => |v| try self.alloc(node.span, .{
                 .return_expr = if (v) |inner| try self.substitute(inner) else null,

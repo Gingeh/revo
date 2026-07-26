@@ -367,8 +367,9 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .loop_expr => |v| inferExprType(ctx, v.body),
         .for_loop => |v| inferExprType(ctx, v.body),
         .while_loop => |v| inferExprType(ctx, v.body),
-        .break_expr => |val| if (val) |v| inferExprType(ctx, v) else .any,
-        .continue_expr => |val| if (val) |v| inferExprType(ctx, v) else .any,
+        .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .any,
+        .continue_expr => |c| if (c.value) |v| inferExprType(ctx, v) else .any,
+        .labeled_block => |lb| inferExprType(ctx, lb.body),
         .try_expr => |inner| blk: {
             const it = inferExprType(ctx, inner);
             break :blk if (it == .@"union") okTypeFromUnion(it) else it;

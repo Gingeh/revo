@@ -108,9 +108,7 @@ pub const Compiler = struct {
     functions: std.ArrayList(FunctionState),
     slot_allocators: std.ArrayList(LocalSlot),
     temps: Temps = .{},
-    break_jumps: std.ArrayList(usize),
-    continue_targets: std.ArrayList(usize),
-    loop_result_regs: std.ArrayList(usize),
+    loop_stack: std.ArrayList(state_mod.LoopFrame),
     test_suite_names: std.ArrayList([]const u8),
     in_loop_depth: usize = 0,
     failure: ?LowerFailure = null,
@@ -155,9 +153,7 @@ pub const Compiler = struct {
             .slot_allocators = try std.ArrayList(LocalSlot).initCapacity(arena, 4),
             .failure_reports = try std.ArrayList(LowerFailure).initCapacity(arena, 4),
             .spans = try std.ArrayList(ast.Span).initCapacity(arena, 32),
-            .break_jumps = try std.ArrayList(usize).initCapacity(arena, 16),
-            .continue_targets = try std.ArrayList(usize).initCapacity(arena, 8),
-            .loop_result_regs = try std.ArrayList(usize).initCapacity(arena, 8),
+            .loop_stack = try std.ArrayList(state_mod.LoopFrame).initCapacity(arena, 8),
             .test_suite_names = try std.ArrayList([]const u8).initCapacity(arena, 4),
             .struct_layouts = std.StringHashMap([]const types.FieldDef).init(arena),
             .ir_builder = try ir.IrBuilder.init(arena),
@@ -178,9 +174,8 @@ pub const Compiler = struct {
         self.failure_parts.deinit(self.alloc);
         self.failure_reports.deinit(self.alloc);
         self.spans.deinit(self.alloc);
-        self.break_jumps.deinit(self.alloc);
-        self.continue_targets.deinit(self.alloc);
-        self.loop_result_regs.deinit(self.alloc);
+        for (self.loop_stack.items) |*frame| frame.break_jumps.deinit(self.alloc);
+        self.loop_stack.deinit(self.alloc);
         self.test_suite_names.deinit(self.alloc);
         var layout_it = self.struct_layouts.iterator();
         while (layout_it.next()) |entry| self.alloc.free(entry.value_ptr.*);
@@ -761,11 +756,12 @@ pub const Compiler = struct {
                 try self.emit(.bind_local, slot);
             },
             .comp_block => |cb| try self.compileComp(cb.expr),
-            .loop_expr => |v| try flow.compileLoop(self, v.body),
-            .for_loop => |v| try flow.compileFor(self, v.params, v.body, v.iter),
-            .while_loop => |v| try flow.compileWhile(self, v.predicate, v.body),
-            .break_expr => |value| try flow.compileBreak(self, expr, value),
-            .continue_expr => |value| try flow.compileContinue(self, expr, value),
+            .loop_expr => |v| try flow.compileLoop(self, v.body, v.label),
+            .for_loop => |v| try flow.compileFor(self, v.params, v.body, v.iter, v.label),
+            .while_loop => |v| try flow.compileWhile(self, v.predicate, v.body, v.label),
+            .break_expr => |b| try flow.compileBreak(self, expr, b.value, b.label),
+            .continue_expr => |c| try flow.compileContinue(self, expr, c.value, c.label),
+            .labeled_block => |lb| try flow.compileLabeledBlock(self, lb.label, lb.body),
             .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
             .match_expr => |v| try flow.compileMatch(self, v.subject, v.arms),
             .tuple_pattern => return self.fail(
