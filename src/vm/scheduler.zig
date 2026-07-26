@@ -24,6 +24,7 @@ pub const ChannelState = struct {
     cap: usize = 0,
     queue: std.ArrayList(Data),
     queue_head: usize = 0,
+    queue_count: usize = 0,
     send_waiters: std.ArrayList(ChannelWaiter),
     send_head: usize = 0,
     recv_waiters: std.ArrayList(ChannelWaiter),
@@ -33,10 +34,14 @@ pub const ChannelState = struct {
         var self = ChannelState{
             .cap = cap,
             .queue = undefined,
+            .queue_head = 0,
+            .queue_count = 0,
             .send_waiters = undefined,
             .recv_waiters = undefined,
         };
-        self.queue = try std.ArrayList(Data).initCapacity(alloc, if (cap == 0) 1 else cap);
+        const queue_cap = if (cap == 0) 1 else cap;
+        self.queue = try std.ArrayList(Data).initCapacity(alloc, queue_cap);
+        self.queue.items.len = queue_cap;
         errdefer self.queue.deinit(alloc);
         self.send_waiters = try std.ArrayList(ChannelWaiter).initCapacity(alloc, 2);
         errdefer self.send_waiters.deinit(alloc);
@@ -53,18 +58,22 @@ pub const ChannelState = struct {
     }
 
     fn queueLen(self: *const ChannelState) usize {
-        return self.queue.items.len - self.queue_head;
+        return self.queue_count;
     }
 
     fn pushQueue(self: *ChannelState, alloc: std.mem.Allocator, value: Data) !void {
-        try self.queue.append(alloc, value);
+        _ = alloc;
+        const cap = self.queue.items.len;
+        const tail = (self.queue_head + self.queue_count) % cap;
+        self.queue.items[tail] = value;
+        self.queue_count += 1;
     }
 
     fn popQueue(self: *ChannelState) ?Data {
-        if (self.queue_head >= self.queue.items.len) return null;
+        if (self.queue_count == 0) return null;
         const value = self.queue.items[self.queue_head];
-        self.queue_head += 1;
-        maybeCompactList(Data, &self.queue, &self.queue_head);
+        self.queue_head = (self.queue_head + 1) % self.queue.items.len;
+        self.queue_count -= 1;
         return value;
     }
 
