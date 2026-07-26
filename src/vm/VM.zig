@@ -1760,9 +1760,7 @@ pub fn returnRegister(
     const fiber = self.currentFiber();
     const read_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
     const reg_slot = read_base + @as(usize, instr.a);
-    const byte_addr = @as(u64, @intFromPtr(fiber.registers.ptr)) + reg_slot * @sizeOf(Data);
-    var result: Data = undefined;
-    @memcpy((@as(*[8]u8, @ptrCast(&result)))[0..8], (@as(*const [8]u8, @ptrFromInt(byte_addr)))[0..8]);
+    const result = fiber.registers[reg_slot];
 
     const frame_hot_idx = fiber.frames_hot.items.len - 1;
     const frame_hot = fiber.frames_hot.items[frame_hot_idx];

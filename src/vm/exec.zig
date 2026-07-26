@@ -374,10 +374,10 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
                 const count: usize = @intCast(
                     std.math.clamp(@as(i64, @intFromFloat(pair.n)), 0, std.math.maxInt(i32)),
                 );
-                _ = std.math.mul(usize, str.len, count) catch
+                const total_len = std.math.mul(usize, str.len, count) catch
                     return self.evalFailure(error.OutOfMemory);
-                self.noteGCPressure(str.len * count + @sizeOf(Data));
-                const result = try alloc.alloc(u8, str.len * count);
+                self.noteGCPressure(total_len + @sizeOf(Data));
+                const result = try alloc.alloc(u8, total_len);
                 for (0..count) |i|
                     @memcpy(result[i * str.len ..][0..str.len], str);
                 regWrite(slots, base, instr.a, try self.adoptDataStringNoDedup(result));
