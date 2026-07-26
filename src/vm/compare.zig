@@ -2,7 +2,6 @@
 ///
 /// - when tags differ: eq/neq -> false/true; ordered ops -> type error
 /// - when same type: numbers/strings/tuples compare by value; atoms/functions/tables by id
-/// note: NaNs are canonicalized so fast bitwise equality may treat NaN as equal
 const std = @import("std");
 const Data = @import("memory.zig").Data;
 const BOX_MASK = @import("memory.zig").BOX_MASK;
@@ -56,29 +55,36 @@ pub fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, c
     if (comptime op == .eq or op == .neq) {
         // fast path: boxed values; identical bits = identity = equality
         // strings and tuples are value types, fall through to compare()
+        // numbers (including canonicalized NaN) also fall through to NaN-aware handling
         if ((lhs.bits & BOX_MASK) == BOX_MASK) {
             const tag = lhs.tag();
-            if (tag != .string and tag != .tuple) {
+            if (tag != .string and tag != .tuple and tag != .number) {
                 const is_eq = lhs.bits == rhs.bits;
                 VM.regWrite(slots, base, instr.a, Data.new.boolean(if (op == .eq) is_eq else !is_eq));
                 return;
             }
         }
-        // fast path: both are numbers; compare raw bits (handles +-0 and nan)
+        // fast path: both are numbers; compare raw bits (handles +-0)
         if ((rhs.bits & BOX_MASK) != BOX_MASK) {
             const SIGN_MASK: u64 = @as(u64, 1) << 63;
-            const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
             if (lhs.bits == rhs.bits) {
-                if (lhs.bits != CANONICAL_NAN) {
-                    VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));
-                    return;
-                }
-            } else {
-                if ((lhs.bits | SIGN_MASK) == (rhs.bits | SIGN_MASK) and (lhs.bits & ~SIGN_MASK) == 0) {
-                    VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));
-                    return;
-                }
+                VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));
+                return;
             }
+            if ((lhs.bits | SIGN_MASK) == (rhs.bits | SIGN_MASK) and (lhs.bits & ~SIGN_MASK) == 0) {
+                VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));
+                return;
+            }
+        }
+    }
+
+    // per IEEE 754 nan is unordered so all comparisons with NaN are false and neq is true
+    if (lhs.tag() == .number and rhs.tag() == .number) {
+        const ln = lhs.asNum().?;
+        const rn = rhs.asNum().?;
+        if (std.math.isNan(ln) or std.math.isNan(rn)) {
+            VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .neq));
+            return;
         }
     }
 
