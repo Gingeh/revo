@@ -25,6 +25,7 @@ fn renderAll(w: *Writer, alloc: std.mem.Allocator) !void {
         for (group) |*s| try flat.append(alloc, s);
     }
     for (revo.std_lib.root_specs_os) |*s| try flat.append(alloc, s);
+    for (@import("revo").std_lib.regex_specs) |*s| try flat.append(alloc, s);
 
     try renderGlobals(w, flat.items);
     try renderModules(w, flat.items, alloc);

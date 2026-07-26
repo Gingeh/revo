@@ -11,6 +11,8 @@ const testing = revo.lang.testing;
 
 pub const api = @import("api.zig");
 
+pub const regex_specs: []const api.FnSpec = @import("regex.zig").specs;
+
 pub const root_specs: []const api.FnSpec = &.{
     .{
         .name = "fmt",
@@ -342,7 +344,10 @@ pub fn register_stdlib(vm: *revo.VM) !void {
     try vm.globals.put(try vm.internAtom("argv"), argv_val);
     try vm.stdlib_globals.put(try vm.internAtom("argv"), argv_val);
 
-    const all = api.all_specs ++ [_][]const api.FnSpec{root_specs_os};
+    const all = if (@import("build_options").regex)
+        api.all_specs ++ [_][]const api.FnSpec{ root_specs_os, regex_specs }
+    else
+        api.all_specs ++ [_][]const api.FnSpec{root_specs_os};
     try api.registerAll(vm, all, mtPrototype);
 
     try attachMathPi(vm);

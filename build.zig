@@ -259,7 +259,7 @@ pub fn build(b: *Build) !void {
     try import_list.append(b.allocator, .{ .name = "revo", .module = revo_mod });
     try import_list.append(b.allocator, .{ .name = "vm", .module = vm_mod });
     try import_list.append(b.allocator, .{ .name = "c", .module = c_mod });
-    if (features.regex) {
+    { // shouldn't get compiled in if regex flag unspecified
         const mvzr_mod = b.createModule(.{
             .root_source_file = mvzr_dep.path("src/mvzr.zig"),
             .target = target,
