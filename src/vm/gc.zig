@@ -199,7 +199,11 @@ pub inline fn markRoots(self: *VM) void {
     while (channel_it.next()) |entry| {
         self.tables.mark(entry.key_ptr.*, self);
         const channel = entry.value_ptr;
-        for (channel.queue.items[channel.queue_head..]) |value| pushMark(self, value);
+        {
+            const cap = channel.queue.items.len;
+            const count = channel.queue_count;
+            for (0..count) |i| pushMark(self, channel.queue.items[(channel.queue_head + i) % cap]);
+        }
 
         for (channel.send_waiters.items[channel.send_head..]) |waiter| {
             if (waiter.value) |v| pushMark(self, v);
