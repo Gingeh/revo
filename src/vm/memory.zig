@@ -97,6 +97,7 @@ pub const Data = struct {
     }
 
     pub inline fn tag(self: Data) Type {
+        if (self.bits == CANONICAL_NAN) return .number;
         if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
         const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
         if (raw > @backingInt(Type.foreign)) return .number;

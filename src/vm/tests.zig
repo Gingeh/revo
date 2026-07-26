@@ -45,10 +45,9 @@ test "vm join returns dead fiber result" {
 }
 
 test "nanbox canonicalizes nan through helpers" {
-    // nanboxing canonicalizes NaN to CANONICAL_NAN, which collides with the
-    // boxed value tag space. NaN values cannot round-trip through Data.new.num.
     const nan = Data.new.num(std.math.nan(f64));
-    try testing.expect(nan.asNum() == null);
+    try testing.expect(nan.asNum() != null);
+    try testing.expect(std.math.isNan(nan.asNum().?));
 }
 
 test "vm join parks current fiber when target alive" {
