@@ -473,6 +473,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_for => self.parseFor(token),
         .kw_while => self.parseWhile(token),
         .kw_break => self.parseExitExpr(.break_expr, token),
+        .kw_continue => self.allocExpr(token.span(), .{ .continue_expr = null }),
         .kw_return => self.parseExitExpr(.return_expr, token),
         .kw_comp => self.parseComp(token),
         .kw_import => self.parseImport(token),
@@ -1500,7 +1501,7 @@ fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bo
     return switch (left.expr) {
         .number => next == .lparen and !self.isTightSuffix(left),
         .decl => expr_start_tokens.get(next),
-        .assign_expr, .return_expr, .break_expr => expr_start_tokens.get(next),
+        .assign_expr, .return_expr, .break_expr, .continue_expr => expr_start_tokens.get(next),
         .call => call_stmt_boundary_tokens.get(next),
         else => false,
     };
@@ -1826,9 +1827,9 @@ const expr_start_tokens = makeTokenSet(&.{
     .number,    .string,       .multiline_string, .hash,      .ident,
     .kw_const,  .kw_let,       .kw_macro,         .kw_struct, .minus,
     .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,
-    .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_return,
-    .kw_import, .kw_spawn,     .kw_join,          .kw_yield,  .lsquiggly,
-    .kw_type,   .kw_pub,       .eof,
+    .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_continue,
+    .kw_return, .kw_import,    .kw_spawn,         .kw_join,   .kw_yield,
+    .lsquiggly, .kw_type,      .kw_pub,           .eof,
 });
 
 /// expr allows bare call after it (ident, field, call, fn_expr)

@@ -31,6 +31,8 @@ pub fn compileLoop(self: *Compiler, body: *const Node) !void {
     defer loop.deinit();
 
     const loop_start: ProgramCounter = @intCast(self.irLen());
+    try self.continue_targets.append(self.alloc, loop_start);
+    defer _ = self.continue_targets.pop();
     try self.compile(body, true);
     try self.regRelease();
     try self.emit(.jump, loop_start);
@@ -48,6 +50,8 @@ pub fn compileWhile(
     defer loop.deinit();
 
     const loop_start: ProgramCounter = @intCast(self.irLen());
+    try self.continue_targets.append(self.alloc, loop_start);
+    defer _ = self.continue_targets.pop();
     try self.compile(predicate, true);
     const exit_jump = try self.jump(.jump_if_false);
     try self.compile(body, true);
@@ -138,6 +142,8 @@ pub fn compileRangeLoopBody(
     }
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
+    try self.continue_targets.append(self.alloc, loop_check);
+    defer _ = self.continue_targets.pop();
 
     const value_reg = try toRegister(self.active_registers);
     const index_reg = if (needs_index) try toRegister(self.active_registers + 1) else 0;
@@ -246,6 +252,8 @@ pub fn compileFor(
     state.reserveLocalSlots(self);
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
+    try self.continue_targets.append(self.alloc, loop_check);
+    defer _ = self.continue_targets.pop();
 
     // it() -> value | :none
     try self.emit(.load_local, it_slot);
@@ -796,4 +804,15 @@ pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node) !vo
     _ = try self.record(.move, &.{.{ .reg = try toRegister(loop_res) }}, true, try toRegister(r), 0);
     const jump_idx = try self.jump(.jump);
     try self.break_jumps.append(self.alloc, jump_idx);
+}
+
+pub fn compileContinue(self: *Compiler, expr: *const Node, value: ?*const Node) !void {
+    _ = value;
+    if (self.in_loop_depth == 0) {
+        return self.fail(.UnsupportedSyntax, expr, "continue is only valid inside loop");
+    }
+    if (self.loop_result_regs.items.len <= 0) return;
+
+    const target = self.continue_targets.items[self.continue_targets.items.len - 1];
+    try self.emit(.jump, @intCast(target));
 }

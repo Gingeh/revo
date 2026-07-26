@@ -430,6 +430,10 @@ const SemanticChecker = struct {
                 if (val) |v| _ = try self.analyzeNode(v);
                 break :blk types_mod.inferExprType(self, node);
             },
+            .continue_expr => |val| blk: {
+                if (val) |v| _ = try self.analyzeNode(v);
+                break :blk types_mod.inferExprType(self, node);
+            },
             .for_loop => |v| blk: {
                 const iter_type = try self.analyzeNode(v.iter);
                 try self.pushScope();

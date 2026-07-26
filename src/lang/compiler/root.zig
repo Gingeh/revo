@@ -109,6 +109,7 @@ pub const Compiler = struct {
     slot_allocators: std.ArrayList(LocalSlot),
     temps: Temps = .{},
     break_jumps: std.ArrayList(usize),
+    continue_targets: std.ArrayList(usize),
     loop_result_regs: std.ArrayList(usize),
     test_suite_names: std.ArrayList([]const u8),
     in_loop_depth: usize = 0,
@@ -155,6 +156,7 @@ pub const Compiler = struct {
             .failure_reports = try std.ArrayList(LowerFailure).initCapacity(arena, 4),
             .spans = try std.ArrayList(ast.Span).initCapacity(arena, 32),
             .break_jumps = try std.ArrayList(usize).initCapacity(arena, 16),
+            .continue_targets = try std.ArrayList(usize).initCapacity(arena, 8),
             .loop_result_regs = try std.ArrayList(usize).initCapacity(arena, 8),
             .test_suite_names = try std.ArrayList([]const u8).initCapacity(arena, 4),
             .struct_layouts = std.StringHashMap([]const types.FieldDef).init(arena),
@@ -177,6 +179,7 @@ pub const Compiler = struct {
         self.failure_reports.deinit(self.alloc);
         self.spans.deinit(self.alloc);
         self.break_jumps.deinit(self.alloc);
+        self.continue_targets.deinit(self.alloc);
         self.loop_result_regs.deinit(self.alloc);
         self.test_suite_names.deinit(self.alloc);
         var layout_it = self.struct_layouts.iterator();
@@ -762,6 +765,7 @@ pub const Compiler = struct {
             .for_loop => |v| try flow.compileFor(self, v.params, v.body, v.iter),
             .while_loop => |v| try flow.compileWhile(self, v.predicate, v.body),
             .break_expr => |value| try flow.compileBreak(self, expr, value),
+            .continue_expr => |value| try flow.compileContinue(self, expr, value),
             .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
             .match_expr => |v| try flow.compileMatch(self, v.subject, v.arms),
             .tuple_pattern => return self.fail(

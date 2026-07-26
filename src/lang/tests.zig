@@ -1226,6 +1226,60 @@ test "while loop counts down" {
     , 0);
 }
 
+test "continue doesnt doesnt work outside of loop" {
+    try t.expectCompileError("continue", .UnsupportedSyntax);
+}
+
+test "continue in loop" {
+    try t.top_number(
+        \\ let i = 0
+        \\ let result = 0
+        \\ loop do
+        \\   i += 1
+        \\   if i > 5 break(result)
+        \\   if i % 2 == 0 continue
+        \\   result += i
+        \\ end
+    , 9);
+}
+
+test "continue in while" {
+    try t.top_number(
+        \\ let i = 0
+        \\ let result = 0
+        \\ while i < 5 do
+        \\   i += 1
+        \\   if i % 2 == 0 continue
+        \\   result += i
+        \\ end
+        \\ result
+    , 9);
+}
+
+test "continue in for range" {
+    try t.top_number(
+        \\ let result = 0
+        \\ for i in 1..6 do
+        \\   if i % 2 == 0 continue
+        \\   result += i
+        \\ end
+        \\ result
+    , 9);
+}
+
+test "continue in nested loops" {
+    try t.top_number(
+        \\ let result = 0
+        \\ for i in 1..3 do
+        \\   for j in 1..5 do
+        \\     if j == 2 continue
+        \\     result += 1
+        \\   end
+        \\ end
+        \\ result
+    , 6);
+}
+
 test "break restrictions" {
     try t.expectCompileError("break(1)", .UnsupportedSyntax);
     try t.top_atom(

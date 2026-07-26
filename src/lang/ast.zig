@@ -291,6 +291,7 @@ pub const Expr = union(enum) {
     comp_block: struct { expr: *Node, is_macro: bool = false },
     while_loop: struct { predicate: *Node, body: *Node },
     break_expr: ?*Node,
+    continue_expr: ?*Node,
     return_expr: ?*Node,
     range_literal: struct {
         start: *Node,
@@ -537,6 +538,16 @@ pub const Node = struct {
                     try close(writer, depth);
                 } else {
                     try writer.writeAll("(break)");
+                }
+            },
+            .continue_expr => |value| {
+                if (value) |expr| {
+                    try writer.writeAll("(continue");
+                    try sep(writer, depth, 1);
+                    try expr.printAt(writer, child(depth));
+                    try close(writer, depth);
+                } else {
+                    try writer.writeAll("(continue)");
                 }
             },
             .return_expr => |value| {
@@ -1147,6 +1158,9 @@ pub fn walkExpr(
         } }),
         .break_expr => |v| allocNode(allocator, expr.span, .{
             .break_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,
+        }),
+        .continue_expr => |v| allocNode(allocator, expr.span, .{
+            .continue_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,
         }),
         .return_expr => |v| allocNode(allocator, expr.span, .{
             .return_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,

@@ -329,6 +329,9 @@ pub const AstSubstituter = struct {
             .break_expr => |v| try self.alloc(node.span, .{
                 .break_expr = if (v) |inner| try self.substitute(inner) else null,
             }),
+            .continue_expr => |v| try self.alloc(node.span, .{
+                .continue_expr = if (v) |inner| try self.substitute(inner) else null,
+            }),
             .return_expr => |v| try self.alloc(node.span, .{
                 .return_expr = if (v) |inner| try self.substitute(inner) else null,
             }),
