@@ -10,21 +10,26 @@ const root = @import("root.zig");
 const TypeSpec = root.TypeSpec;
 const NativeFunc = root.NativeFunc;
 
-pub const all_specs: []const []const FnSpec = &.{
-    @import("root.zig").root_specs,
-    @import("string.zig").specs,
-    @import("table.zig").specs,
-    @import("tuple.zig").specs,
-    @import("iter.zig").specs,
-    @import("math.zig").specs,
-    @import("json.zig").specs,
-    @import("time.zig").specs,
-    @import("net.zig").specs,
-    @import("fs.zig").specs,
-    @import("revo.zig").specs,
-    @import("compress.zig").specs,
+pub const all_specs: []const []const FnSpec = blk: {
+    var x = &.{
+        @import("root.zig").root_specs,
+        @import("string.zig").specs,
+        @import("table.zig").specs,
+        @import("tuple.zig").specs,
+        @import("iter.zig").specs,
+        @import("math.zig").specs,
+        @import("json.zig").specs,
+        @import("time.zig").specs,
+        @import("net.zig").specs,
+        @import("fs.zig").specs,
+        @import("revo.zig").specs,
+        @import("compress.zig").specs,
+    };
+
     if (@import("build_options").regex)
-        @import("regex.zig").specs,
+        x = x ++ @import("regex.zig").specs;
+
+    break :blk x;
 };
 
 /// look up a function by name across all spec tables.
