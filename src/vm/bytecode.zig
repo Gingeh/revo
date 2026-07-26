@@ -233,13 +233,20 @@ fn deserializeTuple(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) !memo
 pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !DeserializedBytecode {
     var reader: std.Io.Reader = .fixed(data);
 
-    // header
-    const header = (try reader.takeStructPointer(Header)).*;
-    if (!std.mem.eql(u8, &header.magic, &MAGIC)) return error.InvalidMagic;
-    if (std.mem.littleToNative(u16, header.version_major) != VERSION_MAJOR) return error.VersionMismatch;
+    // header, read field-by-field (endian-aware, unlike takeStructPointer)
+    const magic = (try reader.takeArray(4)).*;
+    if (!std.mem.eql(u8, &magic, &MAGIC)) return error.InvalidMagic;
+    const version_major = std.mem.readInt(u16, try reader.takeArray(2), .little);
+    if (version_major != VERSION_MAJOR) return error.VersionMismatch;
+    _ = std.mem.readInt(u16, try reader.takeArray(2), .little); // version_minor
+    _ = std.mem.readInt(u32, try reader.takeArray(4), .little); // flags
+    const constants_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    const instructions_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    const spans_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    const prototypes_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
 
     // inst
-    const instructions = try allocator.alloc(Instruction, std.mem.littleToNative(u32, header.instructions_count));
+    const instructions = try allocator.alloc(Instruction, instructions_count);
     errdefer allocator.free(instructions);
 
     for (instructions) |*instr| {
@@ -253,7 +260,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     }
 
     // spans
-    const spans = try allocator.alloc(Span, std.mem.littleToNative(u32, header.spans_count));
+    const spans = try allocator.alloc(Span, spans_count);
     errdefer allocator.free(spans);
 
     for (spans) |*span| {
@@ -266,7 +273,6 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     }
 
     // consts
-    const constants_count = std.mem.littleToNative(u32, header.constants_count);
     for (0..constants_count) |_| {
         const tag = (try reader.takeArray(1))[0];
         const constant: memory.Data = switch (tag) {
@@ -303,7 +309,6 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     }
 
     // prototypes
-    const prototypes_count = std.mem.littleToNative(u32, header.prototypes_count);
     for (0..prototypes_count) |_| {
         const addr = std.mem.readInt(u32, try reader.takeArray(4), .little);
         const arity = (try reader.takeArray(1))[0];
