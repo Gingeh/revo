@@ -88,6 +88,7 @@ pub const LoopFrame = struct {
     continue_target: usize,
     result_reg: Register,
     break_jumps: std.ArrayList(usize),
+    function_index: usize,
 };
 
 pub const Temps = struct { pipe: usize = 0, match_subject: usize = 0, bind: usize = 0, match_temp: usize = 0 };
@@ -107,6 +108,7 @@ pub fn LoopScope(comptime T: type) type {
                 .continue_target = 0,
                 .result_reg = result_reg,
                 .break_jumps = try std.ArrayList(usize).initCapacity(compiler.alloc, 4),
+                .function_index = compiler.functions.items.len,
             });
             return .{ .compiler = compiler, .prev_in_loop = prev };
         }

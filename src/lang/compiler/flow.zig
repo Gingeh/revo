@@ -795,17 +795,24 @@ pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
 }
 
 fn findLoopFrame(self: *Compiler, label: ?[]const u8) !?*state.LoopFrame {
+    const fn_index = self.functions.items.len;
     if (label) |lbl| {
         var i: usize = self.loop_stack.items.len;
         while (i > 0) {
             i -= 1;
             const frame = &self.loop_stack.items[i];
+            if (frame.function_index != fn_index) continue;
             if (std.mem.eql(u8, frame.label orelse "", lbl)) return frame;
         }
         return null;
     }
-    if (self.loop_stack.items.len == 0) return null;
-    return &self.loop_stack.items[self.loop_stack.items.len - 1];
+    var i: usize = self.loop_stack.items.len;
+    while (i > 0) {
+        i -= 1;
+        const frame = &self.loop_stack.items[i];
+        if (frame.function_index == fn_index) return frame;
+    }
+    return null;
 }
 
 pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, label: ?[]const u8) !void {
