@@ -23,7 +23,8 @@ pub const all_specs: []const []const FnSpec = &.{
     @import("fs.zig").specs,
     @import("revo.zig").specs,
     @import("compress.zig").specs,
-    @import("regex.zig").specs,
+    if (@import("build_options").regex)
+        @import("regex.zig").specs,
 };
 
 /// look up a function by name across all spec tables.

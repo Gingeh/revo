@@ -42,6 +42,7 @@ const release_target_queries = blk: {
 const Features = packed struct {
     isocline: bool = false,
     lsp: bool = false,
+    regex: bool = false,
 
     fn isFull(self: Features) bool {
         const info = @typeInfo(Features).@"struct";
@@ -132,9 +133,9 @@ pub fn build(b: *Build) !void {
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
-    const features_str = b.option([]const u8, "features", "available: isocline, lsp") orelse
+    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex") orelse
         // isocline needs libc, lsp is untested on freestanding
-        if (is_freestanding) "" else "isocline,lsp";
+        if (is_freestanding) "" else "isocline,lsp,regex";
 
     const test_filters = b.option(
         []const []const u8,
@@ -155,6 +156,7 @@ pub fn build(b: *Build) !void {
     const debug_options = b.addOptions();
     debug_options.addOption(bool, "is_freestanding", is_freestanding);
     debug_options.addOption(bool, "isocline", features.isocline);
+    debug_options.addOption(bool, "regex", features.regex);
     debug_options.addOption([]const u8, "version", dev_version);
     debug_options.addOption(bool, "lsp_enabled", features.lsp);
     const debug_options_mod = debug_options.createModule();
@@ -165,6 +167,7 @@ pub fn build(b: *Build) !void {
     const release_options = b.addOptions();
     release_options.addOption(bool, "is_freestanding", is_freestanding);
     release_options.addOption(bool, "isocline", features.isocline);
+    release_options.addOption(bool, "regex", features.regex);
     release_options.addOption([]const u8, "version", VERSION);
     release_options.addOption(bool, "lsp_enabled", features.lsp);
     const release_options_mod = release_options.createModule();
@@ -251,17 +254,20 @@ pub fn build(b: *Build) !void {
         c_mod,   revolt_mod,
         exe_mod, erevo_mod.?,
     };
-    const mvzr_mod = b.createModule(.{
-        .root_source_file = mvzr_dep.path("src/mvzr.zig"),
-        .target = target,
-        .optimize = effective_optimize,
-    });
-    const imports = [_]Module.Import{
-        .{ .name = "revo", .module = revo_mod },
-        .{ .name = "vm", .module = vm_mod },
-        .{ .name = "c", .module = c_mod },
-        .{ .name = "mvzr", .module = mvzr_mod },
-    };
+    var import_list: std.ArrayListUnmanaged(Module.Import) = .empty;
+    defer import_list.deinit(b.allocator);
+    try import_list.append(b.allocator, .{ .name = "revo", .module = revo_mod });
+    try import_list.append(b.allocator, .{ .name = "vm", .module = vm_mod });
+    try import_list.append(b.allocator, .{ .name = "c", .module = c_mod });
+    if (features.regex) {
+        const mvzr_mod = b.createModule(.{
+            .root_source_file = mvzr_dep.path("src/mvzr.zig"),
+            .target = target,
+            .optimize = effective_optimize,
+        });
+        try import_list.append(b.allocator, .{ .name = "mvzr", .module = mvzr_mod });
+    }
+    const imports = try import_list.toOwnedSlice(b.allocator);
     const shared_build_options = if (optimize == .debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
         for (imports) |imp| {
