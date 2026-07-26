@@ -52,10 +52,19 @@ pub fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, c
     const lhs = VM.regRead(slots, base, instr.b);
     const rhs = VM.regRead(slots, base, instr.c);
 
+    // per IEEE 754 nan is unordered so all comparisons with NaN are false and neq is true
+    if (lhs.asNum()) |ln| {
+        if (rhs.asNum()) |rn| {
+            if (std.math.isNan(ln) or std.math.isNan(rn)) {
+                VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .neq));
+                return;
+            }
+        }
+    }
+
     if (comptime op == .eq or op == .neq) {
         // fast path: boxed values; identical bits = identity = equality
         // strings and tuples are value types, fall through to compare()
-        // numbers (including canonicalized NaN) also fall through to NaN-aware handling
         if ((lhs.bits & BOX_MASK) == BOX_MASK) {
             const tag = lhs.tag();
             if (tag != .string and tag != .tuple and tag != .number) {
@@ -75,16 +84,6 @@ pub fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, c
                 VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));
                 return;
             }
-        }
-    }
-
-    // per IEEE 754 nan is unordered so all comparisons with NaN are false and neq is true
-    if (lhs.tag() == .number and rhs.tag() == .number) {
-        const ln = lhs.asNum().?;
-        const rn = rhs.asNum().?;
-        if (std.math.isNan(ln) or std.math.isNan(rn)) {
-            VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .neq));
-            return;
         }
     }
 

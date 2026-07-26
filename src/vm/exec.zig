@@ -236,12 +236,8 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
 
             // number + number fast path
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
-                const l_str = try std.fmt.allocPrint(alloc, "{d}", .{ln});
-                defer alloc.free(l_str);
-                const r_str = try std.fmt.allocPrint(alloc, "{d}", .{rn});
-                defer alloc.free(r_str);
-                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
-                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+                const combined = try std.fmt.allocPrint(alloc, "{d}{d}", .{ ln, rn });
+                self.noteGCPressure(combined.len + @sizeOf(Data));
                 regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
@@ -263,11 +259,9 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
 
             // number + string fast path
             if (lhs.asNum()) |ln| if (rhs.asStr()) |rs| {
-                const l_str = try std.fmt.allocPrint(alloc, "{d}", .{ln});
-                defer alloc.free(l_str);
                 const r_str = self.stringValue(rs);
-                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
-                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+                const combined = try std.fmt.allocPrint(alloc, "{d}{s}", .{ ln, r_str });
+                self.noteGCPressure(combined.len + @sizeOf(Data));
                 regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;

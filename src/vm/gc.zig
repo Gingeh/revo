@@ -87,7 +87,16 @@ fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
 pub fn processMarkStack(self: *VM) void {
     while (self.gc_mark_stack.pop()) |item| {
         switch (item) {
-            .data => |data| markDataImpl(self, data),
+            .data => |data| {
+                switch (data.tag()) {
+                    .string => self.strings.mark(data.asString().?),
+                    .table => self.tables.mark(data.asTable().?, self),
+                    .tuple => self.tuples.mark(data.asTuple().?, self),
+                    .function => self.functions.mark(data.asFunction().?, self),
+                    .struct_val => self.struct_instances.mark(data.asStructVal().?, self),
+                    else => {},
+                }
+            },
             .table => |id| {
                 if (id >= self.tables.tables.items.len) continue;
 
@@ -229,29 +238,6 @@ pub inline fn pushMarkUpvalue(self: *VM, id: anytype) void {
 
 pub inline fn pushMarkStructInstance(self: *VM, id: anytype) void {
     self.gc_mark_stack.append(self.runtime.alloc, .{ .struct_instance = id }) catch @panic("OOM in GC marking");
-}
-
-pub inline fn markDataImpl(self: *VM, data: revo.Data) void {
-    switch (data.tag()) {
-        .string => self.strings.mark(data.asString().?),
-        .table => self.tables.mark(
-            data.asTable().?,
-            self,
-        ),
-        .tuple => self.tuples.mark(
-            data.asTuple().?,
-            self,
-        ),
-        .function => self.functions.mark(
-            data.asFunction().?,
-            self,
-        ),
-        .struct_val => self.struct_instances.mark(
-            data.asStructVal().?,
-            self,
-        ),
-        else => {},
-    }
 }
 
 pub fn markData(self: *VM, data: revo.Data) void {
