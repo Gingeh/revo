@@ -183,6 +183,7 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
     }
 
     // owned by backend after submit
+    if (job.buffer) |buf| vm.runtime.alloc.free(buf);
     vm.runtime.alloc.destroy(job);
 }
 
