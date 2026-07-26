@@ -87,7 +87,6 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
             const has_index = bx != 0;
             bc = .{ .op = op, .a = r, .b = r - 3, .c = if (has_index) r + 1 else 0, .bx = @as(u32, if (has_index) r + 2 else r + 1) };
         },
-        .range_for => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2, .bx = bxi },
         .unwrap_result => bc = .{ .op = op, .a = r, .bx = bxi },
     }
 

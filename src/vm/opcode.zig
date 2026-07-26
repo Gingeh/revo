@@ -108,16 +108,6 @@ pub const Opcode = enum(u8) {
     /// - advances current += step, index += 1 if has_next
     range_next,
 
-    /// loop counter for unrolled range iterations
-    ///
-    /// R[a] in/out: current
-    /// R[b] in:     step
-    /// R[c] in:     limit
-    /// bx   in:     max iterations to unroll
-    ///
-    /// advances current up to bx times, stops early if past limit
-    /// returns actual iterations completed in R[a]
-    range_for,
     /// R[a] is (:ok, x)? extract x into R[a]; or (:err, e)? ret; otherwise pass through
     /// bx = 0: propagate errors
     /// bx = 1: dont propagate

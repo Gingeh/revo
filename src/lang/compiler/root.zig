@@ -461,11 +461,6 @@ pub const Compiler = struct {
                 d += 3;
                 try self.recordStackOp(op, 1, 3, result_reg, op_arg);
             },
-            .range_for => {
-                std.debug.assert(d >= 3);
-                result_reg = try toRegister(d - 3);
-                try self.recordStackOp(op, 3, 0, result_reg, op_arg);
-            },
             .unwrap_result => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);

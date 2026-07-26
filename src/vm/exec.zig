@@ -1008,30 +1008,6 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        .range_for => {
-            const current_data = regRead(regs, base, instr.a);
-            var current = current_data.as_number() catch
-                return self.typeError("number for range current", current_data);
-            const step_data = regRead(regs, base, instr.b);
-            const step = step_data.as_number() catch
-                return self.typeError("number for range step", step_data);
-            const limit_data = regRead(regs, base, instr.c);
-            const limit = limit_data.as_number() catch
-                return self.typeError("number for range limit", limit_data);
-            const max_iter: f64 = @floatFromInt(instr.bx);
-
-            var i: f64 = 0;
-            while (i < max_iter) {
-                const done = (step > 0 and current > limit) or (step < 0 and current < limit);
-                if (done) break;
-                current += step;
-                i += 1;
-            }
-            regWrite(regs, base, instr.a, Data.new.num(current));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         .unwrap_result => {
             const val = regRead(regs, base, instr.a);
             const propagate_errors = instr.bx == 0;
