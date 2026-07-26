@@ -107,6 +107,14 @@ pub fn compileRangeLoopBody(
     var value_slot: ?LocalSlot = null;
     var index_slot: ?LocalSlot = null;
 
+    // slots don't overlap with temporaries from enclosing call/expressions
+    if (self.slot_allocators.items.len > 0) {
+        const idx = self.slot_allocators.items.len - 1;
+        if (self.slot_allocators.items[idx] < self.active_registers) {
+            self.slot_allocators.items[idx] = @intCast(self.active_registers);
+        }
+    }
+
     // declare before loop_check so range_next can fill them each iteration
     if (params.len >= 1 and !ast.isDiscardName(params[0].name)) {
         value_slot = try state.declareLocal(self, params[0].name, false);
