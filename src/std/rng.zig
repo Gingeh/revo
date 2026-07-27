@@ -9,7 +9,7 @@ const VM = revo.VM;
 const NativeResult = root.NativeResult;
 
 // Possibly change when multi-vm and multi-threading to prevent bad stuff from happening
-var seed: ?u64 = null;
+var prng: ?std.Random.DefaultPrng = null;
 
 pub const specs: []const api.FnSpec = &.{
     .{
@@ -75,7 +75,7 @@ pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {
     const raw_arg = args[0].asNum() orelse return .Err(vm, "err");
     const new_seed: u64 = @intFromFloat(raw_arg);
 
-    seed = new_seed;
+    prng = std.Random.DefaultPrng.init(new_seed);
 
     return .okData(Data.new.nil());
 }
@@ -84,7 +84,7 @@ pub fn revertSeed(args: []const Data, vm: *VM) !NativeResult {
     _ = args;
     _ = vm;
 
-    seed = null;
+    prng = null;
 
     return .okData(Data.new.nil());
 }
@@ -135,25 +135,24 @@ pub fn choice(args: []const Data, vm: *VM) !NativeResult {
 }
 
 fn randomNumber(comptime T: type, vm: *VM, lowerBound: T, upperBound: T) T {
-    const this_seed: u64 = seed orelse @intCast(std.Io.Clock.awake.now(vm.runtime.io).toNanoseconds());
-
-    var prng = std.Random.DefaultPrng.init(this_seed);
-    var random = prng.random();
-
-    switch (@typeInfo(T)) {
-        .int => {
-            const rand_result = random.intRangeAtMost(T, lowerBound, upperBound);
-
-            return rand_result;
-        },
-
-        .float => {
-            return random.float(T);
-        },
-
-        // gusic: At the moment `randomNumber` is only ever instantiated with `isize` and f64`.
-        else => unreachable,
+    if (prng) |*p| {
+        var random = p.random();
+        return switch (@typeInfo(T)) {
+            .int => random.intRangeAtMost(T, lowerBound, upperBound),
+            .float => random.float(T),
+            else => unreachable,
+        };
     }
+
+    const time_seed: u64 = @intCast(std.Io.Clock.awake.now(vm.runtime.io).toNanoseconds());
+    var temp_prng = std.Random.DefaultPrng.init(time_seed);
+    var random = temp_prng.random();
+    return switch (@typeInfo(T)) {
+        .int => random.intRangeAtMost(T, lowerBound, upperBound),
+        .float => return random.float(T),
+        // gusic: At the moment `randomNumber` is only ever instantiated with `isize/usize` and f64`.
+        else => unreachable,
+    };
 }
 
 test "getting random element from table" {
