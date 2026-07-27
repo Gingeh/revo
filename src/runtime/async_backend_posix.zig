@@ -155,10 +155,6 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
             } else {
                 try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
             }
-            // free buffer owned by backend
-            if (rec.job_ptr.*.buffer) |b_free| {
-                vm.runtime.alloc.free(b_free);
-            }
         },
 
         .socket_accept => {
@@ -204,20 +200,45 @@ fn drain_pipe(vm: *revo.VM, bs: *BackendState) !bool {
 
 fn poll_impl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bool {
     const vm: *revo.VM = @ptrCast(@alignCast(vm_ptr));
-    var woke_any = false;
-    var used_timeout = timeout_ms;
+    // the async backend owns the completion pipe, but socket recv/send
+    // waiters are still driven by std_net.pollIoWaiters. poll both sources in
+    // one cycle; blocking on the pipe alone strands a fiber parked in recv()
+    var poll_fds = try std.ArrayList(std.posix.pollfd).initCapacity(
+        vm.runtime.alloc,
+        1 + vm.sched.io_waiters.items.len,
+    );
+    defer poll_fds.deinit(vm.runtime.alloc);
 
-    var one = [_]std.posix.pollfd{
-        .{ .fd = bs.control_r, .events = std.posix.POLL.IN, .revents = 0 },
-    };
-    _ = try std.posix.poll(&one, timeout_ms);
-    if (one[0].revents != 0) {
-        const did = try drain_pipe(vm, bs);
-        woke_any = woke_any or did;
+    try poll_fds.append(vm.runtime.alloc, .{
+        .fd = bs.control_r,
+        .events = std.posix.POLL.IN,
+        .revents = 0,
+    });
+    for (vm.sched.io_waiters.items) |waiter| {
+        const events: i16 = switch (waiter.intent) {
+            .read => std.posix.POLL.IN,
+            .write => std.posix.POLL.OUT,
+            .read_write => std.posix.POLL.IN | std.posix.POLL.OUT,
+        };
+        try poll_fds.append(vm.runtime.alloc, .{
+            .fd = @as(std.posix.fd_t, @intCast(waiter.wait_id)),
+            .events = events,
+            .revents = 0,
+        });
     }
-    used_timeout = 0;
 
-    const io_woke = try revo.std_net.pollIoWaiters(vm, used_timeout);
+    _ = try std.posix.poll(poll_fds.items, timeout_ms);
+
+    var woke_any = false;
+    if (poll_fds.items[0].revents != 0) {
+        woke_any = try drain_pipe(vm, bs);
+    }
+
+    // readiness remains latched for the socket, so dispatch the socket poller
+    // without blocking again
+    //
+    // it also removes completed waiters safely
+    const io_woke = try revo.std_net.pollIoWaiters(vm, 0);
     return woke_any or io_woke;
 }
 

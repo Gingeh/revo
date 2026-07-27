@@ -401,11 +401,21 @@ pub fn wrapSocket(vm: *VM, entry_ptr: *SocketEntry, is_server: bool) !Data {
     var mt = try vm.tables.get(metatable);
     const socket_module_data = vm.globals.get(revo.core_atoms.socket.atom_id()) orelse
         return error.SocketModuleNotFound;
+
+    const socket_module = try vm.tables.get(socket_module_data.asTable().?);
+    const close_fn = socket_module.getRaw(try vm.dataAtom("close")) orelse
+        return error.SocketModuleNotFound;
+
     try mt.putRawAtom(revo.core_atoms.__index.atom_id(), socket_module_data);
 
     const mt_array = [_]Data{ Data.new.table(sock_table), Data.new.table(metatable) };
     const set_result = try meta.set_metatable_(&mt_array, vm);
     if (set_result != .ok) return error.SetMetatableFailed;
+
+    // socket handles own an os resource, keep the finalizer attached to the
+    // handle table so abandoned peers/listeners are closed during gc and vm
+    // shutdown, even when user code exits through an error path
+    try vm.registerFinalizer(sock_table, close_fn);
 
     return Data.new.table(sock_table);
 }
@@ -447,6 +457,7 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
     // zeroise so double close is nop rather than use-after-free
     var tbl = try vm.tables.get(socket_data.asTable().?);
     try tbl.putRawAtom(revo.core_atoms.__entry_ptr.atom_id(), Data.new.num(0));
+    vm.unregisterFinalizer(socket_data.asTable().?);
 }
 
 /// > net:connect(host: string, port: number) -> socket
@@ -466,7 +477,11 @@ fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
     }) catch |err| {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
     };
-    setSocketNonBlocking(stream.socket.handle) catch |err| return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+
+    setSocketNonBlocking(stream.socket.handle) catch |err| {
+        stream.close(vm.runtime.io);
+        return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+    };
 
     const entry_ptr = try vm.runtime.alloc.create(SocketEntry);
     entry_ptr.* = .{ .stream = .{ .socket = stream } };
@@ -484,7 +499,7 @@ fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
     };
 
-    const server = addr.listen(vm.runtime.io, .{
+    var server = addr.listen(vm.runtime.io, .{
         .mode = std.Io.net.Socket.Mode.stream,
         .protocol = std.Io.net.Protocol.tcp,
         .kernel_backlog = backlog,
@@ -493,7 +508,10 @@ fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
     };
 
-    setSocketNonBlocking(server.socket.handle) catch |err| return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+    setSocketNonBlocking(server.socket.handle) catch |err| {
+        std.Io.net.Server.deinit(&server, vm.runtime.io);
+        return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+    };
 
     const entry_ptr = try vm.runtime.alloc.create(SocketEntry);
     entry_ptr.* = .{ .server = server };
@@ -553,7 +571,10 @@ fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
         else => |err| return try root.resultTuple(vm, .err, try vm.dataAtom(@tagName(err))),
     }
     const handle: std.posix.fd_t = @intCast(rc);
-    setSocketNonBlocking(handle) catch |err| return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+    setSocketNonBlocking(handle) catch |err| {
+        _ = std.c.close(handle);
+        return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
+    };
     const new_entry_ptr = try vm.runtime.alloc.create(SocketEntry);
     new_entry_ptr.* = .{
         .stream = .{

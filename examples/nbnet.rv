@@ -6,12 +6,12 @@
 #   anything else is repeated back at the user
 
 fn serve(peer, counter) do
-  print!("new peer %v", peer)
+  print("new peer {peer}")
 
   while :true do
     # send a prompt; if the socket is not writable yet, this fiber parks here
     # and resumes after the runtime gets a writable event for this fd.
-    peer:send("$ ")
+    peer:send("$ ")?
 
     # wait for one full line; read_line keeps appending chunks until it sees "\n".
     match peer:recv({ mode = :read_line })
@@ -25,11 +25,12 @@ fn serve(peer, counter) do
     | (:ok, "ping") => do
         counter = counter + 1
         # send the current counter back to the client.
-        peer:send("pong " ~ string(counter) ~ "\n")?
+        peer:send("pong {counter}\n")?
     end
     | (:ok, line) => do
         # echo any other line back to the same peer.
-        peer:send(line + "\n")?
+        print("< {line:p}")
+        peer:send("{line}\n")?
     end
     | (:err, :SocketClosed) => do
       # the other side hung up, so just close our handle and stop this fiber.
@@ -37,7 +38,7 @@ fn serve(peer, counter) do
       return :nil
     end
     | (:err, reason) => do
-      print!("recv failed: %s \n", string(reason))
+      print("! recv failed: {reason:p} \n")
       # close here too: once recv fails, the socket is no longer useful.
       peer:close()?
       return :nil
@@ -47,7 +48,7 @@ end
 
 fn srv(port) do
   const server = net.listen(port)?
-  print!("serving on localhost:%d...", server.port)
+  print("serving on {'localhost:' ~ server.port:p}...")
 
   while :true do
     # accept the next connection; if none is ready, this fiber parks until the
