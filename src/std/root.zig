@@ -348,6 +348,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         api.all_specs ++ [_][]const api.FnSpec{ root_specs_os, regex_specs }
     else
         api.all_specs ++ [_][]const api.FnSpec{root_specs_os};
+
     try api.registerAll(vm, all, mtPrototype);
 
     try attachMathPi(vm);

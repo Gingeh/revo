@@ -1,7 +1,12 @@
+# editor things
+.vscode
+.zed
+
 zig-out
 # all dotfiles
 # .*
 *.so
+.revo_history
 # meta.rvo output from examples
 *.rvo
 .priv
