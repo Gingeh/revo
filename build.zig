@@ -427,7 +427,12 @@ pub fn build(b: *Build) !void {
             const rel_options = b.addOptions();
             rel_options.addOption(bool, "is_freestanding", release_is_fs);
             rel_options.addOption(bool, "isocline", release_isocline_enabled);
-            rel_options.addOption(bool, "regex", features.regex);
+            // TODO: regex compiles for freestanding, it isn't the issue here
+            rel_options.addOption(
+                bool,
+                "regex",
+                release_target.result.os.tag != .freestanding and features.regex,
+            );
             rel_options.addOption([]const u8, "version", VERSION);
             rel_options.addOption(bool, "lsp_enabled", release_lsp_enabled);
             const rel_options_mod = rel_options.createModule();
