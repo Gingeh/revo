@@ -93,15 +93,15 @@ pub const Data = struct {
     inline fn boxed(t: Type, val: usize) Data {
         if (val != std.math.maxInt(usize)) std.debug.assert(val <= PAYLOAD_MASK);
         const pl = @as(u64, @intCast(val)) & PAYLOAD_MASK;
-        return .{ .bits = BOX_MASK | (@as(u64, @backingInt(t)) << TAG_SHIFT) | pl };
+        return .{ .bits = BOX_MASK | (@as(u64, @intFromEnum(t)) << TAG_SHIFT) | pl };
     }
 
     pub inline fn tag(self: Data) Type {
         if (self.bits == CANONICAL_NAN) return .number;
         if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
         const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
-        if (raw > @backingInt(Type.foreign)) return .number;
-        return @fromBackingInt(@intCast(raw));
+        if (raw > @intFromEnum(Type.foreign)) return .number;
+        return @enumFromInt(raw);
     }
 
     pub inline fn is(self: Data, t: Type) bool {
@@ -136,7 +136,7 @@ pub const Data = struct {
     }
 
     pub inline fn asStr(self: Data) ?StringID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @backingInt(Type.string))
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.string))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }

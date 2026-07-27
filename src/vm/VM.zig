@@ -165,7 +165,7 @@ loading_stack: std.ArrayList([]const u8),
 
 /// matches type enum order
 metatables: [
-    @typeInfo(memory.Type).@"enum".field_names.len
+    @typeInfo(memory.Type).@"enum".fields.len
 ]?mem.TableID = @splat(null),
 module_cache: ModuleCache,
 package_path: std.ArrayList([]const u8),
@@ -525,7 +525,7 @@ pub inline fn writeRegisterUnsafe(self: *VM, slot: usize, value: Data) void {
 
 /// register read using a cached slots pointer (avoids currentFiber call)
 pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Data {
-    if (builtin.mode != .fast) {
+    if (builtin.mode != .ReleaseFast) {
         const slot = base + reg;
         if (slot >= slots.len)
             return revo.Data.new.core(.missing);
@@ -535,7 +535,7 @@ pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Da
 
 /// register write using a cached slots pointer (avoids currentFiber call)
 pub inline fn regWrite(slots: []Data, base: usize, reg: opcode.Register, value: Data) void {
-    if (builtin.mode != .fast) {
+    if (builtin.mode != .ReleaseFast) {
         const slot = base + reg;
         if (slot >= slots.len)
             @panic("register write out of bounds; this is a compiler bug, report at https://codeberg.org/lung/revo/issues");
@@ -1087,7 +1087,7 @@ pub fn getMetatableId(
                     break :blk mt_id;
             } else |_| {}
             break :blk self.metatables[
-                @backingInt(
+                @intFromEnum(
                     mem.Type.table,
                 )
             ];
@@ -1099,12 +1099,12 @@ pub fn getMetatableId(
                     break :blk mt_id;
             } else |_| {}
             break :blk self.metatables[
-                @backingInt(
+                @intFromEnum(
                     mem.Type.tuple,
                 )
             ];
         },
-        else => |e| self.metatables[@backingInt(e)],
+        else => |e| self.metatables[@intFromEnum(e)],
     };
 }
 
@@ -1131,7 +1131,7 @@ pub inline fn tableFast(
     self: *VM,
     id: mem.TableID,
 ) !*root.table.Table {
-    if (builtin.mode == .fast) {
+    if (builtin.mode == .ReleaseFast) {
         std.debug.assert(id < self.tables.tables.items.len);
         std.debug.assert(
             self.tables.tables.items[id] != null,
@@ -1145,7 +1145,7 @@ inline fn functionFast(
     self: *VM,
     id: mem.FunctionID,
 ) !*root.functions.Function {
-    if (builtin.mode == .fast) {
+    if (builtin.mode == .ReleaseFast) {
         std.debug.assert(
             id < self.functions.functions.items.len,
         );
@@ -1690,7 +1690,7 @@ fn structFieldValueMatches(
             false;
     }
     for (&[_]revo.core_atoms{ .num, .number, .int, .integer, .float }) |at| {
-        if (expected_atom == @backingInt(at))
+        if (expected_atom == @intFromEnum(at))
             return value.isNumber();
     }
     // some amount of work is done at compile-time to ignore complex types

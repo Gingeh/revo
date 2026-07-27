@@ -121,7 +121,7 @@ pub const TablePool = struct {
 pub const Table = struct {
     fn hashKey(key: Data) u64 {
         var h = std.hash.Wyhash.init(0);
-        h.update(&[_]u8{@intCast(@backingInt(key.tag()))});
+        h.update(&[_]u8{@intCast(@intFromEnum(key.tag()))});
         switch (key.tag()) {
             .number => {
                 const bits: u64 = key.rawBits();

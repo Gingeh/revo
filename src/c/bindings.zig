@@ -72,8 +72,7 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
 
     inline for (.{ "ffi.zig", "erevo.zig" }) |mod| {
         const source = @embedFile(mod);
-        const source_z = try allocator.allocSentinel(u8, source.len, 0);
-        @memcpy(source_z[0..source.len], source);
+        const source_z = try allocator.dupeSentinel(u8, source, 0);
         defer allocator.free(source_z);
 
         const category: Function.Category = if (std.mem.endsWith(u8, mod, "ffi.zig")) .revo else .erevo;
@@ -84,7 +83,7 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
     std.mem.sort(Function, functions.items, {}, struct {
         pub fn lessThan(_: void, a: Function, b: Function) bool {
             if (a.category != b.category) {
-                return @backingInt(a.category) < @backingInt(b.category);
+                return @intFromEnum(a.category) < @intFromEnum(b.category);
             }
             return std.mem.lessThan(u8, a.name, b.name);
         }
@@ -211,14 +210,14 @@ fn parseModuleForCallconvC(
     functions: *std.ArrayList(Function),
     category: Function.Category,
 ) !void {
-    var ast = try std.zig.Ast.parse(allocator, source, .{ .mode = .zig });
+    var ast = try std.zig.Ast.parse(allocator, source, .zig);
     defer ast.deinit(allocator);
 
     const root_declarations = ast.rootDecls();
     const nodes = ast.nodes;
 
     for (root_declarations) |decl_idx| {
-        const decl_idx_val = @backingInt(decl_idx);
+        const decl_idx_val = @intFromEnum(decl_idx);
         const decl_tag = nodes.items(.tag)[decl_idx_val];
 
         const is_function = switch (decl_tag) {

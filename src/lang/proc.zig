@@ -439,15 +439,15 @@ fn encodeExpr(allocator: std.mem.Allocator, node: *const Node, splices: []const 
     }
 
     const tag_name = @tagName(node.expr);
-    const info = comptime @typeInfo(Expr).@"union";
+    const info = @typeInfo(Expr).@"union";
 
-    inline for (info.field_names, info.field_types) |field_name, field_type| {
-        if (std.mem.eql(u8, field_name, tag_name)) {
+    inline for (info.fields) |field| {
+        if (std.mem.eql(u8, field.name, tag_name)) {
             const payload = try encodePayload(
                 allocator,
                 node.span,
-                field_type,
-                @field(node.expr, field_name),
+                field.type,
+                @field(node.expr, field.name),
                 splices,
             );
             var items = try std.ArrayList(*Node).initCapacity(allocator, payload.len + 1);
@@ -467,15 +467,14 @@ fn encodePayload(
     value: T,
     splices: []const []const u8,
 ) ExpandError![]*Node {
-    const ti = comptime @typeInfo(T);
+    const ti = @typeInfo(T);
     if (ti == .void) return try allocator.alloc(*Node, 0);
 
     if (ti == .@"struct") {
-        const st = ti.@"struct";
-        var out = try std.ArrayList(*Node).initCapacity(allocator, st.field_names.len);
+        var out = try std.ArrayList(*Node).initCapacity(allocator, ti.@"struct".fields.len);
         errdefer out.deinit(allocator);
-        inline for (st.field_names, st.field_types) |field_name, field_type| {
-            try out.append(allocator, try encodeValue(allocator, span, field_type, @field(value, field_name), splices));
+        inline for (ti.@"struct".fields) |field| {
+            try out.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name), splices));
         }
         return out.toOwnedSlice(allocator);
     }
@@ -526,12 +525,12 @@ fn encodeValue(
         .@"enum" => atomNode(allocator, span, @tagName(value)),
 
         .@"union" => |ui| {
-            inline for (ui.field_names, ui.field_types) |field_name, field_type| {
-                if (std.mem.eql(u8, field_name, @tagName(value))) {
-                    const payload = try encodePayload(allocator, span, field_type, @field(value, field_name), splices);
+            inline for (ui.fields) |field| {
+                if (std.mem.eql(u8, field.name, @tagName(value))) {
+                    const payload = try encodePayload(allocator, span, field.type, @field(value, field.name), splices);
                     var items = try std.ArrayList(*Node).initCapacity(allocator, payload.len + 1);
                     errdefer items.deinit(allocator);
-                    try items.append(allocator, try atomNode(allocator, span, field_name));
+                    try items.append(allocator, try atomNode(allocator, span, field.name));
                     for (payload) |item| try items.append(allocator, item);
                     return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
                 }
@@ -540,11 +539,10 @@ fn encodeValue(
         },
 
         .@"struct" => {
-            const st = ti.@"struct";
-            var items = try std.ArrayList(*Node).initCapacity(allocator, st.field_names.len);
+            var items = try std.ArrayList(*Node).initCapacity(allocator, ti.@"struct".fields.len);
             errdefer items.deinit(allocator);
-            inline for (st.field_names, st.field_types) |field_name, field_type| {
-                try items.append(allocator, try encodeValue(allocator, span, field_type, @field(value, field_name), splices));
+            inline for (ti.@"struct".fields) |field| {
+                try items.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name), splices));
             }
             return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
         },
@@ -573,13 +571,13 @@ fn decodeExprNode(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: 
         return ast.allocNode(allocator, span, .{ .number = .{ .value = value, .is_float = is_float } });
     }
 
-    const info = comptime @typeInfo(Expr).@"union";
-    inline for (info.field_names, info.field_types) |field_name, field_type| {
-        if (std.mem.eql(u8, field_name, tag)) {
+    const info = @typeInfo(Expr).@"union";
+    inline for (info.fields) |field| {
+        if (std.mem.eql(u8, field.name, tag)) {
             var idx: usize = 1;
-            const payload = try decodePayload(vm, allocator, span, field_type, tuple.items, &idx);
+            const payload = try decodePayload(vm, allocator, span, field.type, tuple.items, &idx);
             if (idx != tuple.items.len) return error.InvalidProcReturn;
-            return ast.allocNode(allocator, span, @unionInit(Expr, field_name, payload));
+            return ast.allocNode(allocator, span, @unionInit(Expr, field.name, payload));
         }
     }
     return error.InvalidProcReturn;
@@ -593,15 +591,14 @@ fn decodePayload(
     items: []const Data,
     idx: *usize,
 ) ExpandError!T {
-    const ti = comptime @typeInfo(T);
+    const ti = @typeInfo(T);
     if (ti == .void) return {};
 
     if (ti == .@"struct") {
-        const st = ti.@"struct";
         // SAFETY: all fields set by inline for loop below
         var out: T = undefined;
-        inline for (st.field_names, st.field_types) |field_name, field_type| {
-            @field(out, field_name) = try decodeValue(vm, allocator, span, field_type, items, idx);
+        inline for (ti.@"struct".fields) |field| {
+            @field(out, field.name) = try decodeValue(vm, allocator, span, field.type, items, idx);
         }
         return out;
     }
@@ -677,9 +674,9 @@ fn decodeValue(
                 .atom => vm.atomName(data.asAtom().?),
                 else => return error.InvalidProcReturn,
             };
-            const info = comptime @typeInfo(T).@"enum";
-            inline for (info.field_names, info.field_values) |field_name, field_value| {
-                if (std.mem.eql(u8, field_name, name)) return @fromBackingInt(@intCast(field_value));
+            const info = @typeInfo(T).@"enum";
+            inline for (info.fields) |field| {
+                if (std.mem.eql(u8, field.name, name)) return @enumFromInt(field.value);
             }
             return error.InvalidProcReturn;
         },
@@ -688,12 +685,12 @@ fn decodeValue(
             if (union_tuple.items.len == 0 or !union_tuple.items[0].isAtom()) return error.InvalidProcReturn;
             const union_tag = vm.atomName(union_tuple.items[0].asAtom().?);
 
-            inline for (un.field_names, un.field_types) |field_name, field_type| {
-                if (std.mem.eql(u8, field_name, union_tag)) {
+            inline for (un.fields) |field| {
+                if (std.mem.eql(u8, field.name, union_tag)) {
                     var union_idx: usize = 1;
-                    const union_payload = try decodePayload(vm, allocator, span, field_type, union_tuple.items, &union_idx);
+                    const union_payload = try decodePayload(vm, allocator, span, field.type, union_tuple.items, &union_idx);
                     if (union_idx != union_tuple.items.len) return error.InvalidProcReturn;
-                    return @unionInit(T, field_name, union_payload);
+                    return @unionInit(T, field.name, union_payload);
                 }
             }
             return error.InvalidProcReturn;
@@ -703,12 +700,12 @@ fn decodeValue(
             var struct_idx: usize = 0;
             // SAFETY: all fields set by inline for loop below
             var out: T = undefined;
-            inline for (st.field_names, st.field_types) |field_name, field_type| {
-                @field(out, field_name) = try decodeValue(
+            inline for (st.fields) |field| {
+                @field(out, field.name) = try decodeValue(
                     vm,
                     allocator,
                     span,
-                    field_type,
+                    field.type,
                     struct_tuple.items,
                     &struct_idx,
                 );

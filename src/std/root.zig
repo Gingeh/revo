@@ -1265,7 +1265,7 @@ pub const NativeResult = union(enum) {
         return .{ .ok = d };
     }
     pub fn okCa(a: revo.core_atoms) NativeResult {
-        return .{ .ok = Data.new.atom(@backingInt(a)) };
+        return .{ .ok = Data.new.atom(@intFromEnum(a)) };
     }
     pub fn other(message: []const u8) NativeResult {
         return .{ .err = .{ .other = message } };
@@ -1308,12 +1308,11 @@ pub fn defineStubVariadic(comptime types: []const TypeSpec) NativeFunc {
 
 // type utils
 pub fn typeUtils(vm: *VM) !void {
-    const type_enum = comptime @typeInfo(revo.memory.Type).@"enum";
-    inline for (type_enum.field_names) |field_name| {
+    inline for (@typeInfo(revo.memory.Type).@"enum".fields) |field| {
         const func = struct {
             fn is_of(args: []const Data, _: *VM) !NativeResult {
                 for (args) |arg| {
-                    if (arg.tag() != @field(revo.memory.Type, field_name)) {
+                    if (arg.tag() != @field(revo.memory.Type, field.name)) {
                         return .okBool(false);
                     }
                 }
@@ -1324,7 +1323,7 @@ pub fn typeUtils(vm: *VM) !void {
             &[1]TypeSpec{.any},
             func,
         ) });
-        const atom = try vm.internAtom(field_name ++ "?");
+        const atom = try vm.internAtom(field.name ++ "?");
         const val = Data.new.function(id);
         try vm.globals.put(atom, val);
         try vm.stdlib_globals.put(atom, val);

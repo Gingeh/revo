@@ -24,7 +24,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
                     return resolved;
                 }
             }
-            const type_mt_id = self.metatables[@backingInt(mem.Type.table)] orelse return null;
+            const type_mt_id = self.metatables[@intFromEnum(mem.Type.table)] orelse return null;
             return resolveViaMetatable(self, object, key, type_mt_id);
         },
         .tuple => {
@@ -56,7 +56,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
                 }
             }
 
-            const type_mt_id = self.metatables[@backingInt(mem.Type.tuple)] orelse return null;
+            const type_mt_id = self.metatables[@intFromEnum(mem.Type.tuple)] orelse return null;
             if (instance_mt_id != null and instance_mt_id.? == type_mt_id) return null;
             return resolveViaMetatable(self, object, key, type_mt_id);
         },
@@ -211,11 +211,11 @@ pub fn setMetatable(self: *VM, val: Data, mt: ?mem.TableID) !void {
             if (self.tuples.get(id)) |tuple_ref| {
                 tuple_ref.metatable = mt;
             } else |_| {
-                self.metatables[@backingInt(mem.Type.tuple)] = mt;
+                self.metatables[@intFromEnum(mem.Type.tuple)] = mt;
             }
         },
-        .number => self.metatables[@backingInt(mem.Type.number)] = mt,
-        else => self.metatables[@backingInt(val.tag())] = mt,
+        .number => self.metatables[@intFromEnum(mem.Type.number)] = mt,
+        else => self.metatables[@intFromEnum(val.tag())] = mt,
     }
 }
 
@@ -224,7 +224,7 @@ pub fn setTableMetatable(self: *VM, id: mem.TableID, mt: ?mem.TableID) !void {
         const tbl_ref = try self.tables.get(id);
         tbl_ref.metatable = mt;
     } else {
-        self.metatables[@backingInt(mem.Type.table)] = mt;
+        self.metatables[@intFromEnum(mem.Type.table)] = mt;
     }
 }
 

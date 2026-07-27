@@ -68,18 +68,15 @@ fn getFeatures(features: []const u8) Features {
     while (it.next()) |token| {
         if (emptyStr(token)) continue;
 
-        const features_info = comptime @typeInfo(Features).@"struct";
-        var matched = false;
-        inline for (features_info.field_names) |field_name| {
-            if (std.mem.eql(u8, token, field_name)) {
-                if (@field(ret, field_name)) {
+        inline for (@typeInfo(Features).@"struct".fields) |field| {
+            if (std.mem.eql(u8, token, field.name)) {
+                if (@field(ret, field.name)) {
                     std.log.warn("Duplicate feature: {s}", .{token});
                 }
-                @field(ret, field_name) = true;
-                matched = true;
+                @field(ret, field.name) = true;
+                break;
             }
-        }
-        if (!matched) std.log.warn("Unknown feature: {s}", .{token});
+        } else std.log.warn("Unknown feature: {s}", .{token});
     }
     return ret;
 }
@@ -129,7 +126,7 @@ pub fn build(b: *Build) !void {
     // botch: wasm64 has a codegen bug in Debug mode that causes "memory access out of
     // bounds" at runtime for some reason
     // force ReleaseSmall for ALL modules linked into the wasm binary, so the VM code gets the fix too
-    const effective_optimize = if (is_freestanding) .small else optimize;
+    const effective_optimize = if (is_freestanding) .ReleaseSmall else optimize;
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
@@ -268,7 +265,7 @@ pub fn build(b: *Build) !void {
         try import_list.append(b.allocator, .{ .name = "mvzr", .module = mvzr_mod });
     }
     const imports = try import_list.toOwnedSlice(b.allocator);
-    const shared_build_options = if (optimize == .debug) debug_options_mod else release_options_mod;
+    const shared_build_options = if (optimize == .Debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
         for (imports) |imp| {
             mod.addImport(imp.name, imp.module);
@@ -302,7 +299,7 @@ pub fn build(b: *Build) !void {
         const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
         const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod.? });
 
-        if (optimize == .debug) exe.lto = .none;
+        if (optimize == .Debug) exe.lto = .none;
         exe.rdynamic = true;
         if (builtin.os.tag == .linux and with_glibc) {
             exe.use_llvm = true;
@@ -329,7 +326,7 @@ pub fn build(b: *Build) !void {
         const run_step = b.step("run", "run the cli");
         {
             const run_exe = b.addRunArtifact(exe);
-            run_exe.addPassthruArgs();
+            run_exe.addArgs(b.args orelse &.{});
             run_step.dependOn(&run_exe.step);
         }
 
@@ -422,7 +419,7 @@ pub fn build(b: *Build) !void {
             const release_target = b.resolveTargetQuery(query);
             const release_is_fs = release_target.result.os.tag == .freestanding or
                 release_target.result.cpu.arch == .wasm64;
-            const release_optimize: std.builtin.OptimizeMode = if (release_is_fs) .small else .fast;
+            const release_optimize: std.builtin.OptimizeMode = if (release_is_fs) .ReleaseSmall else .ReleaseFast;
 
             const release_lsp_enabled = features.lsp and !release_is_fs;
             const release_isocline_enabled = features.isocline and !release_is_fs;

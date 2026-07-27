@@ -7,15 +7,16 @@ const VM = revo.VM;
 
 const isocline_c = if (builtin.link_libc) @import("isocline") else struct {};
 
-const signal_c = if (build_options.isocline and builtin.link_libc) struct {
-    pub const SIGINT = 2;
-    pub extern "c" fn signal(sig: c_int, handler: ?*const fn (c_int) callconv(.c) void) ?*const fn (c_int) callconv(.c) void;
-} else struct {};
+const signal_c = if (build_options.isocline and builtin.link_libc)
+    @cImport(@cInclude("signal.h"))
+else
+    struct {};
 
-const libc = if (builtin.link_libc) struct {
-    pub extern "c" fn getpid() c_int;
-    pub extern "c" fn strlen(s: [*:0]const u8) usize;
-} else struct {};
+const libc = if (builtin.link_libc) @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("string.h");
+    @cInclude("unistd.h");
+}) else struct {};
 
 const IsoclineContext = struct {
     vm: *VM,
@@ -95,9 +96,8 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
     const commands = &[_][]const u8{ ":q", ":quit", ":clear", ":features", ":h", ":help", ":doc", ":apropos", ":doctest" };
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, wslice)) {
-            const cmd_slice = std.fmt.bufPrint(&buf, "{s}", .{cmd}) catch continue;
-            buf[cmd_slice.len] = 0;
-            _ = isocline_c.ic_add_completion(cenv, buf[0..cmd_slice.len :0]);
+            const cmd_c = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch continue;
+            _ = isocline_c.ic_add_completion(cenv, cmd_c);
         }
     }
 
@@ -109,9 +109,8 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
     while (s_it.next()) |entry| {
         const name = vm.atomName(entry.key_ptr.*);
         if (std.mem.startsWith(u8, name, wslice)) {
-            const n_slice = std.fmt.bufPrint(&buf, "{s}", .{name}) catch continue;
-            buf[n_slice.len] = 0;
-            _ = isocline_c.ic_add_completion(cenv, buf[0..n_slice.len :0]);
+            const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
+            _ = isocline_c.ic_add_completion(cenv, n_c);
         }
     }
 
@@ -119,18 +118,16 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
     while (g_it.next()) |entry| {
         const name = vm.atomName(entry.key_ptr.*);
         if (std.mem.startsWith(u8, name, wslice)) {
-            const n_slice = std.fmt.bufPrint(&buf, "{s}", .{name}) catch continue;
-            buf[n_slice.len] = 0;
-            _ = isocline_c.ic_add_completion(cenv, buf[0..n_slice.len :0]);
+            const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
+            _ = isocline_c.ic_add_completion(cenv, n_c);
         }
     }
 
     // ...then keywords
     for (revo.lang.Lexer.TokenType.of_string.keys()) |kw| {
         if (std.mem.startsWith(u8, kw, wslice)) {
-            const kw_slice = std.fmt.bufPrint(&buf, "{s}", .{kw}) catch continue;
-            buf[kw_slice.len] = 0;
-            _ = isocline_c.ic_add_completion(cenv, buf[0..kw_slice.len :0]);
+            const kw_c = std.fmt.bufPrintZ(&buf, "{s}", .{kw}) catch continue;
+            _ = isocline_c.ic_add_completion(cenv, kw_c);
         }
     }
 }
@@ -479,12 +476,10 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
 
         var b: [512]u8 = undefined;
         const hist_path = if (std.c.getenv("HOME")) |p|
-            try std.fmt.bufPrint(&b, "{s}/.revo_history", .{std.mem.span(p)})
+            try std.fmt.bufPrintZ(&b, "{s}/.revo_history", .{std.mem.span(p)})
         else
-            try std.fmt.bufPrint(&b, ".revo_history", .{});
-        b[hist_path.len] = 0;
-        const hist_path_z = b[0..hist_path.len :0];
-        isocline_c.ic_set_history(hist_path_z.ptr, 1000);
+            try std.fmt.bufPrintZ(&b, ".revo_history", .{});
+        isocline_c.ic_set_history(hist_path.ptr, 1000);
 
         // lfeatures
         _ = isocline_c.ic_enable_color(true);
@@ -497,9 +492,8 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
         for (&[_][]const u8{ "keyword", "string", "number", "function", "hash" }) |s| {
             const def = revo.pretty.replStyleDef(s);
             var name_buf: [32]u8 = undefined;
-            const s_slice = try std.fmt.bufPrint(&name_buf, "{s}", .{s});
-            name_buf[s_slice.len] = 0;
-            _ = isocline_c.ic_style_def(name_buf[0..s_slice.len :0].ptr, def.ptr);
+            const s_c = try std.fmt.bufPrintZ(&name_buf, "{s}", .{s});
+            _ = isocline_c.ic_style_def(s_c.ptr, def.ptr);
         }
     }
 
