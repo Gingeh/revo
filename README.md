@@ -141,7 +141,7 @@ binary releases are not yet available
 
 i highly recommend using [anyzig](https://github.com/marler8997/anyzig)
 
-you will need [zig](https://ziglang.org/download) version `0.17.0-dev.1442+972627084` or later to build revo
+you will need [zig](https://ziglang.org/download) version `0.16.0` to build revo
 
 available on most package managers as `zig`
 
