@@ -30,22 +30,23 @@ const USAGE =
     \\  -h, --help       show this help message
     \\  --version        show version
 ++
-    if (lsp_enabled)
+    (if (lsp_enabled)
+        \\
         \\  --lsp            start the language server
     else
-        "" ++
-            \\
-            \\examples:
-            \\  revo                           start interactive REPL
-            \\  revo script.rv                 run script
-            \\  revo -e "1 + 2"                run inline code
-            \\  revo -e "1 + 2" -i             run inline code and enter REPL
-            \\  revo -b script.rv              compile script to bytecode
-            \\  revo -b -o output.rvo script   compile script with custom output path
-            \\  revo --bench script.rv         run with performance counters
-            \\  revo --dis script.rv           show bytecode disassembly
-            \\  revo --docs script.rv          print extracted docs without running code
-        ;
+        "") ++
+    \\
+    \\examples:
+    \\  revo                           start interactive REPL
+    \\  revo script.rv                 run script
+    \\  revo -e "1 + 2"                run inline code
+    \\  revo -e "1 + 2" -i             run inline code and enter REPL
+    \\  revo -b script.rv              compile script to bytecode
+    \\  revo -b -o output.rvo script   compile script with custom output path
+    \\  revo --bench script.rv         run with performance counters
+    \\  revo --dis script.rv           show bytecode disassembly
+    \\  revo --docs script.rv          print extracted docs without running code
+;
 
 const ExecutionMode = enum { run, bench, disassemble, compile, docs, lsp };
 
