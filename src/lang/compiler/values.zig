@@ -335,6 +335,9 @@ fn compileAssignSimple(
                 try self.compile(index.key, true);
                 try self.compile(value, true);
                 try self.emit(.table_set, 0);
+                try self.compile(index.object, true);
+                try self.compile(index.key, true);
+                try self.emit(.table_get, 0);
             }
         },
         else => {
