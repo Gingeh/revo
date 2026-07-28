@@ -258,7 +258,7 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
                 }
             }
             _ = try self.expect(.lbracket);
-            const key = try self.parseExpression(0);
+            const key = try self.parseBracketKey();
             const close = try self.expect(.rbracket);
             left = try self.allocExpr(Span.merge(left.span, close.span()), .{
                 .index = .{ .object = left, .key = key },
@@ -267,7 +267,7 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
         }
 
         // postfix: paren call `f(args)`; only if f allows it (ident, field, call, fn, index)
-        if (self.peek().type == .lparen and (exprAllowsParenCall(left) or self.isTightSuffix(left))) {
+        if (self.peek().type == .lparen and (exprAllowsParenCall(left) or self.tokenAdjacent(left.span.end))) {
             _ = try self.expect(.lparen);
             const args = try self.parseDelimitedExprList(.rparen);
             const close = try self.expect(.rparen);
@@ -474,7 +474,10 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_while => self.parseWhile(token),
         .kw_break => self.parseBreak(token),
         .kw_continue => self.parseContinue(token),
-        .kw_return => self.parseExitExpr(.return_expr, token),
+        .kw_return => blk: {
+            const value = try self.parseExpression(0);
+            break :blk try self.allocExpr(Span.merge(token.span(), value.span), .{ .return_expr = value });
+        },
         .kw_comp => self.parseComp(token),
         .kw_import => self.parseImport(token),
         .kw_spawn => self.parseSpawn(token),
@@ -829,7 +832,14 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
 
 fn parseOptionalLabel(self: *Parser) ?[]const u8 {
     if (self.match(.slash)) {
-        const ident = self.expectIdent() catch return null;
+        if (!self.tokenAdjacent(self.tokens[self.pos - 1].span().end)) {
+            self.pos -= 1;
+            return null;
+        }
+        const ident = self.expectIdent() catch {
+            self.pos -= 1;
+            return null;
+        };
         return ident.text;
     }
     return null;
@@ -866,27 +876,76 @@ fn parseFor(self: *Parser, start: Token) anyerror!*Node {
         try params.append(self.alloc, .{ .name = name.text });
     }
     _ = try self.expect(.kw_in);
-    const iter = try self.parseExpression(0);
+
+    const iter = try self.parseForRange();
     const body = try self.parseExpression(0);
     return self.allocExpr(Span.merge(start.span(), body.span), .{
         .for_loop = .{ .params = try params.toOwnedSlice(self.alloc), .iter = iter, .body = body, .label = label },
     });
 }
 
-/// return expr or break expr
-fn parseExitExpr(self: *Parser, comptime tag: std.meta.Tag(Expr), start: Token) anyerror!*Node {
-    const value = try self.parseOptionalTrailingExpr();
-    const span =
-        if (value) |expr| Span.merge(start.span(), expr.span) else start.span();
+/// range expr in a for-loop context
+///   ..5, 0.., 0..5, 0..2..10, 0..2..
+/// a missing end is represented as +inf so the vm never terminates on its own
+/// adjacency rule: `..` must touch the next token for it to be part of the range;
+/// a space after `..` means the range is open-ended and the next token starts the body
+fn parseForRange(self: *Parser) anyerror!*Node {
+    const zero = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = 0 } });
+    const one = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = 1 } });
 
-    return self.allocExpr(span, @unionInit(Expr, @tagName(tag), value));
+    if (self.check(.dotdot)) {
+        const tok = self.advance();
+        return self.parseForRangeEnd(zero, one, tok.span().end);
+    }
+
+    const prev_stop = self.stop_token;
+    self.stop_token = .dotdot;
+    const first = try self.parseExpression(0);
+    self.stop_token = prev_stop;
+
+    if (!self.match(.dotdot)) return first;
+
+    return self.parseForRangeEnd(first, one, self.tokens[self.pos - 1].span().end);
+}
+
+/// After `start..` (or `..` with synthesized start), check adjacency to decide
+/// whether the next token is the range end, the step (if followed by another `..`),
+/// or the loop body (open-ended range).
+fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end: usize) anyerror!*Node {
+    if (!self.tokenAdjacent(dotdot_end)) {
+        const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = std.math.inf(f64) } });
+        return self.buildRangeExpr(start, end, default_step);
+    }
+
+    const prev_stop = self.stop_token;
+    self.stop_token = .dotdot;
+    const expr = try self.parseExpression(0);
+    self.stop_token = prev_stop;
+
+    if (self.match(.dotdot)) {
+        const second_dd_end = self.tokens[self.pos - 1].span().end;
+        if (!self.tokenAdjacent(second_dd_end)) {
+            const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = std.math.inf(f64) } });
+            return self.buildRangeExpr(start, end, expr);
+        }
+        const end = try self.parseExpression(0);
+        return self.buildRangeExpr(start, end, expr);
+    }
+
+    const step = try self.allocExpr(expr.span, .{ .number = .{ .value = 1 } });
+    return self.buildRangeExpr(start, expr, step);
+}
+
+/// true when the next token immediately follows the given position (no whitespace gap)
+fn tokenAdjacent(self: *Parser, prev_end: usize) bool {
+    if (self.pos >= self.tokens.len) return false;
+    return self.peek().span().start == prev_end;
 }
 
 fn parseBreak(self: *Parser, start: Token) anyerror!*Node {
     const label = self.parseOptionalLabel();
-    const value = try self.parseOptionalTrailingExpr();
-    const span = if (value) |expr| Span.merge(start.span(), expr.span) else start.span();
-    return self.allocExpr(span, .{
+    const value = try self.parseExpression(0);
+    return self.allocExpr(Span.merge(start.span(), value.span), .{
         .break_expr = .{ .value = value, .label = label },
     });
 }
@@ -1439,10 +1498,51 @@ fn parseDelimitedExprList(self: *Parser, terminator: TokenType) anyerror![]*Node
     return items.toOwnedSlice(self.alloc);
 }
 
-/// optional trailing expr for return/break (expr or null)
-fn parseOptionalTrailingExpr(self: *Parser) anyerror!?*Node {
-    if (self.check(.kw_end) or self.check(.pipe) or self.check(.eof)) return null;
-    return self.parseExpression(0);
+/// Parse the key expression inside brackets, handling slice syntax with
+/// open bounds: [..], [..end], [start..], [start..end], [start..step..end].
+fn parseBracketKey(self: *Parser) anyerror!*Node {
+    if (self.peek().type == .dotdot) {
+        _ = self.advance();
+        return self.parseSliceRest(null, null);
+    }
+
+    const prev_stop = self.stop_token;
+    self.stop_token = .dotdot;
+    const first = try self.parseExpression(0);
+    self.stop_token = prev_stop;
+
+    if (self.match(.dotdot)) {
+        return self.parseSliceRest(first, null);
+    }
+    return first;
+}
+
+/// After consuming the first `..`, parse the remainder of a slice literal.
+/// `start` is null if omitted, `seen_step` is null if no step has been parsed yet.
+fn parseSliceRest(self: *Parser, start: ?*Node, seen_step: ?*Node) anyerror!*Node {
+    if (self.check(.rbracket)) {
+        return self.allocSliceExpr(start, seen_step, null);
+    }
+
+    const prev_stop = self.stop_token;
+    self.stop_token = .dotdot;
+    const expr = try self.parseExpression(BP.range);
+    self.stop_token = prev_stop;
+
+    if (self.match(.dotdot)) {
+        return self.parseSliceRest(start, expr);
+    }
+    return self.allocSliceExpr(start, seen_step, expr);
+}
+
+fn allocSliceExpr(self: *Parser, start: ?*Node, step: ?*Node, end: ?*Node) anyerror!*Node {
+    const span = Span.merge(
+        if (start) |s| s.span else self.peek().span(),
+        if (end) |e| e.span else self.peek().span(),
+    );
+    return self.allocExpr(span, .{
+        .slice_literal = .{ .start = start, .step = step, .end = end },
+    });
 }
 
 /// 0.. and 0..10 :== (:range, 0, 1, limit(int)) and (:range, 0, 1, 10)
@@ -1534,7 +1634,7 @@ fn isStatementBoundary(self: *Parser, left: *const Node) bool {
 
 fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bool {
     return switch (left.expr) {
-        .number => next == .lparen and !self.isTightSuffix(left),
+        .number => next == .lparen and !self.tokenAdjacent(left.span.end),
         .decl => expr_start_tokens.get(next),
         .assign_expr, .return_expr, .break_expr, .continue_expr, .labeled_block => expr_start_tokens.get(next),
         .call => call_stmt_boundary_tokens.get(next),
@@ -1548,7 +1648,7 @@ fn canContinueExpression(self: *Parser, left: *const Node) bool {
     if (t == .plus_assign or t == .minus_assign or t == .star_assign or t == .slash_assign or t == .percent_assign) return true;
     if (logical_binding_table.get(t) != null) return true;
     if (infix_binding_table.get(t) != null) return true;
-    if (t == .lparen and (exprAllowsParenCall(left) or self.isTightSuffix(left))) return true;
+    if (t == .lparen and (exprAllowsParenCall(left) or self.tokenAdjacent(left.span.end))) return true;
     if (t == .hash and self.peekAt(1).type == .lparen) return true;
     if (self.allow_bare_calls and exprAllowsBareCall(left)) return bare_call_arg_start_tokens.get(t);
     return false;
@@ -1573,10 +1673,6 @@ fn looksLikeTupleAssignStart(self: *Parser) bool {
         } else if (t == .eof) return false;
     }
     return false;
-}
-
-fn isTightSuffix(self: *Parser, left: *const Node) bool {
-    return left.span.end == self.peek().start;
 }
 
 /// alloc node and set span+expr

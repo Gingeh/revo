@@ -378,7 +378,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .comp_block => |cb| inferExprType(ctx, cb.expr),
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
-        .range_literal => .int,
+        .range_literal, .slice_literal => .int,
         .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .any,
         .struct_def => |def| .{ .struct_type = def.name },
     };
@@ -440,6 +440,13 @@ pub fn inferTupleType(ctx: anytype, items: []const *ast.Node) TypeInfo {
 }
 
 pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Node) TypeInfo {
+    if (key.expr == .range_literal or key.expr == .slice_literal) {
+        return switch (inferExprType(ctx, object)) {
+            .string => .string,
+            .tuple => |items| .{ .tuple = items },
+            else => .any,
+        };
+    }
     return switch (inferExprType(ctx, object)) {
         .tuple => |items| if (key.expr == .number) blk: {
             const key_num = key.expr.number.value;
@@ -1045,6 +1052,100 @@ test "string indexing returns string" {
         \\ let s: string = "hello"
         \\ s[0]
     , "h");
+}
+
+test "string slicing uses half-open range bounds" {
+    try t.top_string(
+        \\ let s: string = "hello"
+        \\ s[1..4]
+    , "ell");
+}
+
+test "stepped string slicing" {
+    try t.top_string(
+        \\ let s: string = "abcdef"
+        \\ s[5..-1..1]
+    , "fedc");
+}
+
+test "tuple slicing returns a tuple" {
+    try t.top_number(
+        \\ let t = (10, 20, 30, 40)
+        \\ t[1..3][1]
+    , 30);
+}
+
+//
+// open-bound slicing
+//
+test "string slice open start [..n]" {
+    try t.top_string(
+        \\ let s: string = "hello"
+        \\ s[..4]
+    , "hell");
+}
+
+test "string slice open end [n..]" {
+    try t.top_string(
+        \\ let s: string = "hello"
+        \\ s[2..]
+    , "llo");
+}
+
+test "string slice open both [..]" {
+    try t.top_string(
+        \\ let s: string = "hello"
+        \\ s[..]
+    , "hello");
+}
+
+test "tuple slice open start [..n]" {
+    try t.top_number(
+        \\ let t = (10, 20, 30, 40)
+        \\ t[..3][1]
+    , 20);
+}
+
+test "tuple slice open end [n..]" {
+    try t.top_number(
+        \\ let t = (10, 20, 30, 40)
+        \\ t[2..][0]
+    , 30);
+}
+
+test "tuple slice open both [..]" {
+    try t.top_number(
+        \\ let t = (10, 20, 30, 40)
+        \\ len(t[..])
+    , 4);
+}
+
+test "string slice open step [n..step..m]" {
+    try t.top_string(
+        \\ let s: string = "abcdef"
+        \\ s[0..2..5]
+    , "ace");
+}
+
+test "tuple slice open negative step [n..-step..m]" {
+    try t.top_number(
+        \\ let t = (1, 2, 3, 4, 5)
+        \\ t[4..-2..0][0]
+    , 5);
+}
+
+test "string slice empty result" {
+    try t.top_string(
+        \\ let s: string = "abc"
+        \\ s[2..2]
+    , "");
+}
+
+test "tuple slice empty result" {
+    try t.top_number(
+        \\ let t = (1, 2, 3)
+        \\ len(t[2..2])
+    , 0);
 }
 
 //

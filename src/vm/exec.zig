@@ -595,6 +595,78 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
+        .slice => {
+            const object = regRead(regs, base, instr.b);
+            const start_value = regRead(regs, base, instr.b + 1);
+            const step_value = regRead(regs, base, instr.b + 2);
+            const end_value = regRead(regs, base, instr.b + 3);
+
+            const nil_atom = revo.core_atoms.atom_id(.nil);
+
+            const step_num = if (step_value.asAtom() == nil_atom)
+                @as(f64, 1)
+            else
+                step_value.asNum() orelse return self.typeError("number for slice step", step_value);
+
+            const source_len: isize = switch (object.tag()) {
+                .string => @intCast(self.stringValue(object.asString().?).len),
+                .tuple => @intCast((try self.tuples.get(object.asTuple().?)).items.len),
+                else => return self.typeError("string or tuple for slice", object),
+            };
+
+            const start_num = if (start_value.asAtom() == nil_atom)
+                if (step_num > 0) @as(f64, 0) else @as(f64, @floatFromInt(source_len - 1))
+            else
+                start_value.asNum() orelse return self.typeError("number for slice start", start_value);
+
+            const end_num = if (end_value.asAtom() == nil_atom)
+                if (step_num > 0) @as(f64, @floatFromInt(source_len)) else @as(f64, -1)
+            else
+                end_value.asNum() orelse return self.typeError("number for slice end", end_value);
+
+            if (!std.math.isFinite(start_num) or !std.math.isFinite(step_num) or !std.math.isFinite(end_num) or
+                @floor(start_num) != start_num or @floor(step_num) != step_num or @floor(end_num) != end_num or
+                step_num == 0)
+                return self.fail(error.TypeError, "slice bounds must be finite integers with a non-zero step", .{});
+
+            switch (object.tag()) {
+                .string => {
+                    const source = self.stringValue(object.asString().?);
+                    const start: isize = @intFromFloat(start_num);
+                    const step: isize = @intFromFloat(step_num);
+                    const end: isize = @intFromFloat(end_num);
+                    var out = std.ArrayList(u8).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
+                    defer out.deinit(self.runtime.alloc);
+                    var i = start;
+                    while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
+                        if (i < 0 or @as(usize, @intCast(i)) >= source.len)
+                            return self.fail(error.TypeError, "string slice index out of range", .{});
+                        try out.append(self.runtime.alloc, source[@intCast(i)]);
+                    }
+                    const data = try self.adoptDataString(try out.toOwnedSlice(self.runtime.alloc));
+                    regWrite(regs, base, instr.a, data);
+                },
+                .tuple => {
+                    const tuple = try self.tuples.get(object.asTuple().?);
+                    const start: isize = @intFromFloat(start_num);
+                    const step: isize = @intFromFloat(step_num);
+                    const end: isize = @intFromFloat(end_num);
+                    var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
+                    defer out.deinit(self.runtime.alloc);
+                    var i = start;
+                    while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
+                        if (i < 0 or @as(usize, @intCast(i)) >= tuple.items.len)
+                            return self.fail(error.TypeError, "tuple slice index out of range", .{});
+                        try out.append(self.runtime.alloc, tuple.items[@intCast(i)]);
+                    }
+                    regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(out.items)));
+                },
+                else => return self.typeError("string or tuple for slice", object),
+            }
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
         .table_set_atom => {
             const table_value = regRead(regs, base, instr.a);
             if (try self.setStructField(table_value, instr.bx, regRead(regs, base, instr.c))) {

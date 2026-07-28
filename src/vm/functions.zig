@@ -422,7 +422,7 @@ test "functions return exactly one value" {
     , 41);
     try t.top_nil(
         \\ const f = fn() do
-        \\     return
+        \\     return :nil
         \\ end
         \\ f()
     );

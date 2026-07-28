@@ -67,6 +67,7 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
         .tuple_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .table_set => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
+        .slice => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .table_set_atom, .struct_set_offset => bc = .{ .op = op, .a = r, .c = r + 1, .bx = bxi },
         .struct_set_method => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get_atom, .tuple_get_const, .struct_get_offset => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },

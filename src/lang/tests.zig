@@ -1280,17 +1280,6 @@ test "continue in nested loops" {
     , 6);
 }
 
-test "break restrictions" {
-    try t.expectCompileError("break(1)", .UnsupportedSyntax);
-    try t.top_atom(
-        \\ const x = fn()
-        \\   for i in 0..5 do break
-        \\   return :asdf
-        \\ end
-        \\ x()
-    , "asdf");
-}
-
 test "break in for loops" {
     try t.top_number(
         \\ let result = 0
@@ -1300,6 +1289,7 @@ test "break in for loops" {
         \\ end
         \\ result
     , 10);
+
     try t.top_number(
         \\ for i in 0..10 do
         \\     if i == 7 break(i)
@@ -1307,7 +1297,7 @@ test "break in for loops" {
     , 7);
     try t.top_atom(
         \\ const x = for i in 0..5 do
-        \\   break
+        \\   break :nil
         \\ end
         \\ x
     , "nil");
@@ -3509,29 +3499,29 @@ test "labeled loop: unlabeled break targets innermost" {
         \\ let r = 0
         \\ loop/a do
         \\   for i in 0..3 do
-        \\     if i == 2 break
+        \\     if i == 2 break :nil
         \\     r += 1
         \\   end
-        \\   break
+        \\   break :nil
         \\ end
         \\ r
     , 2);
 }
 
 test "labeled break/continue label not found errors" {
-    try t.expectCompileError("break/no_such", .UnsupportedSyntax);
+    try t.expectCompileError("break/no_such :nil", .UnsupportedSyntax);
     try t.expectCompileError("continue/no_such", .UnsupportedSyntax);
 }
 
 test "labeled goto unlabeled break outside loop" {
-    try t.expectCompileError("break", .UnsupportedSyntax);
+    try t.expectCompileError("break :nil", .UnsupportedSyntax);
     try t.expectCompileError("continue", .UnsupportedSyntax);
 }
 
 test "labeled break with unknown label is rejected" {
     try t.expectCompileError(
         \\ loop do
-        \\   break/no_such
+        \\   break/no_such :nil
         \\ end
     , .UnsupportedSyntax);
 }

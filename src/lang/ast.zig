@@ -296,10 +296,13 @@ pub const Expr = union(enum) {
     return_expr: ?*Node,
     range_literal: struct {
         start: *Node,
-        step: *Node, // TODO: actual steps
+        step: *Node,
         end: *Node,
-        // TODO: ...< for exclusive. but prolly not
-        // inclusive: bool = true,
+    },
+    slice_literal: struct {
+        start: ?*Node,
+        step: ?*Node,
+        end: ?*Node,
     },
     import_stmt: struct { name: []const u8, path: []const u8, pub_: bool = false },
     macro_expr: struct { name: []const u8, pattern: []const u8, template: []const u8 },
@@ -371,6 +374,13 @@ pub const Node = struct {
                 try r.step.print(writer);
                 try writer.writeAll(" ");
                 try r.end.print(writer);
+                try writer.writeAll(")");
+            },
+            .slice_literal => |s| {
+                try writer.writeAll("(slice");
+                if (s.start) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
+                if (s.step) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
+                if (s.end) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
                 try writer.writeAll(")");
             },
             .unary => |u| {
@@ -1245,6 +1255,11 @@ pub fn walkExpr(
             .start = try ctx.walk(allocator, v.start, ctx),
             .step = try ctx.walk(allocator, v.step, ctx),
             .end = try ctx.walk(allocator, v.end, ctx),
+        } }),
+        .slice_literal => |v| allocNode(allocator, expr.span, .{ .slice_literal = .{
+            .start = if (v.start) |n| try ctx.walk(allocator, n, ctx) else null,
+            .step = if (v.step) |n| try ctx.walk(allocator, n, ctx) else null,
+            .end = if (v.end) |n| try ctx.walk(allocator, n, ctx) else null,
         } }),
         .try_expr => |v| allocNode(allocator, expr.span, .{
             .try_expr = try ctx.walk(allocator, v, ctx),

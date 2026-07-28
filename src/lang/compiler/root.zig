@@ -406,6 +406,12 @@ pub const Compiler = struct {
                 d -= 1;
                 try self.recordStackOp(op, 2, 1, result_reg, 0);
             },
+            .slice => {
+                std.debug.assert(d >= 4);
+                result_reg = try toRegister(d - 4);
+                d -= 3;
+                try self.recordStackOp(op, 4, 1, result_reg, 0);
+            },
             .table_set_atom, .struct_set_offset => {
                 std.debug.assert(d >= 2);
                 result_reg = try toRegister(d - 2);
@@ -658,7 +664,19 @@ pub const Compiler = struct {
             },
             .index => |index| {
                 try self.compile(index.object, true);
-                if (index.key.expr == .hash) try self.emit(
+                if (index.key.expr == .range_literal) {
+                    const range = index.key.expr.range_literal;
+                    try self.compile(range.start, true);
+                    try self.compile(range.step, true);
+                    try self.compile(range.end, true);
+                    try self.emit(.slice, 0);
+                } else if (index.key.expr == .slice_literal) {
+                    const slice = index.key.expr.slice_literal;
+                    if (slice.start) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                    if (slice.step) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                    if (slice.end) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                    try self.emit(.slice, 0);
+                } else if (index.key.expr == .hash) try self.emit(
                     .table_get_atom,
                     try self.vm.internAtom(index.key.expr.hash),
                 ) else if (state_mod.constTupleIndex(self, index)) |idx| try self.emit(
@@ -768,6 +786,11 @@ pub const Compiler = struct {
                 .UnsupportedSyntax,
                 expr,
                 "range literals only go in forloops for now",
+            ),
+            .slice_literal => return self.fail(
+                .UnsupportedSyntax,
+                expr,
+                "slice literals only appear inside index expressions",
             ),
             .try_expr => |expr_ptr| {
                 try self.compile(expr_ptr, true);

@@ -422,6 +422,12 @@ const SemanticChecker = struct {
                 _ = try self.analyzeNode(v.end);
                 break :blk types_mod.inferExprType(self, node);
             },
+            .slice_literal => |v| blk: {
+                if (v.start) |s| _ = try self.analyzeNode(s);
+                if (v.step) |s| _ = try self.analyzeNode(s);
+                if (v.end) |e| _ = try self.analyzeNode(e);
+                break :blk types_mod.inferExprType(self, node);
+            },
             .comp_block => |v| blk: {
                 const t = try self.analyzeNode(v.expr);
                 break :blk t;
