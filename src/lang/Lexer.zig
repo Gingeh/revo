@@ -102,6 +102,18 @@ pub const TokenType = enum {
     comment,
     eof,
 
+    pub fn classify(self: TokenType) ?TokenClass {
+        return switch (self) {
+            .number => .number,
+            .string, .multiline_string, .backtick_string => .string,
+            .hash => .enum_member,
+            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
+            .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
+            .comment => .comment,
+            .ident, .eof => null,
+        };
+    }
+
     // i think this does perfect hash but prolly not
     pub const of_string = std.StaticStringMap(TokenType).initComptime(.{
         .{ "const", .kw_const },
@@ -222,19 +234,6 @@ pub const TokenClass = enum {
     enum_member,
     comment,
 };
-
-/// map token type to its semantic class; returns null for .ident
-pub fn classifyToken(token_type: TokenType) ?TokenClass {
-    return switch (token_type) {
-        .number => .number,
-        .string, .multiline_string, .backtick_string => .string,
-        .hash => .enum_member,
-        .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
-        .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
-        .comment => .comment,
-        .ident, .eof => null,
-    };
-}
 
 /// check if an ident token at `pos` (byte offset right after the ident) is a function call
 pub fn identIsFunction(text: []const u8, pos: usize) bool {

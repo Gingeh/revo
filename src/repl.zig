@@ -160,7 +160,7 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
 
         if (tstart > last) fb.appendSlice(alloc, input_slice[last..tstart]) catch {};
 
-        const style: ?[]const u8 = if (revo.lang.classifyToken(tok.type)) |cls|
+        const style: ?[]const u8 = if (tok.type.classify()) |cls|
             switch (cls) {
                 .variable => null,
                 .enum_member => "hash",
