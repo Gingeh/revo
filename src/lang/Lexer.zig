@@ -99,6 +99,7 @@ pub const TokenType = enum {
     rbracket,
     lsquiggly,
     rsquiggly,
+    comment,
     eof,
 
     // i think this does perfect hash but prolly not
@@ -219,6 +220,7 @@ pub const TokenClass = enum {
     variable,
     operator,
     enum_member,
+    comment,
 };
 
 /// map token type to its semantic class; returns null for .ident
@@ -229,6 +231,7 @@ pub fn classifyToken(token_type: TokenType) ?TokenClass {
         .hash => .enum_member,
         .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
         .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
+        .comment => .comment,
         .ident, .eof => null,
     };
 }
@@ -299,12 +302,7 @@ fn next(self: *Lexer) !Token {
             continue;
         }
         if (c == '#') {
-            if (self.peekN(1) == '#') {
-                try self.skipMultilineComment();
-                continue;
-            }
-            while (!self.atEnd() and self.peek() != '\n') _ = self.advance();
-            continue;
+            return try self.lexComment();
         }
         break;
     }
@@ -458,27 +456,6 @@ fn matchTripleQuote(self: *Lexer) bool {
     _ = self.advance();
     _ = self.advance();
     return true;
-}
-
-fn skipMultilineComment(self: *Lexer) !void {
-    self.pending_error_span = .{
-        .start = self.pos,
-        .end = self.pos + 2,
-        .line = self.line,
-        .column = self.column,
-    };
-    _ = self.advance();
-    _ = self.advance();
-    while (!self.atEnd()) {
-        if (self.peek() == '#' and self.peekN(1) == '#') {
-            _ = self.advance();
-            _ = self.advance();
-            self.pending_error_span = null;
-            return;
-        }
-        _ = self.advance();
-    }
-    return error.UnterminatedComment;
 }
 
 fn lexComment(self: *Lexer) !Token {
@@ -1089,7 +1066,7 @@ test "lexes function block with multiline string and table" {
     });
 }
 
-test "lexes comments as whitespace including multiline comments" {
+test "lexes comments" {
     try t.expectTypes(
         \\do # line comment
         \\    ## comment
@@ -1099,6 +1076,8 @@ test "lexes comments as whitespace including multiline comments" {
         \\end
     , &.{
         .kw_do,
+        .comment,
+        .comment,
         .kw_let,
         .ident,
         .assign,

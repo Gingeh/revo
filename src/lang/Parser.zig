@@ -1579,14 +1579,29 @@ fn advance(self: *Parser) Token {
     return token;
 }
 
-/// peek current token without consuming
+/// peek current token without consuming; skips comment tokens
 fn peek(self: *Parser) Token {
+    while (self.pos < self.tokens.len and self.tokens[self.pos].type == .comment) {
+        self.pos += 1;
+    }
     return self.tokens[@min(self.pos, self.tokens.len - 1)];
 }
 
-/// peek token at offset without consuming
+/// peek token at offset without consuming; skips comment tokens
 fn peekAt(self: *Parser, offset: usize) Token {
-    return self.tokens[@min(self.pos + offset, self.tokens.len - 1)];
+    var p = self.pos;
+    while (p < self.tokens.len and self.tokens[p].type == .comment) {
+        p += 1;
+    }
+    var i: usize = 0;
+    while (i < offset) {
+        p += 1;
+        while (p < self.tokens.len and self.tokens[p].type == .comment) {
+            p += 1;
+        }
+        i += 1;
+    }
+    return self.tokens[@min(p, self.tokens.len - 1)];
 }
 
 /// peek identifier and check text match

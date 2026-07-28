@@ -405,13 +405,15 @@ test "hash starts comments only" {
     try t.expectTypes(
         \\do
         \\    # whole line comment
-        \\    let x = 1 # trailing comment
+        \\    let x = ## block comment ## 1
         \\end
     , &.{
         .kw_do,
+        .comment,
         .kw_let,
         .ident,
         .assign,
+        .comment,
         .number,
         .kw_end,
         .eof,
