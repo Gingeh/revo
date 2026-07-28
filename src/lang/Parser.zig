@@ -887,7 +887,7 @@ fn parseFor(self: *Parser, start: Token) anyerror!*Node {
 
 /// range expr in a for-loop context
 ///   ..5, 0.., 0..5, 0..2..10, 0..2..
-/// a missing end is represented as +inf so the vm never terminates on its own
+/// a missing end is represented as +/-inf so the vm never terminates on its own
 /// adjacency rule: `..` must touch the next token for it to be part of the range;
 /// a space after `..` means the range is open-ended and the next token starts the body
 fn parseForRange(self: *Parser) anyerror!*Node {
@@ -916,7 +916,7 @@ fn parseForRange(self: *Parser) anyerror!*Node {
 /// or the loop body (open-ended range).
 fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end: usize) anyerror!*Node {
     if (!self.tokenAdjacent(dotdot_end)) {
-        const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = std.math.inf(f64) } });
+        const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = sentinelForStep(default_step) } });
         return self.buildRangeExpr(start, end, default_step);
     }
 
@@ -930,7 +930,7 @@ fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end
     if (self.match(.dotdot)) {
         const second_dd_end = self.tokens[self.pos - 1].span().end;
         if (!self.tokenAdjacent(second_dd_end)) {
-            const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = std.math.inf(f64) } });
+            const end = try self.allocExpr(self.peek().span(), .{ .number = .{ .value = sentinelForStep(expr) } });
             return self.buildRangeExpr(start, end, expr);
         }
         const end = try self.parseExpression(0);
@@ -939,6 +939,17 @@ fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end
 
     const step = try self.allocExpr(expr.span, .{ .number = .{ .value = 1 } });
     return self.buildRangeExpr(start, expr, step);
+}
+
+/// +inf for positive step, -inf for negative step (so range_next never terminates)
+fn sentinelForStep(step: *const Node) f64 {
+    const val = switch (step.expr) {
+        .number => step.expr.number.value,
+        .unary => |u| if (u.op == .negate and u.expr.expr == .number) -u.expr.expr.number.value else return std.math.inf(f64),
+        else => return std.math.inf(f64),
+    };
+    if (val < 0) return -std.math.inf(f64);
+    return std.math.inf(f64);
 }
 
 /// true when the next token immediately follows the given position (no whitespace gap)
