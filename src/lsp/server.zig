@@ -127,6 +127,23 @@ const Handler = struct {
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
             },
+            .semanticTokensProvider = .{ .semantic_tokens_options = .{
+                .legend = .{
+                    .tokenTypes = &.{
+                        "keyword",
+                        "string",
+                        "number",
+                        "function",
+                        "variable",
+                        "operator",
+                        "enumMember",
+                        "comment",
+                    },
+                    .tokenModifiers = &.{},
+                },
+                .range = .{ .bool = false },
+                .full = .{ .bool = true },
+            } },
         };
         // sanity check in debug builds
         if (builtin.mode == .Debug) {
@@ -398,6 +415,54 @@ const Handler = struct {
             }, .{});
         }
     }
+
+    /// highlighting
+    pub fn @"textDocument/semanticTokens/full"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.semantic_tokens.Params,
+    ) !?T.semantic_tokens.Result {
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const source = snap.text;
+
+        const lexed = try lang.lexReport(arena, source);
+        const tokens = switch (lexed) {
+            .ok => |t| t,
+            .err => return null,
+        };
+
+        var data = try std.ArrayList(u32).initCapacity(arena, tokens.len * 5);
+
+        var prev_line: u32 = 0;
+        var prev_col: u32 = 0;
+
+        for (tokens) |tok| {
+            if (tok.type == .eof) break;
+
+            const type_idx = if (tok.type == .ident)
+                if (lang.identIsFunction(source, tok.end)) SEMANTIC_TOKEN_FUNCTION else SEMANTIC_TOKEN_VARIABLE
+            else
+                @intFromEnum(lang.classifyToken(tok.type) orelse continue);
+
+            const tok_line = tok.line - 1;
+            const tok_col = tok.column - 1;
+            const delta_line = tok_line - prev_line;
+            const delta_col = if (delta_line > 0) tok_col else tok_col - prev_col;
+            const length = tok.end - tok.start;
+
+            data.appendAssumeCapacity(delta_line);
+            data.appendAssumeCapacity(delta_col);
+            data.appendAssumeCapacity(@intCast(length));
+            data.appendAssumeCapacity(type_idx);
+            data.appendAssumeCapacity(0);
+
+            prev_line = tok_line;
+            prev_col = tok_col;
+        }
+
+        return T.semantic_tokens.Result{ .data = try data.toOwnedSlice(arena) };
+    }
 };
 
 //
@@ -498,3 +563,14 @@ fn symbolKindToLsp(kind: Workspace.SymbolKind) T.SymbolKind {
         .type_alias => .Class,
     };
 }
+
+// -- [semantic token] --------------------------------------------------------
+
+const SEMANTIC_TOKEN_KEYWORD: u32 = 0;
+const SEMANTIC_TOKEN_STRING: u32 = 1;
+const SEMANTIC_TOKEN_NUMBER: u32 = 2;
+const SEMANTIC_TOKEN_FUNCTION: u32 = 3;
+const SEMANTIC_TOKEN_VARIABLE: u32 = 4;
+const SEMANTIC_TOKEN_OPERATOR: u32 = 5;
+const SEMANTIC_TOKEN_ENUM_MEMBER: u32 = 6;
+const SEMANTIC_TOKEN_COMMENT: u32 = 7;

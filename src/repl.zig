@@ -160,20 +160,16 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
 
         if (tstart > last) fb.appendSlice(alloc, input_slice[last..tstart]) catch {};
 
-        var style: ?[]const u8 = switch (tok.type) {
-            .number => "number",
-            .string, .multiline_string, .backtick_string => "string",
-            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse => "keyword",
-            .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => "operator",
-            .hash => "hash",
-            else => null,
-        };
-
-        if (style == null and tok.type == .ident) {
-            var pos = tend;
-            while (pos < input_slice.len and std.ascii.isWhitespace(input_slice[pos])) pos += 1;
-            if (pos < input_slice.len and input_slice[pos] == '(') style = "function";
-        }
+        const style: ?[]const u8 = if (revo.lang.classifyToken(tok.type)) |cls|
+            switch (cls) {
+                .variable => null,
+                .enum_member => "hash",
+                else => |e| @tagName(e),
+            }
+        else if (tok.type == .ident and revo.lang.Lexer.identIsFunction(input_slice, tok.end))
+            "function"
+        else
+            null;
 
         if (style) |s| {
             fb.appendSlice(alloc, "[") catch {};

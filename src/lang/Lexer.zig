@@ -191,6 +191,7 @@ pub const testing = struct {
             _ = i;
         }
     }
+
     pub fn expectTypes(source: []const u8, expected: []const TokenType) !void {
         const tokens = try lex(std.testing.allocator, source);
         defer {
@@ -208,6 +209,36 @@ pub const testing = struct {
         }
     }
 };
+
+// for syntax highlighting
+pub const TokenClass = enum {
+    keyword,
+    string,
+    number,
+    function,
+    variable,
+    operator,
+    enum_member,
+};
+
+/// map token type to its semantic class; returns null for .ident
+pub fn classifyToken(token_type: TokenType) ?TokenClass {
+    return switch (token_type) {
+        .number => .number,
+        .string, .multiline_string, .backtick_string => .string,
+        .hash => .enum_member,
+        .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
+        .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
+        .ident, .eof => null,
+    };
+}
+
+/// check if an ident token at `pos` (byte offset right after the ident) is a function call
+pub fn identIsFunction(text: []const u8, pos: usize) bool {
+    var i = pos;
+    while (i < text.len and std.ascii.isWhitespace(text[i])) i += 1;
+    return i < text.len and text[i] == '(';
+}
 
 // tokenize source into a flat array (errors kill to death)
 pub fn lex(allocator: std.mem.Allocator, source: []const u8) ![]Token {
@@ -256,7 +287,7 @@ column: u32 = 1,
 line_start: bool = true, // at start of line (for indent-sensitive tokens)
 pending_error_span: ?ast.Span = null, // saved for error recovery
 
-fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
+pub fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
     return .{ .source = source, .alloc = alloc };
 }
 
@@ -448,6 +479,34 @@ fn skipMultilineComment(self: *Lexer) !void {
         _ = self.advance();
     }
     return error.UnterminatedComment;
+}
+
+fn lexComment(self: *Lexer) !Token {
+    const start = self.pos;
+    const line = self.line;
+    const column = self.column;
+    _ = self.advance(); // consume first #
+    if (self.peek() == '#') {
+        _ = self.advance(); // consume second #
+        self.pending_error_span = .{
+            .start = start,
+            .end = self.pos,
+            .line = line,
+            .column = column,
+        };
+        while (!self.atEnd()) {
+            if (self.peek() == '#' and self.peekN(1) == '#') {
+                _ = self.advance();
+                _ = self.advance();
+                self.pending_error_span = null;
+                return self.makeToken(.comment, start, self.pos, line, column);
+            }
+            _ = self.advance();
+        }
+        return error.UnterminatedComment;
+    }
+    while (!self.atEnd() and self.peek() != '\n') _ = self.advance();
+    return self.makeToken(.comment, start, self.pos, line, column);
 }
 
 fn lexHash(self: *Lexer, start: usize, line: u32, column: u32) !Token {

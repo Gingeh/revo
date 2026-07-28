@@ -70,6 +70,9 @@ pub const TokenType = Lexer.TokenType;
 pub const LexError = Lexer.LexError;
 pub const LexResult = Lexer.LexResult;
 pub const Project = @import("Project.zig").Project;
+pub const TokenClass = Lexer.TokenClass;
+pub const classifyToken = Lexer.classifyToken;
+pub const identIsFunction = Lexer.identIsFunction;
 
 test {
     _ = @import("ast.zig");
