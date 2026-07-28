@@ -378,9 +378,18 @@ pub const Node = struct {
             },
             .slice_literal => |s| {
                 try writer.writeAll("(slice");
-                if (s.start) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
-                if (s.step) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
-                if (s.end) |n| { try writer.writeByte(' '); try n.print(writer); } else try writer.writeAll(" _");
+                if (s.start) |n| {
+                    try writer.writeByte(' ');
+                    try n.print(writer);
+                } else try writer.writeAll(" _");
+                if (s.step) |n| {
+                    try writer.writeByte(' ');
+                    try n.print(writer);
+                } else try writer.writeAll(" _");
+                if (s.end) |n| {
+                    try writer.writeByte(' ');
+                    try n.print(writer);
+                } else try writer.writeAll(" _");
                 try writer.writeAll(")");
             },
             .unary => |u| {

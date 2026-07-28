@@ -240,19 +240,12 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
                 }
                 if (is_type_args) {
                     _ = try self.expect(.lbracket);
-                    var type_args = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
-                    defer type_args.deinit(self.alloc);
-                    while (!self.check(.rbracket)) {
-                        const tp = try self.expectIdent();
-                        try type_args.append(self.alloc, tp.text);
-                        if (!self.match(.comma)) break;
-                    }
-                    _ = try self.expect(.rbracket);
+                    const type_args = try self.parseTypeParamList();
                     _ = try self.expect(.lparen);
                     const args = try self.parseDelimitedExprList(.rparen);
                     const close = try self.expect(.rparen);
                     left = try self.allocExpr(Span.merge(left.span, close.span()), .{
-                        .call = .{ .callee = left, .args = args, .type_args = try type_args.toOwnedSlice(self.alloc) },
+                        .call = .{ .callee = left, .args = args, .type_args = type_args },
                     });
                     continue;
                 }
@@ -480,9 +473,11 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         },
         .kw_comp => self.parseComp(token),
         .kw_import => self.parseImport(token),
-        .kw_spawn => self.parseSpawn(token),
-        .kw_join => self.parseJoin(token),
-        .kw_yield => self.parseYield(token),
+        .kw_spawn => self.parseUnary(.spawn, 60, token),
+        .kw_join => self.parseUnary(.join, 60, token),
+        .kw_yield => blk: {
+            break :blk self.allocExpr(token.span(), .{ .unary = .{ .op = .yield, .expr = try self.allocExpr(token.span(), .nil) } });
+        },
         .lsquiggly => self.parseTable(token),
         .kw_type => {
             if (self.check(.ident)) return self.parseDecl(token);
@@ -607,20 +602,7 @@ fn parseFnWithBodyMin(self: *Parser, start: Token, body_min_bp: u8) anyerror!*No
             });
         }
 
-        // `fn name[T, U, ...](params) body`
-        // `fn name(params) body`
-        // parse optional [T, U] type parameters
-        const type_params = if (self.match(.lbracket)) blk: {
-            var tps = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
-            errdefer tps.deinit(self.alloc);
-            while (!self.check(.rbracket)) {
-                const tp = try self.expectIdent();
-                try tps.append(self.alloc, tp.text);
-                if (!self.match(.comma)) break;
-            }
-            _ = try self.expect(.rbracket);
-            break :blk try tps.toOwnedSlice(self.alloc);
-        } else &.{};
+        const type_params = if (self.match(.lbracket)) try self.parseTypeParamList() else &.{};
 
         if (self.check(.lparen)) {
             _ = try self.expect(.lparen);
@@ -722,15 +704,6 @@ fn parseMatchArm(self: *Parser) anyerror!ast.MatchArm {
 }
 
 /// type Name = TypeExpr
-fn parseTypeAlias(self: *Parser, start: Token) anyerror!*Node {
-    const name = try self.expectIdent();
-    _ = try self.expect(.assign);
-    const type_expr = try self.parseTypeExpr();
-    return self.allocExpr(Span.merge(start.span(), type_expr.span), .{
-        .type_alias = .{ .name = name.text, .type_expr = type_expr },
-    });
-}
-
 fn parseTypeExpr(self: *Parser) anyerror!*ast.TypeExpr {
     return try type_parser.parse(self.tokens, &self.pos, self.alloc);
 }
@@ -813,18 +786,46 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
             const struct_def = try self.parseStruct(start);
             return self.allocExpr(start.span(), .{ .decl = .{ .inner = struct_def, .kind = ast.DeclKind.struct_decl } });
         },
-        .kw_test => {
-            const test_block = try self.parseTest(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = test_block, .kind = ast.DeclKind.test_decl } });
+        .kw_test => blk: {
+            var skip = false;
+            if (self.match(.slash)) {
+                if (self.check(.kw_skip)) {
+                    skip = true;
+                    _ = self.advance();
+                } else return error.UnexpectedToken;
+            }
+            const name = try self.expect(.string);
+            const body_start = try self.expect(.kw_do);
+            const body = try self.parseBlock(body_start);
+            const body_fn = try self.allocExpr(Span.merge(body_start.span(), body.span), .{
+                .fn_expr = .{ .params = &.{}, .body = body },
+            });
+            const node = try self.allocExpr(Span.merge(start.span(), body.span), .{
+                .test_block = .{ .name = name.text, .body = body_fn, .skip = skip },
+            });
+            break :blk self.allocExpr(start.span(), .{ .decl = .{ .inner = node, .kind = ast.DeclKind.test_decl } });
         },
-        .kw_suite => {
-            const suite = try self.parseSuite(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = suite, .kind = ast.DeclKind.suite_decl } });
+        .kw_suite => blk: {
+            const name = try self.expect(.string);
+            const body_start = try self.expect(.kw_do);
+            const body = try self.parseBlock(body_start);
+            const body_fn = try self.allocExpr(Span.merge(body_start.span(), body.span), .{
+                .fn_expr = .{ .params = &.{}, .body = body },
+            });
+            const node = try self.allocExpr(Span.merge(start.span(), body.span), .{
+                .test_suite = .{ .name = name.text, .body = body_fn },
+            });
+            break :blk self.allocExpr(start.span(), .{ .decl = .{ .inner = node, .kind = ast.DeclKind.suite_decl } });
         },
-        .kw_type => {
+        .kw_type => blk: {
             if (!self.check(.ident)) return error.UnexpectedToken;
-            const type_alias = try self.parseTypeAlias(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = type_alias, .kind = ast.DeclKind.type_alias_decl } });
+            const name = try self.expectIdent();
+            _ = try self.expect(.assign);
+            const type_expr = try self.parseTypeExpr();
+            const node = try self.allocExpr(Span.merge(start.span(), type_expr.span), .{
+                .type_alias = .{ .name = name.text, .type_expr = type_expr },
+            });
+            break :blk self.allocExpr(start.span(), .{ .decl = .{ .inner = node, .kind = ast.DeclKind.type_alias_decl } });
         },
         else => return error.UnexpectedToken,
     };
@@ -898,10 +899,12 @@ fn parseForRange(self: *Parser) anyerror!*Node {
         return self.parseForRangeEnd(zero, one, tok.span().end);
     }
 
-    const prev_stop = self.stop_token;
-    self.stop_token = .dotdot;
-    const first = try self.parseExpression(0);
-    self.stop_token = prev_stop;
+    const first = scope: {
+        const prev_stop = self.stop_token;
+        self.stop_token = .dotdot;
+        defer self.stop_token = prev_stop;
+        break :scope try self.parseExpression(0);
+    };
 
     if (!self.match(.dotdot)) return first;
 
@@ -917,10 +920,12 @@ fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end
         return self.buildRangeExpr(start, end, default_step);
     }
 
-    const prev_stop = self.stop_token;
-    self.stop_token = .dotdot;
-    const expr = try self.parseExpression(0);
-    self.stop_token = prev_stop;
+    const expr = scope: {
+        const prev_stop = self.stop_token;
+        self.stop_token = .dotdot;
+        defer self.stop_token = prev_stop;
+        break :scope try self.parseExpression(0);
+    };
 
     if (self.match(.dotdot)) {
         const second_dd_end = self.tokens[self.pos - 1].span().end;
@@ -1043,32 +1048,6 @@ fn parseImport(self: *Parser, start: Token) anyerror!*Node {
         );
     }
 }
-/// spawn expr
-fn parseSpawn(self: *Parser, start: Token) anyerror!*Node {
-    const value = try self.parseExpression(60);
-    return self.allocExpr(
-        Span.merge(start.span(), value.span),
-        .{ .unary = .{ .op = .spawn, .expr = value } },
-    );
-}
-
-/// join expr
-fn parseJoin(self: *Parser, start: Token) anyerror!*Node {
-    const value = try self.parseExpression(60);
-    return self.allocExpr(
-        Span.merge(start.span(), value.span),
-        .{ .unary = .{ .op = .join, .expr = value } },
-    );
-}
-
-/// yield (no expression)
-fn parseYield(self: *Parser, start: Token) anyerror!*Node {
-    return self.allocExpr(
-        start.span(),
-        .{ .unary = .{ .op = .yield, .expr = try self.allocExpr(start.span(), .nil) } },
-    );
-}
-
 /// quasiquote `(expr with %splices)`
 fn parseQuasiquote(self: *Parser, token: Token) anyerror!*Node {
     const raw = token.text;
@@ -1145,42 +1124,6 @@ fn parseProc(self: *Parser, start: Token) anyerror!*Node {
     }
     // neither colon, dot, nor lparen
     return error.UnexpectedToken;
-}
-
-/// test "name" do expr end
-/// test.skip "name" do expr end
-fn parseTest(self: *Parser, start: Token) anyerror!*Node {
-    var skip = false;
-    if (self.match(.slash)) {
-        if (self.check(.kw_skip)) {
-            skip = true;
-            _ = self.advance();
-        } else return error.UnexpectedToken;
-    }
-    const name = try self.expect(.string);
-    const body_start = try self.expect(.kw_do);
-    const body = try self.parseBlock(body_start);
-    const body_fn = try self.allocExpr(Span.merge(body_start.span(), body.span), .{
-        .fn_expr = .{ .params = &.{}, .body = body },
-    });
-    return self.allocExpr(Span.merge(start.span(), body.span), .{
-        .test_block = .{ .name = name.text, .body = body_fn, .skip = skip },
-    });
-}
-
-/// suite "name" do ... end
-fn parseSuite(self: *Parser, start: Token) anyerror!*Node {
-    const name = try self.expect(.string);
-    const body_start = try self.expect(.kw_do);
-    const body = try self.parseBlock(body_start);
-
-    // wrap suite body in a closure
-    const suite_fn = try self.allocExpr(Span.merge(body_start.span(), body.span), .{
-        .fn_expr = .{ .params = &.{}, .body = body },
-    });
-    return self.allocExpr(Span.merge(start.span(), body.span), .{
-        .test_suite = .{ .name = name.text, .body = suite_fn },
-    });
 }
 
 fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
@@ -1506,10 +1449,12 @@ fn parseBracketKey(self: *Parser) anyerror!*Node {
         return self.parseSliceRest(null, null);
     }
 
-    const prev_stop = self.stop_token;
-    self.stop_token = .dotdot;
-    const first = try self.parseExpression(0);
-    self.stop_token = prev_stop;
+    const first = scope: {
+        const prev_stop = self.stop_token;
+        self.stop_token = .dotdot;
+        defer self.stop_token = prev_stop;
+        break :scope try self.parseExpression(0);
+    };
 
     if (self.match(.dotdot)) {
         return self.parseSliceRest(first, null);
@@ -1524,15 +1469,29 @@ fn parseSliceRest(self: *Parser, start: ?*Node, seen_step: ?*Node) anyerror!*Nod
         return self.allocSliceExpr(start, seen_step, null);
     }
 
-    const prev_stop = self.stop_token;
-    self.stop_token = .dotdot;
-    const expr = try self.parseExpression(BP.range);
-    self.stop_token = prev_stop;
+    const expr = scope: {
+        const prev_stop = self.stop_token;
+        self.stop_token = .dotdot;
+        defer self.stop_token = prev_stop;
+        break :scope try self.parseExpression(BP.range);
+    };
 
     if (self.match(.dotdot)) {
         return self.parseSliceRest(start, expr);
     }
     return self.allocSliceExpr(start, seen_step, expr);
+}
+
+fn parseTypeParamList(self: *Parser) ![]const []const u8 {
+    var tps = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
+    errdefer tps.deinit(self.alloc);
+    while (!self.check(.rbracket)) {
+        const tp = try self.expectIdent();
+        try tps.append(self.alloc, tp.text);
+        if (!self.match(.comma)) break;
+    }
+    _ = try self.expect(.rbracket);
+    return tps.toOwnedSlice(self.alloc);
 }
 
 fn allocSliceExpr(self: *Parser, start: ?*Node, step: ?*Node, end: ?*Node) anyerror!*Node {
