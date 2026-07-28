@@ -440,13 +440,23 @@ const Handler = struct {
         // try parser-based role map for more accurate highlighting
         const ast_map = buildASTSpanMap(arena, source);
 
-        var data = try std.ArrayList(u32).initCapacity(arena, tokens.len * 5);
+        var cap: usize = tokens.len * 5;
+        for (tokens) |t| {
+            if (t.interp_opens.len > 0)
+                cap += t.interp_opens.len * 40;
+        }
+        var data = try std.ArrayList(u32).initCapacity(arena, cap);
 
         var prev_line: u32 = 0;
         var prev_col: u32 = 0;
 
         for (tokens) |tok| {
             if (tok.type == .eof) break;
+
+            if (tok.interp_opens.len > 0 and (tok.type == .string or tok.type == .multiline_string)) {
+                try emitInterpolatedStringTokens(arena, source, tok, &data, &prev_line, &prev_col);
+                continue;
+            }
 
             const ctfr = switch (tok.type) {
                 .ident => if (lang.identIsFunction(source, tok.end)) tc(.function) else tc(.variable),
@@ -484,6 +494,147 @@ const Handler = struct {
 
 fn tc(cls: lang.TokenClass) u32 {
     return @intFromEnum(cls);
+}
+
+fn interpEnd(source: []const u8, start: usize, bound: usize) ?usize {
+    var depth: usize = 1;
+    var quote: u8 = 0;
+    var escaped = false;
+    var i = start + 1;
+    while (i < bound) : (i += 1) {
+        const c = source[i];
+        if (quote != 0) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == quote) {
+                quote = 0;
+            }
+            continue;
+        }
+        if (c == '"' or c == '\'' or c == '`') {
+            quote = c;
+        } else if (c == '{') {
+            depth += 1;
+        } else if (c == '}') {
+            depth -= 1;
+            if (depth == 0) return i;
+        }
+    }
+    return null;
+}
+
+fn emitSemanticToken(
+    data: *std.ArrayList(u32),
+    prev_line: *u32,
+    prev_col: *u32,
+    start: usize,
+    end: usize,
+    type_idx: u32,
+    source: []const u8,
+) void {
+    var line: u32 = 0;
+    var col: u32 = 0;
+    for (source[0..start]) |c| {
+        if (c == '\n') {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    const dl = line - prev_line.*;
+    const dc = if (dl > 0) col else col - prev_col.*;
+    data.appendAssumeCapacity(dl);
+    data.appendAssumeCapacity(dc);
+    data.appendAssumeCapacity(@intCast(end - start));
+    data.appendAssumeCapacity(type_idx);
+    data.appendAssumeCapacity(0);
+    prev_line.* = line;
+    prev_col.* = col;
+}
+
+fn emitInterpolatedStringTokens(
+    arena: std.mem.Allocator,
+    source: []const u8,
+    tok: lang.Token,
+    data: *std.ArrayList(u32),
+    prev_line: *u32,
+    prev_col: *u32,
+) !void {
+    const inner_off: usize = if (tok.type == .multiline_string) 3 else 1;
+    const inner_start = tok.start + inner_off;
+    const inner_end = tok.end - inner_off;
+
+    if (inner_start >= inner_end) return;
+
+    var literal_start: usize = inner_start;
+    var open_idx: usize = 0;
+
+    while (open_idx < tok.interp_opens.len) {
+        const open = tok.interp_opens[open_idx];
+        open_idx += 1;
+
+        if (open < literal_start) continue;
+
+        // emit literal string part before this {
+        if (open > literal_start) {
+            emitSemanticToken(data, prev_line, prev_col, literal_start, open, tc(.string), source);
+        }
+
+        // emit { as operator
+        emitSemanticToken(data, prev_line, prev_col, open, open + 1, tc(.operator), source);
+
+        // find matching }
+        const close = interpEnd(source, open, inner_end) orelse {
+            literal_start = open + 1;
+            continue;
+        };
+
+        // emit expression body tokens
+        if (close > open + 1) {
+            try emitSubTokens(arena, source, open + 1, close, data, prev_line, prev_col);
+        }
+
+        // emit } as operator
+        emitSemanticToken(data, prev_line, prev_col, close, close + 1, tc(.operator), source);
+
+        literal_start = close + 1;
+    }
+
+    // remaining literal string part
+    if (inner_end > literal_start) {
+        emitSemanticToken(data, prev_line, prev_col, literal_start, inner_end, tc(.string), source);
+    }
+}
+
+fn emitSubTokens(
+    arena: std.mem.Allocator,
+    source: []const u8,
+    body_start: usize,
+    body_end: usize,
+    data: *std.ArrayList(u32),
+    prev_line: *u32,
+    prev_col: *u32,
+) !void {
+    const body = source[body_start..body_end];
+    const lexed = lang.lexReport(arena, body) catch return;
+    const sub_tokens = switch (lexed) {
+        .ok => |t| t,
+        .err => return,
+    };
+
+    for (sub_tokens) |st| {
+        if (st.type == .eof) break;
+        const ctfr = switch (st.type) {
+            .ident => if (lang.identIsFunction(body, st.end)) tc(.function) else tc(.variable),
+            else => @intFromEnum(st.type.classify() orelse .variable),
+        };
+        const start = body_start + st.start;
+        const end = body_start + st.end;
+        emitSemanticToken(data, prev_line, prev_col, start, end, ctfr, source);
+    }
 }
 
 /// walk ast to build a map of byte offset -> semantic token type for tokens

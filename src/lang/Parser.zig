@@ -440,11 +440,11 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
                 try self.recordError(.InvalidNumber, "number over 2^48 (281474976710655)", token.span());
             break :blk self.allocExpr(token.span(), .{ .number = .{ .value = value, .is_float = is_float } });
         },
-        .string => if (token.has_interpolation)
+        .string => if (token.interp_opens.len > 0)
             self.parseInterpolatedString(token)
         else
             self.allocExpr(token.span(), .{ .string = token.text }),
-        .multiline_string => if (token.has_interpolation)
+        .multiline_string => if (token.interp_opens.len > 0)
             self.parseInterpolatedString(token)
         else
             self.allocExpr(token.span(), .{ .multiline_string = token.text }),

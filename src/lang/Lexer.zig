@@ -157,7 +157,7 @@ pub const TokenType = enum {
 pub const Token = struct {
     type: TokenType,
     text: []const u8,
-    has_interpolation: bool = false,
+    interp_opens: []const usize = &.{},
     line: u32,
     column: u32,
     start: usize,
@@ -174,6 +174,11 @@ pub const Token = struct {
     }
 };
 
+pub fn freeTokenStrings(alloc: std.mem.Allocator, tok: Token) void {
+    alloc.free(tok.text);
+    alloc.free(tok.interp_opens);
+}
+
 pub const testing = struct {
     pub const ExpectedToken = struct {
         t: TokenType,
@@ -186,7 +191,7 @@ pub const testing = struct {
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
-                    std.testing.allocator.free(tok.text);
+                    freeTokenStrings(std.testing.allocator, tok);
                 }
             }
             std.testing.allocator.free(tokens);
@@ -199,7 +204,7 @@ pub const testing = struct {
                 try std.testing.expectEqualStrings(text, got.text);
             }
             if (want.interpolation) |has| {
-                try std.testing.expectEqual(has, got.has_interpolation);
+                try std.testing.expectEqual(has, got.interp_opens.len > 0);
             }
             _ = i;
         }
@@ -210,7 +215,7 @@ pub const testing = struct {
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
-                    std.testing.allocator.free(tok.text);
+                    freeTokenStrings(std.testing.allocator, tok);
                 }
             }
             std.testing.allocator.free(tokens);
@@ -539,7 +544,8 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
     self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
-    var has_interpolation = false;
+    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 2);
+    defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
         if (c == '\\') {
@@ -568,14 +574,27 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
             return .{
                 .type = .string,
                 .text = text,
-                .has_interpolation = has_interpolation,
+                .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
                 .start = start,
                 .end = self.pos,
             };
         }
-        if (c == '{') has_interpolation = true;
+        if (c == '{') {
+            if (!self.atEnd() and self.peek() == '{') {
+                try buf.append(self.alloc, '{');
+                _ = self.advance();
+                continue;
+            }
+            try interp_opens.append(self.alloc, self.pos - 1);
+        } else if (c == '}') {
+            if (!self.atEnd() and self.peek() == '}') {
+                try buf.append(self.alloc, '}');
+                _ = self.advance();
+                continue;
+            }
+        }
         try buf.append(self.alloc, c);
     }
     return error.UnterminatedString;
@@ -590,6 +609,8 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Toke
     };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
+    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 0);
+    defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
         if (c == '\'') {
@@ -598,6 +619,7 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Toke
             return .{
                 .type = .string,
                 .text = text,
+                .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
                 .start = start,
@@ -613,7 +635,8 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
     self.pending_error_span = .{ .start = start, .end = start + 3, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 64);
     defer buf.deinit(self.alloc);
-    var has_interpolation = false;
+    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 2);
+    defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         if (self.peek() == '"' and self.peekN(1) == '"' and self.peekN(2) == '"') {
             _ = self.advance();
@@ -626,7 +649,7 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             return .{
                 .type = .multiline_string,
                 .text = text,
-                .has_interpolation = has_interpolation,
+                .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
                 .start = start,
@@ -634,7 +657,20 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             };
         }
         const c = self.advance();
-        if (c == '{') has_interpolation = true;
+        if (c == '{') {
+            if (!self.atEnd() and self.peek() == '{') {
+                try buf.append(self.alloc, '{');
+                _ = self.advance();
+                continue;
+            }
+            try interp_opens.append(self.alloc, self.pos - 1);
+        } else if (c == '}') {
+            if (!self.atEnd() and self.peek() == '}') {
+                try buf.append(self.alloc, '}');
+                _ = self.advance();
+                continue;
+            }
+        }
         try buf.append(self.alloc, c);
     }
     return error.UnterminatedString;
@@ -697,6 +733,8 @@ fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token 
     self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
+    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 0);
+    defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
         if (c == '\\') {
@@ -730,6 +768,7 @@ fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token 
             return .{
                 .type = .backtick_string,
                 .text = text,
+                .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
                 .start = start,
@@ -827,7 +866,7 @@ test "lexes multiline strings" {
         \\world"""
     );
     defer {
-        allocator.free(tokens[0].text);
+        freeTokenStrings(allocator, tokens[0]);
         allocator.free(tokens);
     }
 
@@ -1130,7 +1169,7 @@ test "lexes string with newline escape" {
     const tokens = try lex(std.testing.allocator, "\"hello\\nworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1165,7 +1204,7 @@ test "lexes string with tab escape" {
     const tokens = try lex(std.testing.allocator, "\"hi\\tworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1178,7 +1217,7 @@ test "lexes string with backslash escape" {
     const tokens = try lex(std.testing.allocator, "\"path\\\\to\\\\file\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1191,7 +1230,7 @@ test "lexes string with quote escape" {
     const tokens = try lex(std.testing.allocator, "\"say \\\"hello\\\"\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1204,7 +1243,7 @@ test "lexes string with carriage return escape" {
     const tokens = try lex(std.testing.allocator, "\"line1\\rline2\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1217,7 +1256,7 @@ test "lexes single quoted string is raw" {
     const tokens = try lex(std.testing.allocator, "'hello\\nworld'");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1230,7 +1269,7 @@ test "lexes backtick string with escapes" {
     const tokens = try lex(std.testing.allocator, "`hello\\nworld`");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .backtick_string) std.testing.allocator.free(tok.text);
+            if (tok.type == .backtick_string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1243,7 +1282,7 @@ test "lexes backtick string with backtick escape" {
     const tokens = try lex(std.testing.allocator, "`say \\`hi\\``");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .backtick_string) std.testing.allocator.free(tok.text);
+            if (tok.type == .backtick_string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
@@ -1256,7 +1295,7 @@ test "lexes string with unknown escape passed through" {
     const tokens = try lex(std.testing.allocator, "\"hello\\qworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.testing.allocator.free(tok.text);
+            if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
         }
         std.testing.allocator.free(tokens);
     }
