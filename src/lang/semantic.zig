@@ -937,6 +937,9 @@ const SemanticChecker = struct {
 
     fn analyzeCall(self: *SemanticChecker, call: anytype, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
+        if (call.callee.expr == .field) {
+            _ = try self.analyzeNode(call.callee.expr.field.object);
+        }
         const callee_type = types_mod.inferExprType(self, call.callee);
         // struct init validation
         if (callee_type == .struct_type) {
