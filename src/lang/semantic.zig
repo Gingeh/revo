@@ -8,8 +8,18 @@ const types_mod = @import("compiler/types.zig");
 const type_parser = @import("type_parser.zig");
 const revo = @import("revo");
 
+pub const ModuleResolver = struct {
+    ptr: *anyopaque,
+    resolveFn: *const fn (ptr: *anyopaque, path: []const u8, alloc: std.mem.Allocator) ?[]const u8,
+
+    pub fn resolve(self: ModuleResolver, path: []const u8, alloc: std.mem.Allocator) ?[]const u8 {
+        return self.resolveFn(self.ptr, path, alloc);
+    }
+};
+
 /// run semantic analysis; known_globals are names that exist at runtime (builtins)
 /// type_map, if set, is populated with name -> type_name during analysis
+/// module_resolver resolves import paths to source text
 pub fn analyze(
     alloc: std.mem.Allocator,
     root: *const ast.Node,
@@ -18,15 +28,16 @@ pub fn analyze(
     known_globals: []const []const u8,
     type_map: ?*std.StringHashMap([]const u8),
     type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
-    import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
+    module_resolver: ModuleResolver,
 ) !?lang.Error {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations, import_fn_sigs);
+    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations);
     defer checker.deinit();
 
+    try checker.loadImportFnSigs(root, module_resolver);
     _ = try checker.visit(root);
     if (type_map) |tm| try reparentTypeMap(tm, alloc);
     if (checker.errors.items.len == 0) return null;
@@ -86,7 +97,8 @@ const SemanticChecker = struct {
     typed_names: std.StringHashMap(void),
     table_field_map: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
     current_type_params: []const []const u8 = &.{},
-    import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
+    import_fn_sigs: std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
+    dep_asts: std.ArrayList(*const ast.Node),
 
     fn init(
         alloc: std.mem.Allocator,
@@ -95,7 +107,6 @@ const SemanticChecker = struct {
         known_globals: []const []const u8,
         type_map: ?*std.StringHashMap([]const u8),
         type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
-        import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
     ) !SemanticChecker {
         var checker: SemanticChecker = .{
             .alloc = alloc,
@@ -111,7 +122,8 @@ const SemanticChecker = struct {
             .type_annotations = type_annotations,
             .typed_names = std.StringHashMap(void).init(alloc),
             .table_field_map = std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)).init(alloc),
-            .import_fn_sigs = import_fn_sigs,
+            .import_fn_sigs = std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)).init(alloc),
+            .dep_asts = undefined,
         };
         checker.errors = try std.ArrayList(diagnostic.Part).initCapacity(alloc, 8);
         errdefer checker.errors.deinit(alloc);
@@ -121,6 +133,8 @@ const SemanticChecker = struct {
         errdefer checker.fn_sigs.deinit(alloc);
         checker.return_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, 4);
         errdefer checker.return_types.deinit(alloc);
+        checker.dep_asts = try std.ArrayList(*const ast.Node).initCapacity(alloc, 0);
+        errdefer checker.dep_asts.deinit(alloc);
 
         try checker.pushScope();
         // registers builtins
@@ -147,6 +161,39 @@ const SemanticChecker = struct {
     fn deinit(self: *SemanticChecker) void {
         for (self.scopes.items) |*scope| scope.deinit();
         self.scopes.deinit(self.alloc);
+        self.import_fn_sigs.deinit();
+        self.dep_asts.deinit(self.alloc);
+    }
+
+    fn loadImportFnSigs(self: *SemanticChecker, root: *const ast.Node, resolver: ModuleResolver) !void {
+        try self.walkImports(root, resolver);
+    }
+
+    fn walkImports(self: *SemanticChecker, node: *const ast.Node, resolver: ModuleResolver) !void {
+        switch (node.expr) {
+            .block => |items| {
+                for (items) |item| try self.walkImports(item, resolver);
+            },
+            .import_stmt => |stmt| {
+                try self.resolveImport(stmt, resolver);
+            },
+            .decl => |d| try self.walkImports(d.inner, resolver),
+            .binding => |b| try self.walkImports(b.value, resolver),
+            else => {},
+        }
+    }
+
+    fn resolveImport(self: *SemanticChecker, stmt: anytype, resolver: ModuleResolver) !void {
+        if (self.import_fn_sigs.contains(stmt.name)) return;
+
+        const source_alloc = resolver.resolve(stmt.path, self.alloc) orelse return;
+        const source = try self.alloc.dupe(u8, source_alloc);
+        self.alloc.free(source_alloc);
+
+        const module_ast = lang.parseSource(self.alloc, source) catch return;
+        try self.dep_asts.append(self.alloc, module_ast);
+
+        lang.pipeline.extractPubFnSigs(module_ast, stmt.name, self.alloc, &self.import_fn_sigs) catch return;
     }
 
     fn finishReport(self: *SemanticChecker) !diagnostic.Report {
@@ -263,38 +310,36 @@ const SemanticChecker = struct {
             for (layout) |f| if (std.mem.eql(u8, f.name, name)) return if (f.field_type != .any) f.field_type else if (f.type_name) |tn| types_mod.resolveTypeName(self, tn) else .any;
         }
         // import function signature lookup
-        if (self.import_fn_sigs) |sigs| {
-            if (object.expr == .ident) {
-                const obj_name = object.expr.ident;
-                if (sigs.get(obj_name)) |fn_list| {
-                    for (fn_list.items) |meta| {
-                        if (!std.mem.eql(u8, meta.name, name)) continue;
-                        var param_types = std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, meta.params.len) catch return .any;
-                        var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, meta.params.len) catch return .any;
-                        for (meta.params) |p| {
-                            param_names.appendAssumeCapacity(p.name);
-                            const pt = if (p.type_expr) |te| type_parser.evalTypeExpr(self, te) catch .any else .any;
-                            param_types.appendAssumeCapacity(pt);
-                        }
-                        const ret = if (meta.return_type_expr) |rt| type_parser.evalTypeExpr(self, rt) catch .any else .any;
-                        const names_slice = param_names.toOwnedSlice(self.alloc) catch return .any;
-                        const types_slice = param_types.toOwnedSlice(self.alloc) catch return .any;
-                        const sig_ptr = self.alloc.create(FnSig) catch return .any;
-                        sig_ptr.* = .{
+        if (object.expr == .ident) {
+            const obj_name = object.expr.ident;
+            if (self.import_fn_sigs.get(obj_name)) |fn_list| {
+                for (fn_list.items) |meta| {
+                    if (!std.mem.eql(u8, meta.name, name)) continue;
+                    var param_types = std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, meta.params.len) catch return .any;
+                    var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, meta.params.len) catch return .any;
+                    for (meta.params) |p| {
+                        param_names.appendAssumeCapacity(p.name);
+                        const pt = if (p.type_expr) |te| type_parser.evalTypeExpr(self, te) catch .any else .any;
+                        param_types.appendAssumeCapacity(pt);
+                    }
+                    const ret = if (meta.return_type_expr) |rt| type_parser.evalTypeExpr(self, rt) catch .any else .any;
+                    const names_slice = param_names.toOwnedSlice(self.alloc) catch return .any;
+                    const types_slice = param_types.toOwnedSlice(self.alloc) catch return .any;
+                    const sig_ptr = self.alloc.create(FnSig) catch return .any;
+                    sig_ptr.* = .{
+                        .param_names = names_slice,
+                        .param_types = types_slice,
+                        .return_type = ret,
+                        .required_count = types_slice.len,
+                        .sig = .{
                             .param_names = names_slice,
-                            .param_types = types_slice,
+                            .params = types_slice,
                             .return_type = ret,
                             .required_count = types_slice.len,
-                            .sig = .{
-                                .param_names = names_slice,
-                                .params = types_slice,
-                                .return_type = ret,
-                                .required_count = types_slice.len,
-                            },
-                        };
-                        self.fn_sigs.append(self.alloc, sig_ptr) catch return .any;
-                        return .{ .function = &sig_ptr.sig };
-                    }
+                        },
+                    };
+                    self.fn_sigs.append(self.alloc, sig_ptr) catch return .any;
+                    return .{ .function = &sig_ptr.sig };
                 }
             }
         }

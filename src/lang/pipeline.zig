@@ -133,7 +133,7 @@ fn allocNode(alloc: std.mem.Allocator, span: ast.Span, expr: ast.Expr) !*Node {
 
 /// walk AST and pre-load imported modules (best-effort, OOM propagates, others
 /// are deferred to runtime where the import native fn handles them)
-fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator, import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
     var inject_nodes = std.ArrayList(*Node).initCapacity(alloc, 8) catch |err| return err;
     defer inject_nodes.deinit(alloc);
 
@@ -145,7 +145,7 @@ fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator, import_fn_sigs
     var visited_sub = std.StringHashMap(void).init(alloc);
     defer visited_sub.deinit();
 
-    try walkAndProcessImports(vm, root, alloc, &inject_nodes, &visited, &visited_sub, import_fn_sigs);
+    try walkAndProcessImports(vm, root, alloc, &inject_nodes, &visited, &visited_sub);
 
     if (inject_nodes.items.len > 0 and root.expr == .block) {
         const items = root.expr.block;
@@ -156,14 +156,14 @@ fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator, import_fn_sigs
     }
 }
 
-fn walkAndProcessImports(vm: *VM, node: *Node, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void), import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+fn walkAndProcessImports(vm: *VM, node: *Node, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
     switch (node.expr) {
         .block => |items| {
-            for (items) |item| try walkAndProcessImports(vm, item, alloc, inject_nodes, visited, visited_sub, import_fn_sigs);
+            for (items) |item| try walkAndProcessImports(vm, item, alloc, inject_nodes, visited, visited_sub);
         },
-        .import_stmt => |stmt| try processImport(vm, stmt.path, stmt.name, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
-        .decl => |d| try walkAndProcessImports(vm, d.inner, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
-        .binding => |b| try walkAndProcessImports(vm, b.value, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
+        .import_stmt => |stmt| try processImport(vm, stmt.path, stmt.name, alloc, inject_nodes, visited, visited_sub),
+        .decl => |d| try walkAndProcessImports(vm, d.inner, alloc, inject_nodes, visited, visited_sub),
+        .binding => |b| try walkAndProcessImports(vm, b.value, alloc, inject_nodes, visited, visited_sub),
         else => {},
     }
 }
@@ -260,7 +260,7 @@ fn tryResolve(alloc: std.mem.Allocator, io: std.Io, dir: []const u8, name: []con
 /// read, parse, and extract macros/procs from a module for compile-time use
 /// does NOT compile or cache the module!!! runtime `import` handles that!
 /// extraction populates the expander env with qualified names (mod_name.macro!)
-fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void), import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
     if (visited.contains(path)) return;
     try visited.put(path, {});
 
@@ -282,7 +282,6 @@ fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem
 
     extractPubDefs(module_ast, mod_name, alloc, inject_nodes) catch return;
     extractPubImportsOneLevel(vm, module_ast, mod_name, alloc, inject_nodes, visited_sub) catch return;
-    extractPubFnSigs(module_ast, mod_name, alloc, import_fn_sigs) catch return;
 }
 
 /// extract pub macros and procs from a module AST, qualified with prefix
@@ -369,7 +368,7 @@ fn extractPubImportsOneLevel(
 }
 
 /// extract pub fn signatures from a module AST, qualified with prefix
-fn extractPubFnSigs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+pub fn extractPubFnSigs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
     switch (node.expr) {
         .block => |items| {
             for (items) |item| try extractPubFnSigs(item, prefix, alloc, out);
@@ -432,10 +431,8 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     if (opts.module_scope)
         parsed.root = try wrapModule(arena.allocator(), parsed.root);
 
-    var import_fn_sigs = std.StringHashMap(std.ArrayList(ImportFnMeta)).init(arena.allocator());
-
     if (!opts.skip_preload and comptime !revo.is_freestanding)
-        preloadImports(vm, parsed.root, arena.allocator(), &import_fn_sigs) catch |err| switch (err) {
+        preloadImports(vm, parsed.root, arena.allocator()) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => revo.pretty.fatal("preload: {s}", .{@errorName(err)}, vm),
         };
@@ -475,6 +472,17 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         }
     }
 
+    const PipelineResolver = struct {
+        vm: *VM,
+        fn resolve(ptr: *anyopaque, path: []const u8, a: std.mem.Allocator) ?[]const u8 {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            const resolved = (resolveModuleFile(self.vm, path) catch return null) orelse return null;
+            defer self.vm.runtime.alloc.free(resolved);
+            return std.Io.Dir.cwd().readFileAlloc(self.vm.runtime.io, resolved, a, std.Io.Limit.unlimited) catch null;
+        }
+    };
+    var pipeline_resolver = PipelineResolver{ .vm = vm };
+
     if (try lang.semantic.analyze(
         vm.runtime.alloc,
         expanded.root,
@@ -483,7 +491,7 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         known_globals.items,
         null,
         &type_annotations,
-        &import_fn_sigs,
+        .{ .ptr = &pipeline_resolver, .resolveFn = PipelineResolver.resolve },
     )) |semantic_err| {
         var copied = try semantic_err.semantic.report.copy(vm.runtime.diag_alloc);
         copied.source_name = source.name;

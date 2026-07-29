@@ -803,7 +803,33 @@ pub fn inspectDetailed(
         type_map.deinit();
     }
 
-    const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text, known_globals, &type_map, null, null);
+    var type_annotations = std.AutoHashMap(*const lang.Node, lang.types.TypeInfo).init(alloc);
+    defer type_annotations.deinit();
+
+    const WorkspaceResolver = struct {
+        ws: *Workspace,
+        source_name: []const u8,
+        mode: lang.RunMode,
+        project_root: []const u8,
+        fn resolve(ptr: *anyopaque, path: []const u8, a: std.mem.Allocator) ?[]const u8 {
+            const s: *@This() = @ptrCast(@alignCast(ptr));
+            const file_id = s.ws.resolveOpenImport(s.source_name, path, s.mode, s.project_root) orelse return null;
+            const snap2 = s.ws.snapshot(file_id) orelse return null;
+            return a.dupe(u8, snap2.text) catch null;
+        }
+    };
+    const project_root = blk: {
+        const entry = self.entryPtr(snap.id) catch break :blk "";
+        break :blk entry.project_root;
+    };
+    var ws_resolver = WorkspaceResolver{
+        .ws = self,
+        .source_name = snap.name,
+        .mode = opts.mode,
+        .project_root = project_root,
+    };
+
+    const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text, known_globals, &type_map, &type_annotations, .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve });
     const cache_diag = if (semantic_error) |err|
         try copyError(self.alloc, err, snap.name, snap.text)
     else
@@ -980,7 +1006,7 @@ fn invalidateCacheImpl(
 }
 
 /// import path to an open file, checking both source dir and project root
-fn resolveOpenImport(
+pub fn resolveOpenImport(
     self: *Workspace,
     source_name: []const u8,
     raw_path: []const u8,
