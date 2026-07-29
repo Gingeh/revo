@@ -314,6 +314,12 @@ fn extractPubDefs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out
                             try out.append(alloc, proc_node);
                         }
                     },
+                    .type_alias => |t| {
+                        const ta_node = try allocNode(alloc, d.inner.span, .{
+                            .type_alias = .{ .name = t.name, .type_expr = t.type_expr },
+                        });
+                        try out.append(alloc, ta_node);
+                    },
                     else => {},
                 }
             }

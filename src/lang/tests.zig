@@ -3182,6 +3182,101 @@ test "import in function body binds correctly" {
     , 99);
 }
 
+test "pub type alias from imported module is available" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "types.rv",
+        .data =
+        \\ pub type UserId = int
+        \\ pub fn greet(id: UserId) id
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./types"
+        \\ const x: UserId = 42
+        \\ types.greet(x)
+    , 42);
+}
+
+test "non-pub type alias in imported module does not pollute importer" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "priv_types.rv",
+        .data =
+        \\ type Hidden = int
+        \\ pub const val = 42
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./priv_types"
+        \\ priv_types.val
+    , 42);
+}
+
+test "pub type alias referencing another type alias from same module" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "chain.rv",
+        .data =
+        \\ pub type Id = int
+        \\ pub type Alias = Id
+        \\ pub fn take(n: Alias) n
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./chain"
+        \\ chain.take(42)
+    , 42);
+}
+
+test "pub type alias referencing a pub struct from same module" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "struct_types.rv",
+        .data =
+        \\ pub struct Point { x: num, y: num }
+        \\ pub type P = Point
+        \\ pub fn make(x: num, y: num) -> P Point({x = x, y = y})
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./struct_types"
+        \\ const p = struct_types.make(1, 2)
+        \\ p.x + p.y
+    , 3);
+}
+
+test "pub type alias works in type annotation after import" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "alias_mod.rv",
+        .data =
+        \\ pub type Code = int
+        \\ pub fn lookup(c: Code) c
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./alias_mod"
+        \\ const x: Code = 99
+        \\ alias_mod.lookup(x)
+    , 99);
+}
+
 test "module with only non-pub items compiles and imports" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
