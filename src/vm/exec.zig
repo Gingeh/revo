@@ -688,7 +688,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
 
             if (object.asTable()) |t_id| {
                 const pc = fiber.pc - 1;
-                const ic = &self.icache[pc & (self.icache.len - 1)];
+                const ic = &self.icache[(pc ^ t_id) & (self.icache.len - 1)];
                 const t = try self.tableFast(t_id);
 
                 if (ic.pc == pc and ic.table_id == t_id and ic.version == t.ic_version) {
