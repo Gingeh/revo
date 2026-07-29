@@ -104,10 +104,20 @@ pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
     return switch (ti) {
         .type_var => |n| try alloc.dupe(u8, n),
         .table => |tbl| blk: {
+            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+            errdefer buf.deinit(alloc);
+            try buf.appendSlice(alloc, "table<");
             if (tbl.key) |k| {
-                break :blk try std.fmt.allocPrint(alloc, "table<{s}, {s}>", .{ typeName(k.*), typeName(tbl.value.*) });
+                const kf = try formatType(alloc, k.*);
+                defer alloc.free(kf);
+                try buf.appendSlice(alloc, kf);
+                try buf.appendSlice(alloc, ", ");
             }
-            break :blk try std.fmt.allocPrint(alloc, "table<{s}>", .{typeName(tbl.value.*)});
+            const vf = try formatType(alloc, tbl.value.*);
+            defer alloc.free(vf);
+            try buf.appendSlice(alloc, vf);
+            try buf.append(alloc, '>');
+            break :blk try buf.toOwnedSlice(alloc);
         },
         .@"union" => |variants| blk: {
             var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
@@ -120,9 +130,44 @@ pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
                 }
                 for (v.types, 0..) |vt, j| {
                     if (j > 0 or v.name.len > 0) try buf.append(alloc, ' ');
-                    try buf.appendSlice(alloc, typeName(vt));
+                    const formatted = try formatType(alloc, vt);
+                    defer alloc.free(formatted);
+                    try buf.appendSlice(alloc, formatted);
                 }
             }
+            break :blk try buf.toOwnedSlice(alloc);
+        },
+        .tuple => |items| blk: {
+            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+            errdefer buf.deinit(alloc);
+            try buf.append(alloc, '(');
+            for (items, 0..) |item, i| {
+                if (i > 0) try buf.appendSlice(alloc, ", ");
+                const formatted = try formatType(alloc, item);
+                defer alloc.free(formatted);
+                try buf.appendSlice(alloc, formatted);
+            }
+            try buf.append(alloc, ')');
+            break :blk try buf.toOwnedSlice(alloc);
+        },
+        .function => |sig| blk: {
+            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+            errdefer buf.deinit(alloc);
+            try buf.appendSlice(alloc, "fn(");
+            for (sig.params, 0..) |param, i| {
+                if (i > 0) try buf.appendSlice(alloc, ", ");
+                if (i < sig.param_names.len and sig.param_names[i].len > 0) {
+                    try buf.appendSlice(alloc, sig.param_names[i]);
+                    try buf.appendSlice(alloc, ": ");
+                }
+                const formatted = try formatType(alloc, param);
+                defer alloc.free(formatted);
+                try buf.appendSlice(alloc, formatted);
+            }
+            try buf.appendSlice(alloc, ") ");
+            const ret = try formatType(alloc, sig.return_type);
+            defer alloc.free(ret);
+            try buf.appendSlice(alloc, ret);
             break :blk try buf.toOwnedSlice(alloc);
         },
         else => try alloc.dupe(u8, typeName(ti)),

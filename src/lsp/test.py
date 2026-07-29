@@ -202,7 +202,6 @@ async def test_hover(client: LanguageClient):
     assert "**x**" in contents.value, "expected markdown with name"
     assert "binding" in contents.value, "expected kind"
     assert "int" in contents.value, "expected type"
-    assert "let x = 42" in contents.value, "expected definition source"
 
 
 @pytest.mark.asyncio(loop_scope="module")

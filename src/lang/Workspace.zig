@@ -626,39 +626,17 @@ pub fn hover(
         }
     }
 
-    // extract the definition source line
-    var def_source: []const u8 = "";
-    {
-        var i: usize = 0;
-        var cur: u32 = 1;
-        while (i < snap.text.len) : (i += 1) {
-            if (cur == def.range.start.line) {
-                const start = i;
-                const end = std.mem.findScalarPos(u8, snap.text, i, '\n') orelse snap.text.len;
-                def_source = std.mem.trim(u8, snap.text[start..end], " \t\r");
-                break;
-            }
-            if (snap.text[i] == '\n') cur += 1;
-        }
-    }
-
     const text = if (type_name.len > 0)
         try std.fmt.allocPrint(alloc,
             \\**{s}** -- {s}
             \\_type: {s}_
-            \\```text
-            \\{s}
-            \\```
             \\_at {s}:{d}:{d}_
-        , .{ name, kind, type_name, def_source, def.name, def.range.start.line, def.range.start.character })
+        , .{ name, kind, type_name, def.name, def.range.start.line, def.range.start.character })
     else
         try std.fmt.allocPrint(alloc,
             \\**{s}** -- {s}
-            \\```text
-            \\{s}
-            \\```
             \\_at {s}:{d}:{d}_
-        , .{ name, kind, def_source, def.name, def.range.start.line, def.range.start.character });
+        , .{ name, kind, def.name, def.range.start.line, def.range.start.character });
     return .{
         .text = text,
         .range = def.range,
