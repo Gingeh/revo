@@ -116,13 +116,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
     try writeIntLE(&buffer, allocator, u32, header.spans_count);
     try writeIntLE(&buffer, allocator, u32, header.prototypes_count);
 
-    for (artifact.instructions) |instr| {
-        try writeIntLE(&buffer, allocator, u8, @intFromEnum(instr.op));
-        try writeIntLE(&buffer, allocator, u8, @intCast(instr.a));
-        try writeIntLE(&buffer, allocator, u8, @intCast(instr.b));
-        try writeIntLE(&buffer, allocator, u8, @intCast(instr.c));
-        try writeIntLE(&buffer, allocator, u32, @intCast(instr.bx));
-    }
+    try buffer.appendSlice(allocator, std.mem.sliceAsBytes(artifact.instructions));
 
     for (artifact.spans) |span| {
         try writeIntLE(&buffer, allocator, u32, @intCast(span.start));
@@ -248,16 +242,8 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     // inst
     const instructions = try allocator.alloc(Instruction, instructions_count);
     errdefer allocator.free(instructions);
-
-    for (instructions) |*instr| {
-        instr.* = .{
-            .op = @enumFromInt((try reader.takeArray(1))[0]),
-            .a = (try reader.takeArray(1))[0],
-            .b = (try reader.takeArray(1))[0],
-            .c = (try reader.takeArray(1))[0],
-            .bx = std.mem.readInt(u32, try reader.takeArray(4), .little),
-        };
-    }
+    const instr_bytes = try reader.take(instructions_count * @sizeOf(Instruction));
+    @memcpy(std.mem.sliceAsBytes(instructions), instr_bytes);
 
     // spans
     const spans = try allocator.alloc(Span, spans_count);
