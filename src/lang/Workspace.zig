@@ -803,7 +803,7 @@ pub fn inspectDetailed(
         type_map.deinit();
     }
 
-    const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text, known_globals, &type_map, null);
+    const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text, known_globals, &type_map, null, null);
     const cache_diag = if (semantic_error) |err|
         try copyError(self.alloc, err, snap.name, snap.text)
     else

@@ -3622,3 +3622,60 @@ test "labeled break with unknown label is rejected" {
         \\ end
     , .UnsupportedSyntax);
 }
+
+test "import typed function reports arg type mismatch" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "adder.rv",
+        .data =
+        \\ pub fn add(a: int, b: int) a + b
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    // correct types work
+    try t.top_number_in_dir(module_dir,
+        \\ import "./adder"
+        \\ adder.add(1, 2)
+    , 3);
+    // wrong type should fail at compile time
+    try t.expectCompileErrorInDir(module_dir,
+        \\ import "./adder"
+        \\ adder.add("hi", 2)
+    );
+}
+
+test "import typed function with string param passes type check" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "echo.rv",
+        .data =
+        \\ pub fn echo(s: string) s
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_string_in_dir(module_dir,
+        \\ import "./echo"
+        \\ echo.echo("ok")
+    , "ok");
+}
+
+test "import typed function with no type annotations falls through" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "plain.rv",
+        .data =
+        \\ pub fn double(n) n * 2
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./plain"
+        \\ plain.double(21)
+    , 42);
+}

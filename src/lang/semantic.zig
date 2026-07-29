@@ -18,12 +18,13 @@ pub fn analyze(
     known_globals: []const []const u8,
     type_map: ?*std.StringHashMap([]const u8),
     type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
+    import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
 ) !?lang.Error {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations);
+    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations, import_fn_sigs);
     defer checker.deinit();
 
     _ = try checker.visit(root);
@@ -85,6 +86,7 @@ const SemanticChecker = struct {
     typed_names: std.StringHashMap(void),
     table_field_map: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
     current_type_params: []const []const u8 = &.{},
+    import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
 
     fn init(
         alloc: std.mem.Allocator,
@@ -93,6 +95,7 @@ const SemanticChecker = struct {
         known_globals: []const []const u8,
         type_map: ?*std.StringHashMap([]const u8),
         type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
+        import_fn_sigs: ?*const std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
     ) !SemanticChecker {
         var checker: SemanticChecker = .{
             .alloc = alloc,
@@ -108,6 +111,7 @@ const SemanticChecker = struct {
             .type_annotations = type_annotations,
             .typed_names = std.StringHashMap(void).init(alloc),
             .table_field_map = std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)).init(alloc),
+            .import_fn_sigs = import_fn_sigs,
         };
         checker.errors = try std.ArrayList(diagnostic.Part).initCapacity(alloc, 8);
         errdefer checker.errors.deinit(alloc);
@@ -257,6 +261,42 @@ const SemanticChecker = struct {
             const struct_name = object_type.struct_type;
             const layout = self.struct_layouts.get(struct_name) orelse return .any;
             for (layout) |f| if (std.mem.eql(u8, f.name, name)) return if (f.field_type != .any) f.field_type else if (f.type_name) |tn| types_mod.resolveTypeName(self, tn) else .any;
+        }
+        // import function signature lookup
+        if (self.import_fn_sigs) |sigs| {
+            if (object.expr == .ident) {
+                const obj_name = object.expr.ident;
+                if (sigs.get(obj_name)) |fn_list| {
+                    for (fn_list.items) |meta| {
+                        if (!std.mem.eql(u8, meta.name, name)) continue;
+                        var param_types = std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, meta.params.len) catch return .any;
+                        var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, meta.params.len) catch return .any;
+                        for (meta.params) |p| {
+                            param_names.appendAssumeCapacity(p.name);
+                            const pt = if (p.type_expr) |te| type_parser.evalTypeExpr(self, te) catch .any else .any;
+                            param_types.appendAssumeCapacity(pt);
+                        }
+                        const ret = if (meta.return_type_expr) |rt| type_parser.evalTypeExpr(self, rt) catch .any else .any;
+                        const names_slice = param_names.toOwnedSlice(self.alloc) catch return .any;
+                        const types_slice = param_types.toOwnedSlice(self.alloc) catch return .any;
+                        const sig_ptr = self.alloc.create(FnSig) catch return .any;
+                        sig_ptr.* = .{
+                            .param_names = names_slice,
+                            .param_types = types_slice,
+                            .return_type = ret,
+                            .required_count = types_slice.len,
+                            .sig = .{
+                                .param_names = names_slice,
+                                .params = types_slice,
+                                .return_type = ret,
+                                .required_count = types_slice.len,
+                            },
+                        };
+                        self.fn_sigs.append(self.alloc, sig_ptr) catch return .any;
+                        return .{ .function = &sig_ptr.sig };
+                    }
+                }
+            }
         }
         return .any;
     }

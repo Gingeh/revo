@@ -133,7 +133,7 @@ fn allocNode(alloc: std.mem.Allocator, span: ast.Span, expr: ast.Expr) !*Node {
 
 /// walk AST and pre-load imported modules (best-effort, OOM propagates, others
 /// are deferred to runtime where the import native fn handles them)
-fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
+fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator, import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
     var inject_nodes = std.ArrayList(*Node).initCapacity(alloc, 8) catch |err| return err;
     defer inject_nodes.deinit(alloc);
 
@@ -145,7 +145,7 @@ fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
     var visited_sub = std.StringHashMap(void).init(alloc);
     defer visited_sub.deinit();
 
-    try walkAndProcessImports(vm, root, alloc, &inject_nodes, &visited, &visited_sub);
+    try walkAndProcessImports(vm, root, alloc, &inject_nodes, &visited, &visited_sub, import_fn_sigs);
 
     if (inject_nodes.items.len > 0 and root.expr == .block) {
         const items = root.expr.block;
@@ -156,14 +156,14 @@ fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
     }
 }
 
-fn walkAndProcessImports(vm: *VM, node: *Node, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
+fn walkAndProcessImports(vm: *VM, node: *Node, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void), import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
     switch (node.expr) {
         .block => |items| {
-            for (items) |item| try walkAndProcessImports(vm, item, alloc, inject_nodes, visited, visited_sub);
+            for (items) |item| try walkAndProcessImports(vm, item, alloc, inject_nodes, visited, visited_sub, import_fn_sigs);
         },
-        .import_stmt => |stmt| try processImport(vm, stmt.path, stmt.name, alloc, inject_nodes, visited, visited_sub),
-        .decl => |d| try walkAndProcessImports(vm, d.inner, alloc, inject_nodes, visited, visited_sub),
-        .binding => |b| try walkAndProcessImports(vm, b.value, alloc, inject_nodes, visited, visited_sub),
+        .import_stmt => |stmt| try processImport(vm, stmt.path, stmt.name, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
+        .decl => |d| try walkAndProcessImports(vm, d.inner, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
+        .binding => |b| try walkAndProcessImports(vm, b.value, alloc, inject_nodes, visited, visited_sub, import_fn_sigs),
         else => {},
     }
 }
@@ -260,7 +260,7 @@ fn tryResolve(alloc: std.mem.Allocator, io: std.Io, dir: []const u8, name: []con
 /// read, parse, and extract macros/procs from a module for compile-time use
 /// does NOT compile or cache the module!!! runtime `import` handles that!
 /// extraction populates the expander env with qualified names (mod_name.macro!)
-fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
+fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void), import_fn_sigs: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
     if (visited.contains(path)) return;
     try visited.put(path, {});
 
@@ -282,6 +282,7 @@ fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem
 
     extractPubDefs(module_ast, mod_name, alloc, inject_nodes) catch return;
     extractPubImportsOneLevel(vm, module_ast, mod_name, alloc, inject_nodes, visited_sub) catch return;
+    extractPubFnSigs(module_ast, mod_name, alloc, import_fn_sigs) catch return;
 }
 
 /// extract pub macros and procs from a module AST, qualified with prefix
@@ -367,6 +368,42 @@ fn extractPubImportsOneLevel(
     }
 }
 
+/// extract pub fn signatures from a module AST, qualified with prefix
+fn extractPubFnSigs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+    switch (node.expr) {
+        .block => |items| {
+            for (items) |item| try extractPubFnSigs(item, prefix, alloc, out);
+        },
+        .decl => |d| {
+            if (d.pub_) {
+                if (d.inner.expr == .binding) {
+                    const b = d.inner.expr.binding;
+                    if (b.value.expr == .fn_expr and b.target.expr == .ident) {
+                        const fn_expr = b.value.expr.fn_expr;
+                        const fn_name = b.target.expr.ident;
+                        var params = try std.ArrayList(ImportParam).initCapacity(alloc, fn_expr.params.len);
+                        for (fn_expr.params) |p| {
+                            params.appendAssumeCapacity(.{ .name = p.name, .type_expr = p.type_name });
+                        }
+                        var entry = out.getPtr(prefix) orelse blk: {
+                            const empty = try std.ArrayList(ImportFnMeta).initCapacity(alloc, 0);
+                            try out.put(prefix, empty);
+                            break :blk out.getPtr(prefix).?;
+                        };
+                        try entry.append(alloc, .{
+                            .name = fn_name,
+                            .params = try params.toOwnedSlice(alloc),
+                            .return_type_expr = fn_expr.return_type,
+                        });
+                    }
+                }
+            }
+            try extractPubFnSigs(d.inner, prefix, alloc, out);
+        },
+        else => {},
+    }
+}
+
 pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
     defer arena.deinit();
@@ -395,8 +432,10 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     if (opts.module_scope)
         parsed.root = try wrapModule(arena.allocator(), parsed.root);
 
+    var import_fn_sigs = std.StringHashMap(std.ArrayList(ImportFnMeta)).init(arena.allocator());
+
     if (!opts.skip_preload and comptime !revo.is_freestanding)
-        preloadImports(vm, parsed.root, arena.allocator()) catch |err| switch (err) {
+        preloadImports(vm, parsed.root, arena.allocator(), &import_fn_sigs) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => revo.pretty.fatal("preload: {s}", .{@errorName(err)}, vm),
         };
@@ -444,6 +483,7 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         known_globals.items,
         null,
         &type_annotations,
+        &import_fn_sigs,
     )) |semantic_err| {
         var copied = try semantic_err.semantic.report.copy(vm.runtime.diag_alloc);
         copied.source_name = source.name;
@@ -519,6 +559,17 @@ pub const ExpandWithVmResult = union(enum) {
 };
 pub const LowerResult = Result(Artifact, compiler.LowerFailure);
 pub const BuildResult = Result(Artifact, Error);
+
+pub const ImportParam = struct {
+    name: []const u8,
+    type_expr: ?*ast.TypeExpr,
+};
+
+pub const ImportFnMeta = struct {
+    name: []const u8,
+    params: []const ImportParam,
+    return_type_expr: ?*ast.TypeExpr,
+};
 
 pub fn parse(allocator: std.mem.Allocator, source: Source, opts: ParseOptions) !ParseResult {
     if (!opts.include_default_macros) {
