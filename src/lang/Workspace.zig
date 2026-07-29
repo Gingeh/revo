@@ -607,14 +607,28 @@ pub fn hover(
     }
     const def = try self.definition(alloc, id, pos, opts) orelse return null;
 
-    // find type from analysis
+    // look up type in the definition file (may differ from current file)
     var type_name: []const u8 = "";
-    for (analysis.symbols) |sym| {
-        if (std.mem.eql(u8, sym.name, name) and
-            sym.range.start.line == def.range.start.line)
-        {
-            type_name = sym.type_name;
-            break;
+    if (def.file_id == id) {
+        for (analysis.symbols) |sym| {
+            if (std.mem.eql(u8, sym.name, name) and
+                sym.range.start.line == def.range.start.line)
+            {
+                type_name = sym.type_name;
+                break;
+            }
+        }
+    } else {
+        var def_analysis = try self.inspectDetailed(alloc, def.file_id, opts);
+        defer def_analysis.deinit(alloc);
+        for (def_analysis.symbols) |sym| {
+            if (std.mem.eql(u8, sym.name, name)) {
+                type_name = if (sym.type_name.len > 0)
+                    try alloc.dupe(u8, sym.type_name)
+                else
+                    "";
+                break;
+            }
         }
     }
 
@@ -1054,10 +1068,53 @@ pub fn importedModuleSymbols(
         if (std.mem.eql(u8, stem, name)) {
             var dep_analysis = try self.inspectDetailed(alloc, dep_id, .{});
             defer dep_analysis.deinit(alloc);
-            return dep_analysis.symbols;
+            const src = dep_analysis.symbols;
+            var out = try alloc.alloc(Symbol, src.len);
+            for (src, 0..) |s, i| {
+                out[i] = .{
+                    .name = try alloc.dupe(u8, s.name),
+                    .kind = s.kind,
+                    .range = s.range,
+                    .type_name = if (s.type_name.len > 0) try alloc.dupe(u8, s.type_name) else "",
+                };
+            }
+            return out;
         }
     }
     return &.{};
+}
+
+/// resolve an import and open the file from disk if not already open
+/// returns null if the file can't be found or read
+fn resolveOpenImportOrOpen(
+    self: *Workspace,
+    source_name: []const u8,
+    raw_path: []const u8,
+    mode: lang.RunMode,
+    project_root: []const u8,
+) ?FileId {
+    if (self.resolveOpenImport(source_name, raw_path, mode, project_root)) |id| return id;
+    if (self.resolveImportPath(source_name, raw_path)) |resolved| {
+        defer self.alloc.free(resolved);
+        if (self.openFromDisk(resolved)) |id| return id;
+    }
+    if (mode == .project and project_root.len > 0) {
+        if (self.resolveImportPath(project_root, raw_path)) |resolved| {
+            defer self.alloc.free(resolved);
+            if (self.openFromDisk(resolved)) |id| return id;
+        }
+    }
+    return null;
+}
+
+/// read a file from disk and open it in the workspace. requires vm with I/O.
+fn openFromDisk(self: *Workspace, path: []const u8) ?FileId {
+    const vm = self.vm orelse return null;
+    const io = vm.runtime.io;
+    const text = std.Io.Dir.cwd().readFileAlloc(io, path, self.alloc, .limited(std.math.maxInt(usize))) catch return null;
+    defer self.alloc.free(text);
+    _ = self.openWith(path, text, .{}) catch return null;
+    return self.file_names.get(path);
 }
 
 /// replace a file's dependency set; add/remove reverse deps as needed
@@ -1728,8 +1785,9 @@ const SymbolVisitor = struct {
     }
 
     fn addName(self: *@This(), name: []const u8, kind: SymbolKind, span: lang.Span) void {
+        const owned = self.alloc.dupe(u8, name) catch return;
         self.out.append(self.alloc, .{
-            .name = name,
+            .name = owned,
             .kind = kind,
             .range = .{
                 .start = .{ .line = span.line, .character = @intCast(span.column) },
@@ -1763,9 +1821,11 @@ const ImportVisitor = struct {
         if (node.expr == .import_stmt) {
             const raw = node.expr.import_stmt.path;
             if (raw.len != 0) {
-                if (self.ws.resolveOpenImport(self.base, raw, self.mode, self.project_root)) |id| {
-                    if (!containsId(self.out.items, id)) {
-                        self.out.append(self.ws.alloc, id) catch {
+                const id = self.ws.resolveOpenImport(self.base, raw, self.mode, self.project_root) orelse
+                    self.ws.resolveOpenImportOrOpen(self.base, raw, self.mode, self.project_root);
+                if (id) |resolved| {
+                    if (!containsId(self.out.items, resolved)) {
+                        self.out.append(self.ws.alloc, resolved) catch {
                             self.failed = true;
                         };
                     }

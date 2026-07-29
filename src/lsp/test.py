@@ -1,3 +1,5 @@
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -649,3 +651,107 @@ async def test_code_action(client: LanguageClient):
     if result:
         titles = [a.title for a in result]
         assert any("inline" in t.lower() for t in titles)
+
+
+ONE_RV_CONTENT = """pub fn hi(a: num, b: num) -> num
+  a * b
+"""
+
+TWO_RV_CONTENT = """import "one.rv"
+
+one.hi(1, 2)
+"""
+
+
+def _open_import_pair(client: LanguageClient, tmpdir):
+    one_path = os.path.join(tmpdir, "one.rv")
+    with open(one_path, "w") as f:
+        f.write(ONE_RV_CONTENT)
+
+    two_path = os.path.join(tmpdir, "two.rv")
+    with open(two_path, "w") as f:
+        f.write(TWO_RV_CONTENT)
+
+    one_uri = "file://" + one_path
+    two_uri = "file://" + two_path
+    client.text_document_did_open(params=DidOpenTextDocumentParams(
+        text_document=TextDocumentItem(uri=one_uri, language_id="revo", version=1, text=ONE_RV_CONTENT),
+    ))
+    client.text_document_did_open(params=DidOpenTextDocumentParams(
+        text_document=TextDocumentItem(uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
+    ))
+    return one_uri, two_uri
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_import_hover(client: LanguageClient):
+    """hover over `hi` in `one.hi(1, 2)` should resolve through import"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, two_uri = _open_import_pair(client, tmpdir)
+        await client.wait_for_notification("textDocument/publishDiagnostics")
+
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=2, character=4),
+                text_document=TextDocumentIdentifier(uri=two_uri),
+            )
+        )
+        print("  import hover result:", result)
+        assert result is not None, "hover on imported fn returned None"
+        contents = result.contents
+        assert contents is not None
+        assert "hi" in contents.value, f"expected 'hi' in hover, got: {contents.value}"
+        assert "fn hi" in contents.value or "num" in contents.value, (
+            f"expected fn signature in hover, got: {contents.value}"
+        )
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_import_completion(client: LanguageClient):
+    """completion after `one.` should show items from imported module"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, two_uri = _open_import_pair(client, tmpdir)
+        result = await client.text_document_completion_async(
+            params=CompletionParams(
+                position=Position(line=2, character=4),
+                text_document=TextDocumentIdentifier(uri=two_uri),
+            )
+        )
+        assert result is not None, "expected completions, got None"
+        items = result.items if hasattr(result, 'items') else result
+        labels = [i.label for i in items]
+        assert "hi" in labels, f"expected 'hi' completion from import, got: {labels}"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_import_hover_autoopen(client: LanguageClient):
+    """hover over imported fn when only the importer is opened"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        one_path = os.path.join(tmpdir, "one.rv")
+        with open(one_path, "w") as f:
+            f.write(ONE_RV_CONTENT)
+
+        two_path = os.path.join(tmpdir, "two.rv")
+        with open(two_path, "w") as f:
+            f.write(TWO_RV_CONTENT)
+
+        two_uri = "file://" + two_path
+        client.text_document_did_open(params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
+        ))
+        await client.wait_for_notification("textDocument/publishDiagnostics")
+
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=2, character=4),
+                text_document=TextDocumentIdentifier(uri=two_uri),
+            )
+        )
+        print("  autoopen hover result:", result)
+        assert result is not None, "hover on imported fn (auto-open) returned None"
+        contents = result.contents
+        assert contents is not None
+        assert "hi" in contents.value, f"expected 'hi' in hover, got: {contents.value}"
+        assert "fn hi" in contents.value or "num" in contents.value, (
+            f"expected fn signature in hover, got: {contents.value}"
+        )
