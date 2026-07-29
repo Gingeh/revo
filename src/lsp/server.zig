@@ -124,6 +124,7 @@ const Handler = struct {
             .documentSymbolProvider = .{ .bool = true },
             .workspaceSymbolProvider = .{ .bool = true },
             .completionProvider = .{ .triggerCharacters = &.{"."} },
+            .renameProvider = .{ .rename_options = .{ .prepareProvider = true } },
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
             },
@@ -419,6 +420,42 @@ const Handler = struct {
                 .diagnostics = &.{},
             }, .{});
         }
+    }
+
+    /// check rename validity
+    pub fn @"textDocument/prepareRename"(h: *Handler, arena: std.mem.Allocator, params: T.prepare_rename.Params) !?T.prepare_rename.Result {
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const ws_pos = add1(params.position);
+        const range = try h.ws.prepareRename(arena, file_id, ws_pos, .{}) orelse return null;
+        return T.prepare_rename.Result{ .range = .{ .start = sub1(range.start), .end = sub1(range.end) } };
+    }
+
+    /// rename symbol at position across the workspace
+    pub fn @"textDocument/rename"(h: *Handler, arena: std.mem.Allocator, params: T.rename.Params) !?T.WorkspaceEdit {
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const ws_pos = add1(params.position);
+        const refs = try h.ws.references(arena, file_id, ws_pos, .{});
+        defer arena.free(refs);
+
+        var file_edits = std.StringHashMap(std.ArrayList(T.TextEdit)).init(arena);
+        defer file_edits.deinit();
+
+        for (refs) |ref| {
+            const uri = h.file_to_uri.get(ref.file_id) orelse continue;
+            const gop = try file_edits.getOrPut(uri);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.append(arena, .{
+                .range = .{ .start = sub1(ref.range.start), .end = sub1(ref.range.end) },
+                .newText = params.newName,
+            });
+        }
+
+        var changes = std.json.ArrayHashMap([]const T.TextEdit){ .map = .empty };
+        var it = file_edits.iterator();
+        while (it.next()) |entry| {
+            try changes.map.put(arena, entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(arena));
+        }
+        return T.WorkspaceEdit{ .changes = changes };
     }
 
     /// highlighting

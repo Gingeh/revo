@@ -78,17 +78,21 @@ you might want to add a grammar entry for syntax highlighting
 - [DONE] textDocument/didClose
 - [DONE] textDocument/definition
 - [DONE] textDocument/hover
+- [DONE] textDocument/signatureHelp
 - [DONE] textDocument/references
 - [DONE] textDocument/documentSymbol
+- [DONE] textDocument/rename
+    - [DONE] textDocument/prepareRename
 - [STUB] textDocument/completion
-- [DONE] workspace/symbol
 - [DONE] textDocument/publishDiagnostics
-- [TODO] textDocument/publishDiagnostics
+- [DONE] textDocument/semanticTokens/full
+- [DONE] workspace/symbol
 - [TODO] textDocument/willSaveWaitUntil
 - [TODO] textDocument/formatting
-- [TODO] textDocument/rename
 - [TODO] textDocument/codeAction
     - [TODO] inline a function
+- [TODO] textDocument/inlayHint
+- [TODO] textDocument/codeLens
 
 # server logs
 

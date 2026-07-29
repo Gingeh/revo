@@ -19,6 +19,7 @@ from lsprotocol.types import (
     InitializeParams,
     Position,
     ReferenceContext,
+    PrepareRenameParams,
     ReferenceParams,
     RenameParams,
     SignatureHelpParams,
@@ -621,10 +622,35 @@ async def test_formatting(client: LanguageClient):
     assert result is not None
 
 
-@pytest.mark.skip(reason="TODO")
 @pytest.mark.asyncio(loop_scope="module")
 async def test_rename(client: LanguageClient):
     """rename should update all references"""
+    # re-open TEST_URI in case a previous test closed it
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=TEST_URI, language_id="revo", version=1, text=TEST_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    # first, prepareRename should confirm renameability
+    prep = await client.text_document_prepare_rename_async(
+        params=PrepareRenameParams(
+            text_document=TextDocumentIdentifier(uri=TEST_URI),
+            position=Position(line=2, character=3),
+        ),
+    )
+    assert prep is not None, "prepareRename returned None"
+    if hasattr(prep, 'range'):
+        r = prep.range
+    else:
+        r = prep
+    assert r.start.line == 2
+    assert r.start.character <= 3 <= r.end.character
+
+    # then rename should return a WorkspaceEdit
     result = await client.text_document_rename_async(
         params=RenameParams(
             text_document=TextDocumentIdentifier(uri=TEST_URI),
@@ -632,7 +658,10 @@ async def test_rename(client: LanguageClient):
             new_name="greet",
         ),
     )
-    assert result is not None
+    print("  rename result:", result)
+    assert result is not None, "rename returned None"
+    # should have changes with at least the current file
+    assert result.changes is not None, "expected changes in workspace edit"
 
 
 @pytest.mark.skip(reason="TODO")

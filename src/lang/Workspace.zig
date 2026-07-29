@@ -846,6 +846,25 @@ pub fn references(
     return out.toOwnedSlice(alloc);
 }
 
+/// validate that the word at pos is renameable, returning its range
+pub fn prepareRename(
+    self: *Workspace,
+    alloc: std.mem.Allocator,
+    id: FileId,
+    pos: Position,
+    opts: lang.BuildOptions,
+) !?Range {
+    _ = try self.definition(alloc, id, pos, opts) orelse return null;
+    const snap = self.snapshot(id) orelse return null;
+    const offset = positionToOffset(snap.text, pos) orelse return null;
+    var start = offset;
+    while (start > 0 and isWordChar(snap.text[start - 1])) start -= 1;
+    var end = offset;
+    while (end < snap.text.len and isWordChar(snap.text[end])) end += 1;
+    if (end <= start) return null;
+    return .{ .start = offsetToPosition(snap.text, start), .end = offsetToPosition(snap.text, end) };
+}
+
 // quick inspection via inspect cache (no full compile)
 pub fn inspectDetailed(
     self: *Workspace,
