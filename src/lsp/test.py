@@ -746,7 +746,7 @@ async def test_import_hover_module_name(client: LanguageClient):
         assert "fn hi(a: num, b: num) -> num" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )
-        assert "pub const CT: int" in contents.value, (
+        assert "const CT: int = 5" in contents.value, (
             f"expected const export in hover, got: {contents.value}"
         )
 

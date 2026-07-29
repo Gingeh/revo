@@ -649,16 +649,21 @@ pub fn hover(
             };
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
-            try buf.writer.print("module {s}\n\n", .{name});
+            try buf.writer.print("module `{s}`\n\n", .{name});
             for (mod_syms) |s| {
                 const fid = mod_id orelse id;
                 try buf.writer.writeAll("- `");
                 if (try self.fnSig(alloc, fid, s.name) != null) {
                     try buf.writer.writeAll(try renderDefinition(alloc, s.name, s.type_name, self, fid));
-                } else if (s.type_name.len > 0) {
-                    try buf.writer.print("pub const {s}: {s}", .{ s.name, s.type_name });
                 } else {
-                    try buf.writer.writeAll(s.name);
+                    if (self.snapshot(fid)) |ss| {
+                        var line = sourceLine(ss.text, s.range.start.line);
+                        line = std.mem.trim(u8, line, " \t\r");
+                        line = stripPub(line);
+                        try buf.writer.writeAll(line);
+                    } else {
+                        try buf.writer.writeAll(s.name);
+                    }
                 }
                 try buf.writer.writeAll("`\n");
             }
@@ -669,29 +674,52 @@ pub fn hover(
         }
     }
 
-    const display = try renderDefinition(alloc, name, type_name, self, def.file_id);
     var doc_text: []const u8 = "";
-    if (try self.fnSig(alloc, def.file_id, name)) |sig| {
+    const display = if (try self.fnSig(alloc, def.file_id, name)) |sig| blk: {
         if (sig.doc) |d| doc_text = d;
+        break :blk try renderDefinition(alloc, name, type_name, self, def.file_id);
+    } else blk: {
+        if (self.snapshot(def.file_id)) |ss| {
+            var line = sourceLine(ss.text, def.range.start.line);
+            line = std.mem.trim(u8, line, " \t\r");
+            line = stripPub(line);
+            if (type_name.len > 0 and std.mem.indexOf(u8, line, type_name) == null) {
+                break :blk try std.fmt.allocPrint(alloc, "{s}\n(type = {s})", .{ line, type_name });
+            }
+            break :blk try alloc.dupe(u8, line);
+        }
+        break :blk try renderDefinition(alloc, name, type_name, self, def.file_id);
+    };
+    var buf = std.Io.Writer.Allocating.init(alloc);
+    defer buf.deinit();
+    try buf.writer.writeAll("```revo\n");
+    try buf.writer.writeAll(display);
+    try buf.writer.writeAll("\n```");
+    if (doc_text.len > 0) {
+        try buf.writer.print("\n\n{s}", .{doc_text});
     }
-    const text = if (doc_text.len > 0)
-        try std.fmt.allocPrint(alloc,
-            \\```revo
-            \\{s}
-            \\```
-            \\
-            \\{s}
-        , .{ display, doc_text })
-    else
-        try std.fmt.allocPrint(alloc,
-            \\```revo
-            \\{s}
-            \\```
-        , .{display});
     return .{
-        .text = text,
+        .text = try buf.toOwnedSlice(),
         .range = def.range,
     };
+}
+
+/// extract a single source line by line index (1-based)
+fn sourceLine(text: []const u8, line: u32) []const u8 {
+    var pos: usize = 0;
+    var cur: u32 = 1;
+    while (cur < line and pos < text.len) {
+        if (text[pos] == '\n') cur += 1;
+        pos += 1;
+    }
+    const end = std.mem.indexOfScalarPos(u8, text, pos, '\n') orelse text.len;
+    return text[pos..end];
+}
+
+/// strip leading `pub ` from a line
+fn stripPub(line: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, line, "pub ")) return line[4..];
+    return line;
 }
 
 /// format a definition line: fn name(p1: t1, ...) -> ret when fnSig
@@ -1848,7 +1876,7 @@ const SymbolVisitor = struct {
             .kind = kind,
             .range = .{
                 .start = .{ .line = span.line, .character = @intCast(span.column) },
-                .end = .{ .line = span.line, .character = @intCast(span.column + 1) },
+                .end = .{ .line = span.line, .character = @intCast(span.column + name.len) },
             },
         }) catch {};
     }
