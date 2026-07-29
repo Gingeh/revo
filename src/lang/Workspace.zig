@@ -1021,10 +1021,13 @@ fn resolveImportPath(
     raw_path: []const u8,
 ) ?[]u8 {
     const base_dir = std.fs.path.dirname(source_name) orelse ".";
-    const joined = if (std.fs.path.isAbsolute(raw_path))
-        self.alloc.dupe(u8, raw_path) catch return null
+    // strip leading ./ from relative paths so join produces a clean path
+    var clean = raw_path;
+    while (clean.len >= 2 and clean[0] == '.' and clean[1] == '/') clean = clean[2..];
+    const joined = if (std.fs.path.isAbsolute(clean))
+        self.alloc.dupe(u8, clean) catch return null
     else
-        std.fs.path.join(self.alloc, &.{ base_dir, raw_path }) catch return null;
+        std.fs.path.join(self.alloc, &.{ base_dir, clean }) catch return null;
     if (std.fs.path.extension(joined).len != 0) return joined;
     const with_ext = std.fmt.allocPrint(self.alloc, "{s}.rv", .{joined}) catch {
         self.alloc.free(joined);
@@ -1032,6 +1035,29 @@ fn resolveImportPath(
     };
     self.alloc.free(joined);
     return with_ext;
+}
+
+/// given a file and the name of an import binding, return the symbols
+/// exported by the imported module. relies on file stem matching the
+/// auto-derived import binding name (the common case for bare imports)
+pub fn importedModuleSymbols(
+    self: *Workspace,
+    alloc: std.mem.Allocator,
+    file_id: FileId,
+    name: []const u8,
+) ![]const Symbol {
+    const deps = try self.dependencyClosure(alloc, file_id);
+    defer alloc.free(deps);
+    for (deps) |dep_id| {
+        const dep_snap = self.snapshot(dep_id) orelse continue;
+        const stem = std.fs.path.stem(dep_snap.name);
+        if (std.mem.eql(u8, stem, name)) {
+            var dep_analysis = try self.inspectDetailed(alloc, dep_id, .{});
+            defer dep_analysis.deinit(alloc);
+            return dep_analysis.symbols;
+        }
+    }
+    return &.{};
 }
 
 /// replace a file's dependency set; add/remove reverse deps as needed
@@ -1682,6 +1708,7 @@ const SymbolVisitor = struct {
             .binding => |b| if (!self.in_decl) self.addBinding(b),
             .struct_def => |def| if (!self.in_decl) self.addName(def.name, .struct_type, node.span),
             .type_alias => |t| if (!self.in_decl) self.addName(t.name, .type_alias, node.span),
+            .import_stmt => |is| if (!self.in_decl) self.addName(is.name, .binding, node.span),
             else => {},
         }
         if (node.expr != .decl) lang.ast.walkAST(SymbolVisitor, self, node);

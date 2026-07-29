@@ -34,7 +34,7 @@ pub fn completions(
     };
 
     if (dot_target) |target| {
-        try addFieldCompletions(vm, arena, &items, target, prefix);
+        try addFieldCompletions(vm, workspace, arena, &items, target, prefix, file_id);
     } else {
         try addGeneralCompletions(vm, workspace, arena, &items, prefix, file_id);
     }
@@ -45,26 +45,41 @@ pub fn completions(
 /// completions for fields of a table or struct (after a dot)
 fn addFieldCompletions(
     vm: *revo.VM,
+    workspace: *Workspace,
     arena: std.mem.Allocator,
     items: *std.ArrayList(T.completion.Item),
     target: []const u8,
     prefix: []const u8,
+    file_id: Workspace.FileId,
 ) !void {
     const target_atom = vm.internAtom(target) catch return;
-    const val = vm.globals.get(target_atom) orelse return;
-    if (val.isTable()) {
-        const table = try vm.tables.get(val.asTable().?);
-        var hash_it = table.hash.orderedIterator();
-        while (hash_it.next()) |entry| {
-            if (entry.key.isAtom()) {
-                const name = vm.atomName(entry.key.asAtom().?);
-                if (std.mem.startsWith(u8, name, prefix)) {
-                    items.append(arena, .{
-                        .label = name,
-                        .kind = .Field,
-                    }) catch return;
+    // stdlib modules registered as globals (string, table, math, etc.)
+    if (vm.globals.get(target_atom)) |val| {
+        if (val.isTable()) {
+            const table = try vm.tables.get(val.asTable().?);
+            var hash_it = table.hash.orderedIterator();
+            while (hash_it.next()) |entry| {
+                if (entry.key.isAtom()) {
+                    const name = vm.atomName(entry.key.asAtom().?);
+                    if (std.mem.startsWith(u8, name, prefix)) {
+                        items.append(arena, .{
+                            .label = name,
+                            .kind = .Field,
+                        }) catch return;
+                    }
                 }
             }
+            return;
+        }
+    }
+    // user-imported modules (e.g. `import "one.rv"` creates a local binding)
+    const imported_syms = workspace.importedModuleSymbols(arena, file_id, target) catch return;
+    for (imported_syms) |sym| {
+        if (std.mem.startsWith(u8, sym.name, prefix)) {
+            items.append(arena, .{
+                .label = sym.name,
+                .kind = .Field,
+            }) catch return;
         }
     }
 }
