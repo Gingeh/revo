@@ -199,8 +199,6 @@ async def test_hover(client: LanguageClient):
     assert result is not None, "hover is None"
     contents = result.contents
     assert contents is not None
-    assert "**x**" in contents.value, "expected markdown with name"
-    assert "binding" in contents.value, "expected kind"
     assert "int" in contents.value, "expected type"
 
 
@@ -235,7 +233,7 @@ async def test_fn_hover(client: LanguageClient):
     contents = result.contents
     assert contents is not None
     print("  hover value:", repr(contents.value))
-    assert "**greet**" in contents.value, "expected function name"
+    assert "fn greet(name: string) -> string" in contents.value, "expected type signature with explicit return type"
 
     # try hovering over `say_hi` from TEST_URI to verify basic fn hover
     result2 = await client.text_document_hover_async(
@@ -260,8 +258,7 @@ async def test_fn_hover(client: LanguageClient):
     contents = result.contents
     assert contents is not None
     print("  say_hi value:", repr(contents.value))
-    assert "**say_hi**" in contents.value
-    assert "function" in contents.value or "binding" in contents.value
+    assert "say_hi" in contents.value
 
     # hover over the call site `greet` should also show signature + doc
     result = await client.text_document_hover_async(
@@ -274,8 +271,8 @@ async def test_fn_hover(client: LanguageClient):
     assert result is not None, "hover at call site is None"
     contents = result.contents
     assert contents is not None
-    assert "**greet**" in contents.value, "expected function name at call site"
-    assert "fn(name: string) string" in contents.value, "expected type signature with explicit return type"
+    assert "fn greet(name: string) -> string" in contents.value, "expected type signature with explicit return type"
+    assert "greets a person" in contents.value, "expected doc text at call site"
 
 
 @pytest.mark.asyncio(loop_scope="module")

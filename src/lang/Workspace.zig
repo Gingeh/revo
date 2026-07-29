@@ -585,12 +585,11 @@ pub fn hover(
         if (revo.std_lib.api.find(name)) |spec| {
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
-            try buf.writer.writeAll("`");
+            try buf.writer.writeAll("```revo\n");
             try revo.std_lib.api.renderSignature(&buf.writer, spec);
-            try buf.writer.writeAll("`");
+            try buf.writer.writeAll("\n```");
             if (spec.doc.len > 0) {
-                try buf.writer.writeAll("\n");
-                try buf.writer.writeAll(spec.doc);
+                try buf.writer.print("\n\n{s}", .{spec.doc});
             }
             const text = try buf.toOwnedSlice();
             return .{
@@ -608,19 +607,12 @@ pub fn hover(
     }
     const def = try self.definition(alloc, id, pos, opts) orelse return null;
 
-    // find symbol kind and type from analysis
-    var kind: []const u8 = "value";
+    // find type from analysis
     var type_name: []const u8 = "";
     for (analysis.symbols) |sym| {
         if (std.mem.eql(u8, sym.name, name) and
             sym.range.start.line == def.range.start.line)
         {
-            kind = switch (sym.kind) {
-                .binding => "binding",
-                .function => "function",
-                .struct_type => "struct",
-                .type_alias => "type alias",
-            };
             type_name = sym.type_name;
             break;
         }
@@ -631,24 +623,30 @@ pub fn hover(
         if (sig.doc) |d| doc_text = d;
     }
 
+    // insert function name into function type signatures
+    var display_type: []const u8 = type_name;
+    if (type_name.len > 0 and std.mem.startsWith(u8, type_name, "fn(")) {
+        display_type = try std.fmt.allocPrint(alloc, "fn {s}{s}", .{ name, type_name[2..] });
+    }
+
     const text = if (doc_text.len > 0 and type_name.len > 0)
         try std.fmt.allocPrint(alloc,
-            \\**{s}** -- {s}
-            \\_type: {s}_
+            \\```revo
             \\{s}
-            \\_at {s}:{d}:{d}_
-        , .{ name, kind, type_name, doc_text, def.name, def.range.start.line, def.range.start.character })
+            \\```
+            \\
+            \\{s}
+        , .{ display_type, doc_text })
     else if (type_name.len > 0)
         try std.fmt.allocPrint(alloc,
-            \\**{s}** -- {s}
-            \\_type: {s}_
-            \\_at {s}:{d}:{d}_
-        , .{ name, kind, type_name, def.name, def.range.start.line, def.range.start.character })
+            \\```revo
+            \\{s}
+            \\```
+        , .{display_type})
     else
         try std.fmt.allocPrint(alloc,
-            \\**{s}** -- {s}
-            \\_at {s}:{d}:{d}_
-        , .{ name, kind, def.name, def.range.start.line, def.range.start.character });
+            \\{s}
+        , .{name});
     return .{
         .text = text,
         .range = def.range,
@@ -1916,7 +1914,7 @@ test "workspace query surface" {
     try std.testing.expect(hov != null);
     defer if (hov) |*h| h.deinit(alloc);
     try std.testing.expect(std.mem.find(u8, hov.?.text, "int") != null);
-    try std.testing.expect(std.mem.find(u8, hov.?.text, "_type:") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "```revo") != null);
 }
 
 test "workspace diagnostics query" {

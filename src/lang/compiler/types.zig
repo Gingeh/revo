@@ -164,7 +164,7 @@ pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
                 defer alloc.free(formatted);
                 try buf.appendSlice(alloc, formatted);
             }
-            try buf.appendSlice(alloc, ") ");
+            try buf.appendSlice(alloc, ") -> ");
             const ret = try formatType(alloc, sig.return_type);
             defer alloc.free(ret);
             try buf.appendSlice(alloc, ret);
