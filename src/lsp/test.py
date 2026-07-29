@@ -655,6 +655,8 @@ async def test_code_action(client: LanguageClient):
 
 ONE_RV_CONTENT = """pub fn hi(a: num, b: num) -> num
   a * b
+
+pub const CT: int = 5
 """
 
 TWO_RV_CONTENT = """import "one.rv"
@@ -721,6 +723,32 @@ async def test_import_completion(client: LanguageClient):
         items = result.items if hasattr(result, 'items') else result
         labels = [i.label for i in items]
         assert "hi" in labels, f"expected 'hi' completion from import, got: {labels}"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_import_hover_module_name(client: LanguageClient):
+    """hover over `one` (the module name) should show module info with exports"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, two_uri = _open_import_pair(client, tmpdir)
+        await client.wait_for_notification("textDocument/publishDiagnostics")
+
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=2, character=0),
+                text_document=TextDocumentIdentifier(uri=two_uri),
+            )
+        )
+        print("  module hover result:", result)
+        assert result is not None, "hover on module name returned None"
+        contents = result.contents
+        assert contents is not None
+        assert "module" in contents.value, f"expected 'module' in hover, got: {contents.value}"
+        assert "fn hi(a: num, b: num) -> num" in contents.value, (
+            f"expected fn signature in hover, got: {contents.value}"
+        )
+        assert "pub const CT: int" in contents.value, (
+            f"expected const export in hover, got: {contents.value}"
+        )
 
 
 @pytest.mark.asyncio(loop_scope="module")

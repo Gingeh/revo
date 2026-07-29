@@ -632,39 +632,96 @@ pub fn hover(
         }
     }
 
+    // for import modules, show exported symbols with full signatures
+    if (self.importedModuleSymbols(alloc, id, name) catch null) |mod_syms| {
+        defer alloc.free(mod_syms);
+        if (mod_syms.len > 0) {
+            // find the dep file id so fnSig can look up each export's params
+            const mod_id = blk: {
+                const deps = self.dependencyClosure(alloc, id) catch break :blk null;
+                defer alloc.free(deps);
+                for (deps) |dep_id| {
+                    const dep_snap = self.snapshot(dep_id) orelse continue;
+                    const stem = std.fs.path.stem(dep_snap.name);
+                    if (std.mem.eql(u8, stem, name)) break :blk dep_id;
+                }
+                break :blk null;
+            };
+            var buf = std.Io.Writer.Allocating.init(alloc);
+            defer buf.deinit();
+            try buf.writer.print("module {s}\n\n", .{name});
+            for (mod_syms) |s| {
+                const fid = mod_id orelse id;
+                try buf.writer.writeAll("- `");
+                if (try self.fnSig(alloc, fid, s.name) != null) {
+                    try buf.writer.writeAll(try renderDefinition(alloc, s.name, s.type_name, self, fid));
+                } else if (s.type_name.len > 0) {
+                    try buf.writer.print("pub const {s}: {s}", .{ s.name, s.type_name });
+                } else {
+                    try buf.writer.writeAll(s.name);
+                }
+                try buf.writer.writeAll("`\n");
+            }
+            return .{
+                .text = try buf.toOwnedSlice(),
+                .range = def.range,
+            };
+        }
+    }
+
+    const display = try renderDefinition(alloc, name, type_name, self, def.file_id);
     var doc_text: []const u8 = "";
     if (try self.fnSig(alloc, def.file_id, name)) |sig| {
         if (sig.doc) |d| doc_text = d;
     }
-
-    // insert function name into function type signatures
-    var display_type: []const u8 = type_name;
-    if (type_name.len > 0 and std.mem.startsWith(u8, type_name, "fn(")) {
-        display_type = try std.fmt.allocPrint(alloc, "fn {s}{s}", .{ name, type_name[2..] });
-    }
-
-    const text = if (doc_text.len > 0 and type_name.len > 0)
+    const text = if (doc_text.len > 0)
         try std.fmt.allocPrint(alloc,
             \\```revo
             \\{s}
             \\```
             \\
             \\{s}
-        , .{ display_type, doc_text })
-    else if (type_name.len > 0)
+        , .{ display, doc_text })
+    else
         try std.fmt.allocPrint(alloc,
             \\```revo
             \\{s}
             \\```
-        , .{display_type})
-    else
-        try std.fmt.allocPrint(alloc,
-            \\{s}
-        , .{name});
+        , .{display});
     return .{
         .text = text,
         .range = def.range,
     };
+}
+
+/// format a definition line: fn name(p1: t1, ...) -> ret when fnSig
+/// is available, otherwise just name or type_name
+pub fn renderDefinition(
+    alloc: std.mem.Allocator,
+    name: []const u8,
+    type_name: []const u8,
+    ws: *Workspace,
+    file_id: FileId,
+) ![]const u8 {
+    if (try ws.fnSig(alloc, file_id, name)) |sig| {
+        var buf = std.Io.Writer.Allocating.init(alloc);
+        defer buf.deinit();
+        try buf.writer.print("fn {s}(", .{name});
+        for (sig.params, 0..) |p, i| {
+            if (i > 0) try buf.writer.print(", ", .{});
+            try buf.writer.print("{s}: {s}", .{ p.name, p.type_name });
+        }
+        try buf.writer.writeByte(')');
+        if (sig.return_type.len > 0)
+            try buf.writer.print(" -> {s}", .{sig.return_type});
+        return buf.toOwnedSlice();
+    }
+    if (type_name.len > 0 and std.mem.startsWith(u8, type_name, "fn(")) {
+        return std.fmt.allocPrint(alloc, "fn {s}{s}", .{ name, type_name[2..] });
+    }
+    if (type_name.len > 0)
+        return alloc.dupe(u8, type_name);
+    return alloc.dupe(u8, name);
 }
 
 /// signature help: call-site function signature with param info and doc
