@@ -16,8 +16,10 @@ from lsprotocol.types import (
     DocumentFormattingParams,
     DocumentSymbolParams,
     HoverParams,
+    InlayHintParams,
     InitializeParams,
     Position,
+    Range,
     ReferenceContext,
     PrepareRenameParams,
     ReferenceParams,
@@ -620,6 +622,33 @@ async def test_formatting(client: LanguageClient):
         ),
     )
     assert result is not None
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_inlay_hints(client: LanguageClient):
+    """inlay hints should show inferred types"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=TEST_URI, language_id="revo", version=1, text=TEST_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+    result = await client.text_document_inlay_hint_async(
+        params=InlayHintParams(
+            text_document=TextDocumentIdentifier(uri=TEST_URI),
+            range=Range(start=Position(line=0, character=0), end=Position(line=10, character=0)),
+        ),
+    )
+    print("  inlay hints:", result)
+    assert result is not None
+    # `x` is `let x = 42` -> should have a type hint ": num"
+    found_x = [h for h in result if h.position.line == 0]
+    assert len(found_x) >= 1, f"expected hint for x, got hints: {result}"
+    hint = found_x[0]
+    assert "int" in hint.label, f"expected type in label, got {hint.label}"
+    assert hint.kind == 1  # InlayHintKind.Type = 1
 
 
 @pytest.mark.asyncio(loop_scope="module")

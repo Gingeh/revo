@@ -990,6 +990,48 @@ pub fn inspectDetailed(
     };
 }
 
+pub const InlayHint = struct {
+    position: Position,
+    label: []const u8,
+    kind: enum { @"type", parameter },
+};
+
+/// compute type inlay hints for a range in a file
+pub fn inlayHints(
+    self: *Workspace,
+    alloc: std.mem.Allocator,
+    id: FileId,
+    range: Range,
+    opts: lang.BuildOptions,
+) ![]InlayHint {
+    var analysis = try self.inspectDetailed(alloc, id, opts);
+    defer analysis.deinit(alloc);
+    const snap = analysis.snapshot;
+
+    var hints: std.ArrayList(InlayHint) = .empty;
+    errdefer hints.deinit(alloc);
+
+    for (analysis.symbols) |sym| {
+        if (sym.type_name.len == 0) continue;
+        if (sym.kind == .function) continue;
+        if (std.mem.startsWith(u8, sym.type_name, "fn(")) continue;
+        if (sym.range.end.line < range.start.line or sym.range.start.line > range.end.line) continue;
+
+        const line = sourceLine(snap.text, sym.range.start.line);
+        const needle = try std.fmt.allocPrint(alloc, ": {s}", .{sym.type_name});
+        defer alloc.free(needle);
+        if (std.mem.indexOf(u8, line, needle) != null) continue;
+
+        try hints.append(alloc, .{
+            .position = .{ .line = sym.range.end.line, .character = sym.range.end.character },
+            .label = try std.fmt.allocPrint(alloc, ": {s}", .{sym.type_name}),
+            .kind = .@"type",
+        });
+    }
+
+    return hints.toOwnedSlice(alloc);
+}
+
 /// lookup a function signature from the inspect cache for file `id`
 /// returns null if file hasn't been inspected, or name isn't in sig_map
 pub fn fnSig(self: *Workspace, alloc: std.mem.Allocator, id: FileId, name: []const u8) !?FnSig {

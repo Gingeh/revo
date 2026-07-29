@@ -125,6 +125,7 @@ const Handler = struct {
             .workspaceSymbolProvider = .{ .bool = true },
             .completionProvider = .{ .triggerCharacters = &.{"."} },
             .renameProvider = .{ .rename_options = .{ .prepareProvider = true } },
+            .inlayHintProvider = .{ .inlay_hint_options = .{} },
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
             },
@@ -456,6 +457,28 @@ const Handler = struct {
             try changes.map.put(arena, entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(arena));
         }
         return T.WorkspaceEdit{ .changes = changes };
+    }
+
+    /// return type inlay hints for visible bindings
+    pub fn @"textDocument/inlayHint"(h: *Handler, arena: std.mem.Allocator, params: T.InlayHint.Params) !?[]const T.InlayHint {
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const ws_range: Workspace.Range = .{ .start = add1(params.range.start), .end = add1(params.range.end) };
+        const ws_hints = try h.ws.inlayHints(arena, file_id, ws_range, .{});
+        defer arena.free(ws_hints);
+
+        var out = try std.ArrayList(T.InlayHint).initCapacity(arena, ws_hints.len);
+        for (ws_hints) |ws_hint| {
+            out.appendAssumeCapacity(.{
+                .position = sub1(ws_hint.position),
+                .label = .{ .string = ws_hint.label },
+                .kind = switch (ws_hint.kind) {
+                    .@"type" => T.InlayHint.Kind.Type,
+                    .parameter => T.InlayHint.Kind.Parameter,
+                },
+                .paddingLeft = true,
+            });
+        }
+        return try out.toOwnedSlice(arena);
     }
 
     /// highlighting

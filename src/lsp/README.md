@@ -85,6 +85,7 @@ you might want to add a grammar entry for syntax highlighting
     - [DONE] textDocument/prepareRename
 - [STUB] textDocument/completion
 - [DONE] textDocument/publishDiagnostics
+- [DONE] textDocument/inlayHint
 - [DONE] textDocument/semanticTokens/full
 - [DONE] workspace/symbol
 - [TODO] textDocument/willSaveWaitUntil
