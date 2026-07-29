@@ -120,17 +120,13 @@ pub const TablePool = struct {
 
 pub const Table = struct {
     fn hashKey(key: Data) u64 {
+        switch (key.tag()) {
+            .number, .atom => return key.bits,
+            else => {},
+        }
         var h = std.hash.Wyhash.init(0);
         h.update(&[_]u8{@intCast(@intFromEnum(key.tag()))});
-        switch (key.tag()) {
-            .number => {
-                const bits: u64 = key.rawBits();
-                h.update(std.mem.asBytes(&bits));
-            },
-            else => {
-                h.update(std.mem.asBytes(&key.unboxed()));
-            },
-        }
+        h.update(std.mem.asBytes(&key.unboxed()));
         return h.final();
     }
 
