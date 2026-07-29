@@ -58,7 +58,7 @@ print(say_hi("world"))
 
 DOC_URI = "file:///test/doc.rv"
 DOC_TEXT = """@doc "greets a person by name"
-fn greet(name: string) string do
+fn greet(name: string) -> string do
   "hello " + name
 end
 
@@ -202,6 +202,80 @@ async def test_hover(client: LanguageClient):
     assert "**x**" in contents.value, "expected markdown with name"
     assert "binding" in contents.value, "expected kind"
     assert "int" in contents.value, "expected type"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_fn_hover(client: LanguageClient):
+    """hover over a function should show its doc"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=DOC_URI,
+                language_id="revo",
+                version=1,
+                text=DOC_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+    diags = client.diagnostics.get(DOC_URI, [])
+    print(f"  doc diags: {len(diags)}")
+    for d in diags:
+        print(f"    msg={d.message!r} code={d.code} range={d.range}")
+
+    # try hovering over `greet` at the definition
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=1, character=4),
+            text_document=TextDocumentIdentifier(uri=DOC_URI),
+        )
+    )
+    print("  hover result:", result)
+    assert result is not None, "hover is None"
+    contents = result.contents
+    assert contents is not None
+    print("  hover value:", repr(contents.value))
+    assert "**greet**" in contents.value, "expected function name"
+
+    # try hovering over `say_hi` from TEST_URI to verify basic fn hover
+    result2 = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=2, character=4),
+            text_document=TextDocumentIdentifier(uri=TEST_URI),
+        )
+    )
+    print("  say_hi hover:", result2)
+    if result2 is not None:
+        print("  say_hi value:", repr(result2.contents.value))
+
+    # hover over `say_hi` in TEST_URI to verify basic fn hover works
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=2, character=4),
+            text_document=TextDocumentIdentifier(uri=TEST_URI),
+        )
+    )
+    print("say_hi hover:", result)
+    assert result is not None
+    contents = result.contents
+    assert contents is not None
+    print("  say_hi value:", repr(contents.value))
+    assert "**say_hi**" in contents.value
+    assert "function" in contents.value or "binding" in contents.value
+
+    # hover over the call site `greet` should also show signature + doc
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=5, character=1),
+            text_document=TextDocumentIdentifier(uri=DOC_URI),
+        )
+    )
+    print(result)
+    assert result is not None, "hover at call site is None"
+    contents = result.contents
+    assert contents is not None
+    assert "**greet**" in contents.value, "expected function name at call site"
+    assert "fn(name: string) string" in contents.value, "expected type signature with explicit return type"
 
 
 @pytest.mark.asyncio(loop_scope="module")

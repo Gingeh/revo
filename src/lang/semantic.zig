@@ -726,17 +726,9 @@ const SemanticChecker = struct {
             }
             _ = try self.analyzeFnBody(binding.value.expr.fn_expr, sig);
             if (self.type_map) |tm| {
-                if (tm.contains(name)) {
-                    const ts = try types_mod.formatType(self.alloc, fn_type);
-                    const prev = try tm.fetchPut(
-                        try self.alloc.dupe(u8, name),
-                        ts,
-                    );
-                    if (prev) |old| {
-                        self.alloc.free(old.key);
-                        self.alloc.free(old.value);
-                    }
-                }
+                const ts = try types_mod.formatType(self.alloc, fn_type);
+                _ = tm.remove(name);
+                try tm.put(try self.alloc.dupe(u8, name), ts);
             }
             return fn_type;
         }

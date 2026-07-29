@@ -626,7 +626,19 @@ pub fn hover(
         }
     }
 
-    const text = if (type_name.len > 0)
+    var doc_text: []const u8 = "";
+    if (try self.fnSig(alloc, def.file_id, name)) |sig| {
+        if (sig.doc) |d| doc_text = d;
+    }
+
+    const text = if (doc_text.len > 0 and type_name.len > 0)
+        try std.fmt.allocPrint(alloc,
+            \\**{s}** -- {s}
+            \\_type: {s}_
+            \\{s}
+            \\_at {s}:{d}:{d}_
+        , .{ name, kind, type_name, doc_text, def.name, def.range.start.line, def.range.start.character })
+    else if (type_name.len > 0)
         try std.fmt.allocPrint(alloc,
             \\**{s}** -- {s}
             \\_type: {s}_
