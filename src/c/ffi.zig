@@ -102,7 +102,7 @@ pub export fn revo_table_remove(vm_ptr: *anyopaque, table_id: u64, key: CRevoDat
     const tid: memory.TableID = @intCast(table_id);
     const key_data = key.toData(v) catch return false;
     const tbl = v.tables.get(tid) catch return false;
-    return tbl.remove(key_data);
+    return tbl.remove(key_data, v);
 }
 
 /// insert or update a table entry, silently ignores errors

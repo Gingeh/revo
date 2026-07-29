@@ -441,7 +441,7 @@ fn split_f(args: []const Data, vm: *VM) !NativeResult {
     const table_id = try vm.tables.create();
     const table = try vm.tables.get(table_id);
     for (parts.items, 0..) |part, idx| {
-        try table.putRaw(Data.new.num(idx), part);
+        try table.putRaw(Data.new.num(idx), part, vm);
     }
 
     return .{ .ok = Data.new.table(table_id) };

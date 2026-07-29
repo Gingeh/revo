@@ -581,7 +581,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const key = regRead(regs, base, instr.c);
             if (object.asTable()) |t_id| {
                 const t = try self.tableFast(t_id);
-                if (t.getRaw(key)) |value| {
+                if (t.getRaw(key, self)) |value| {
                     regWrite(regs, base, instr.a, value);
 
                     if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -694,7 +694,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
                 if (ic.pc == pc and ic.table_id == t_id and ic.version == t.ic_version) {
                     @branchHint(.likely);
                     regWrite(regs, base, instr.a, ic.value);
-                } else if (t.getRaw(key)) |value| {
+                } else if (t.getRaw(key, self)) |value| {
                     ic.* = .{ .pc = pc, .table_id = t_id, .version = t.ic_version, .value = value };
                     regWrite(regs, base, instr.a, value);
                 } else if (try self.resolveField(object, key)) |resolved| {

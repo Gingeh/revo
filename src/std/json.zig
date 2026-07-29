@@ -137,7 +137,7 @@ fn objectToData(object: json.ObjectMap, vm: *VM) anyerror!Data {
     const table = try vm.tables.get(table_id);
     var it = object.iterator();
     while (it.next()) |entry| {
-        try table.putRawAtom(try vm.internAtom(entry.key_ptr.*), try fromJsonValue(entry.value_ptr.*, vm));
+        try table.putRawAtom(try vm.internAtom(entry.key_ptr.*), try fromJsonValue(entry.value_ptr.*, vm), vm);
     }
     return Data.new.table(table_id);
 }

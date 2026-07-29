@@ -614,7 +614,7 @@ pub fn putInTable(
 ) !void {
     const atom = try self.internAtom(name);
     const t = try self.tables.get(table_id);
-    try t.putRawAtom(atom, Data.new.function(fn_id));
+    try t.putRawAtom(atom, Data.new.function(fn_id), self);
 }
 
 /// same as putInTable but the key is an already-resolved core atom
@@ -625,7 +625,7 @@ pub fn putInTableAtom(
     fn_id: mem.FunctionID,
 ) !void {
     const t = try self.tables.get(table_id);
-    try t.putRawAtom(atom, Data.new.function(fn_id));
+    try t.putRawAtom(atom, Data.new.function(fn_id), self);
 }
 
 pub inline fn getGlobal(self: *VM, name: []const u8) ?Data {
@@ -1072,7 +1072,7 @@ pub inline fn getMetamethodByAtom(
 ) !?Data {
     const mt_id = try self.getMetatableId(val) orelse return null;
     const mt = try self.tables.get(mt_id);
-    return mt.getRawAtom(atom);
+    return mt.getRawAtom(atom, self);
 }
 
 pub fn getMetatableId(
@@ -1613,6 +1613,7 @@ fn callStructConstructor(
         for (desc.fields, 0..) |f, i| {
             if (init_table.getRaw(
                 Data.new.atom(f.name_atom),
+                self,
             )) |val| {
                 instance.fields[i] = val;
             }

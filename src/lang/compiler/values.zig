@@ -629,10 +629,10 @@ fn evalConstNode(self: *Compiler, node: *const Node) ?Data {
                 if (entry.key) |key| {
                     const key_val = evalConstNode(self, key) orelse return null;
                     const val = evalConstNode(self, entry.value) orelse return null;
-                    table.putRaw(key_val, val) catch return null;
+                    table.putRaw(key_val, val, self.vm) catch return null;
                 } else {
                     const val = evalConstNode(self, entry.value) orelse return null;
-                    table.putRaw(Data.new.num(@as(f64, @floatFromInt(array_index))), val) catch return null;
+                    table.putRaw(Data.new.num(@as(f64, @floatFromInt(array_index))), val, self.vm) catch return null;
                     array_index += 1;
                 }
             }

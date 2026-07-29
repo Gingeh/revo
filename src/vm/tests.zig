@@ -191,7 +191,7 @@ test "vm gc keeps rooted tables and their children alive" {
 
     {
         const parent = try vm.tables.get(parent_id);
-        try parent.putRaw(try vm.ownDataString("child"), Data.new.table(child_id));
+        try parent.putRaw(try vm.ownDataString("child"), Data.new.table(child_id), &vm);
     }
 
     try vm.push(Data.new.table(parent_id));
@@ -200,7 +200,7 @@ test "vm gc keeps rooted tables and their children alive" {
     trigger_gc(&vm);
 
     const parent = try vm.tables.get(parent_id);
-    const child = parent.getRaw(try vm.ownDataString("child")) orelse unreachable;
+    const child = parent.getRaw(try vm.ownDataString("child"), &vm) orelse unreachable;
     try testing.expect(child.isTable());
     try testing.expectEqual(child_id, child.asTable().?);
     _ = try vm.tables.get(child_id);
@@ -241,7 +241,7 @@ test "vm gc keeps tables written during sweep alive" {
     vm.maybeCollectGarbage();
 
     const root = try vm.tables.get(root_id);
-    const child = root.getRaw(key) orelse unreachable;
+    const child = root.getRaw(key, &vm) orelse unreachable;
     try testing.expect(child.isTable());
     try testing.expectEqual(child_id, child.asTable().?);
     _ = try vm.tables.get(child_id);
@@ -273,7 +273,7 @@ test "vm gc keeps rooted closures and captured tables alive" {
     defer vm.deinit();
 
     const table_id = try vm.tables.create();
-    try (try vm.tables.get(table_id)).putRaw(try vm.ownDataString("x"), Data.new.num(1));
+    try (try vm.tables.get(table_id)).putRaw(try vm.ownDataString("x"), Data.new.num(1), &vm);
 
     const proto_id = try vm.functions.createPrototype(.{
         .addr = 0,
@@ -415,7 +415,7 @@ test "vm gc stress test allocates many objects" {
         try table_ids.append(vt_runtime().alloc, tid);
 
         const ttbl = try vm.tables.get(tid);
-        try ttbl.putRaw(try vm.ownDataString("index"), Data.new.num(i));
+        try ttbl.putRaw(try vm.ownDataString("index"), Data.new.num(i), &vm);
 
         const tpl_id = try vm.tuples.create(&.{ Data.new.num(i), Data.new.num(i * 2) });
         try tuple_ids.append(vt_runtime().alloc, tpl_id);

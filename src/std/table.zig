@@ -387,7 +387,7 @@ fn keys(args: []const Data, vm: *VM) !NativeResult {
     const result_table = try vm.tables.create();
     const result = try vm.tables.get(result_table);
     for (keys_list.items, 0..) |key, idx| {
-        try result.putRaw(Data.new.num(idx), key);
+        try result.putRaw(Data.new.num(idx), key, vm);
     }
 
     return .okData(Data.new.table(result_table));
@@ -414,7 +414,7 @@ fn values(args: []const Data, vm: *VM) !NativeResult {
     const result_table = try vm.tables.create();
     const result = try vm.tables.get(result_table);
     for (values_list.items, 0..) |val, idx| {
-        try result.putRaw(Data.new.num(idx), val);
+        try result.putRaw(Data.new.num(idx), val, vm);
     }
 
     return .okData(Data.new.table(result_table));
@@ -452,7 +452,7 @@ fn copy(args: []const Data, vm: *VM) !NativeResult {
 
     var hash_it = table.hash.orderedIterator();
     while (hash_it.next()) |entry| {
-        try new_t.putRaw(entry.key, entry.val);
+        try new_t.putRaw(entry.key, entry.val, vm);
     }
 
     return .okData(Data.new.table(new_table));
@@ -477,11 +477,11 @@ fn merge(args: []const Data, vm: *VM) !NativeResult {
 
     var hash_it1 = table1.hash.orderedIterator();
     while (hash_it1.next()) |entry| {
-        try result.putRaw(entry.key, entry.val);
+        try result.putRaw(entry.key, entry.val, vm);
     }
     var hash_it2 = table2.hash.orderedIterator();
     while (hash_it2.next()) |entry| {
-        try result.putRaw(entry.key, entry.val);
+        try result.putRaw(entry.key, entry.val, vm);
     }
 
     return .okData(Data.new.table(result_table));
@@ -494,7 +494,7 @@ fn rawget(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const t = try vm.tables.get(table_id);
-    return .okData(t.getRaw(args[1]) orelse revo.Data.new.core(.undef));
+    return .okData(t.getRaw(args[1], vm) orelse revo.Data.new.core(.undef));
 }
 
 /// > rawset(table: table, key: any, value: any) -> table
@@ -503,7 +503,7 @@ fn rawset(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const t = try vm.tables.get(table_id);
-    try t.putRaw(args[1], args[2]);
+    try t.putRaw(args[1], args[2], vm);
     return .okData(args[0]);
 }
 
@@ -524,11 +524,11 @@ fn tableAdd(args: []const Data, vm: *VM) !NativeResult {
 
     var hash_it = left.hash.orderedIterator();
     while (hash_it.next()) |entry| {
-        try new_t.putRaw(entry.key, entry.val);
+        try new_t.putRaw(entry.key, entry.val, vm);
     }
     hash_it = right.hash.orderedIterator();
     while (hash_it.next()) |entry| {
-        try new_t.putRaw(entry.key, entry.val);
+        try new_t.putRaw(entry.key, entry.val, vm);
     }
     return .okData(Data.new.table(new_id));
 }

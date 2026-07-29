@@ -16,7 +16,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
         .table => {
             const table_id = object.asTable().?;
             const t = try self.tables.get(table_id);
-            if (t.getRaw(key)) |value| {
+            if (t.getRaw(key, self)) |value| {
                 return .{ .value = value, .from_meta = false };
             }
             if (t.metatable) |mt_id| {
@@ -96,10 +96,10 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
 
 fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: @TypeOf(self.metatables[0].?)) VM.EvalError!?FieldLookup {
     const mt = try self.tables.get(mt_id);
-    if (mt.getRaw(key)) |value| {
+    if (mt.getRaw(key, self)) |value| {
         return .{ .value = value, .from_meta = true };
     }
-    if (mt.getRawAtom(revo.core_atoms.atom_id(.__index))) |indexer| {
+    if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), self)) |indexer| {
         return resolveIndex(self, object, key, indexer);
     }
     return null;
@@ -129,16 +129,16 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
         .table => {
             const table_id = indexer.asTable().?;
             const index_table = try self.tables.get(table_id);
-            if (index_table.getRaw(key)) |value| {
+            if (index_table.getRaw(key, self)) |value| {
                 return .{ .value = value, .from_meta = true };
             }
             if (index_table.metatable) |mt_id| {
                 if (depth == 0) return null;
                 const mt = try self.tables.get(mt_id);
-                if (mt.getRaw(key)) |value| {
+                if (mt.getRaw(key, self)) |value| {
                     return .{ .value = value, .from_meta = true };
                 }
-                if (mt.getRawAtom(revo.core_atoms.atom_id(.__index))) |next_indexer| {
+                if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), self)) |next_indexer| {
                     return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1);
                 }
             }

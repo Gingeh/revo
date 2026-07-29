@@ -999,7 +999,7 @@ pub const Compiler = struct {
         const module_table = self.vm.tables.get(module_table_id) catch return false;
 
         const method_atom = try self.vm.internAtom(field.name);
-        const method = module_table.getRawAtom(method_atom) orelse return false;
+        const method = module_table.getRawAtom(method_atom, self.vm) orelse return false;
         if (!method.isFunction()) return false;
 
         try self.emit(.load_stdlib_global, module_atom);

@@ -23,6 +23,7 @@ const revo = @import("revo");
 const memory = revo.memory;
 const Data = memory.Data;
 const testing = revo.lang.testing;
+const compare = @import("compare.zig").compare;
 
 pub const NULL_ID = std.math.maxInt(u32);
 
@@ -164,14 +165,14 @@ pub const Table = struct {
             self.* = .{};
         }
 
-        fn lookup(self: *const HashPart, key: Data) ?u32 {
+        fn lookup(self: *const HashPart, key: Data, vm: *revo.VM) ?u32 {
             if (self.buckets.len == 0) return null;
             const mask = @as(u32, @intCast(self.buckets.len - 1));
             var idx = @as(u32, @truncate(hashKey(key))) & mask;
             const limit: u32 = self.count;
             var probes: u32 = 0;
             while (self.buckets[idx].status == .occupied) {
-                if (keyEq(self.buckets[idx].key, key)) return idx;
+                if (keyEq(self.buckets[idx].key, key, vm)) return idx;
                 idx = (idx + 1) & mask;
                 probes += 1;
                 if (probes >= limit) return null;
@@ -179,24 +180,24 @@ pub const Table = struct {
             return null;
         }
 
-        fn get(self: *const HashPart, key: Data) ?Data {
-            const idx = self.lookup(key) orelse return null;
+        fn get(self: *const HashPart, key: Data, vm: *revo.VM) ?Data {
+            const idx = self.lookup(key, vm) orelse return null;
             return self.buckets[idx].val;
         }
 
-        fn getPtr(self: *HashPart, key: Data) ?*Data {
-            const idx = self.lookup(key) orelse return null;
+        fn getPtr(self: *HashPart, key: Data, vm: *revo.VM) ?*Data {
+            const idx = self.lookup(key, vm) orelse return null;
             return &self.buckets[idx].val;
         }
 
-        fn getOrPut(self: *HashPart, alloc: std.mem.Allocator, key: Data) !*Data {
+        fn getOrPut(self: *HashPart, alloc: std.mem.Allocator, key: Data, vm: *revo.VM) !*Data {
             if (self.buckets.len == 0 or self.count * 100 > self.buckets.len * MAX_LOAD)
                 try self.grow(alloc);
 
             const mask = @as(u32, @intCast(self.buckets.len - 1));
             var idx = @as(u32, @truncate(hashKey(key))) & mask;
             while (self.buckets[idx].status == .occupied) {
-                if (keyEq(self.buckets[idx].key, key))
+                if (keyEq(self.buckets[idx].key, key, vm))
                     return &self.buckets[idx].val;
                 idx = (idx + 1) & mask;
             }
@@ -250,8 +251,8 @@ pub const Table = struct {
             self.last = new_last;
         }
 
-        fn remove(self: *HashPart, key: Data) bool {
-            const idx = self.lookup(key) orelse return false;
+        fn remove(self: *HashPart, key: Data, vm: *revo.VM) bool {
+            const idx = self.lookup(key, vm) orelse return false;
             const mask = @as(u32, @intCast(self.buckets.len - 1));
 
             // unlink from insertion-order list
@@ -328,11 +329,11 @@ pub const Table = struct {
         self.hash.deinit(self.alloc);
     }
 
-    fn keyEq(a: Data, b: Data) bool {
+    fn keyEq(a: Data, b: Data, vm: *revo.VM) bool {
         if (a.tag() != b.tag()) return false;
         return switch (a.tag()) {
             .number => a.rawBits() == b.rawBits(),
-            .string => a.asString().? == b.asString().?,
+            .string => compare(vm, a, b) == .eq,
             .atom => a.asAtom().? == b.asAtom().?,
             .function => a.asFunction().? == b.asFunction().?,
             .table => a.asTable().? == b.asTable().?,
@@ -351,12 +352,12 @@ pub const Table = struct {
     pub fn put(self: *Table, table_id: memory.TableID, vm: *revo.VM, key: Data, val: Data) !void {
         self.ic_version +%= 1;
         if (self.metatable == null) {
-            try self.putRaw(key, val);
+            try self.putRaw(key, val, vm);
         } else {
             const mt_id = self.metatable.?;
             const mt = try vm.tables.get(mt_id);
 
-            if (mt.getRawAtom(revo.core_atoms.atom_id(.__newindex))) |newindex_method| {
+            if (mt.getRawAtom(revo.core_atoms.atom_id(.__newindex), vm)) |newindex_method| {
                 if (newindex_method.asFunction()) |f| {
                     const table_data = Data.new.table(table_id);
                     _ = try vm.callFunction(Data.new.function(f), &[_]Data{ table_data, key, val });
@@ -364,11 +365,11 @@ pub const Table = struct {
                 }
             }
 
-            try self.putRaw(key, val);
+            try self.putRaw(key, val, vm);
         }
     }
 
-    pub fn putRaw(self: *Table, key: Data, val: Data) !void {
+    pub fn putRaw(self: *Table, key: Data, val: Data, vm: *revo.VM) !void {
         self.ic_version +%= 1;
         if (integerArrayIndex(key)) |idx| {
             if (idx < self.array.items.len) {
@@ -380,13 +381,13 @@ pub const Table = struct {
             } // else fallback to hash
         }
 
-        const entry = try self.hash.getOrPut(self.alloc, key);
+        const entry = try self.hash.getOrPut(self.alloc, key, vm);
         entry.* = val;
     }
 
-    pub fn putRawAtom(self: *Table, id: memory.AtomID, val: Data) !void {
+    pub fn putRawAtom(self: *Table, id: memory.AtomID, val: Data, vm: *revo.VM) !void {
         self.ic_version +%= 1;
-        const entry = try self.hash.getOrPut(self.alloc, Data.new.atom(id));
+        const entry = try self.hash.getOrPut(self.alloc, Data.new.atom(id), vm);
         entry.* = val;
     }
 
@@ -394,31 +395,31 @@ pub const Table = struct {
         try self.array.append(self.alloc, val);
     }
 
-    pub inline fn getRaw(self: *Table, key: Data) ?Data {
+    pub inline fn getRaw(self: *Table, key: Data, vm: *revo.VM) ?Data {
         if (integerArrayIndex(key)) |idx| {
             if (idx < self.array.items.len) {
                 return self.array.items[idx];
             }
         }
-        return self.hash.get(key);
+        return self.hash.get(key, vm);
     }
 
-    pub inline fn getRawAtom(self: *Table, id: memory.AtomID) ?Data {
-        return self.hash.get(Data.new.atom(id));
+    pub inline fn getRawAtom(self: *Table, id: memory.AtomID, vm: *revo.VM) ?Data {
+        return self.hash.get(Data.new.atom(id), vm);
     }
 
-    pub fn removeRaw(self: *Table, key: Data) bool {
+    pub fn removeRaw(self: *Table, key: Data, vm: *revo.VM) bool {
         self.ic_version +%= 1;
         if (integerArrayIndex(key)) |idx| {
             if (idx >= self.array.items.len) return false;
             self.array.items[idx] = Data.new.nil();
             return true;
         }
-        return self.hash.remove(key);
+        return self.hash.remove(key, vm);
     }
 
-    pub fn remove(self: *Table, key: Data) bool {
-        return self.removeRaw(key);
+    pub fn remove(self: *Table, key: Data, vm: *revo.VM) bool {
+        return self.removeRaw(key, vm);
     }
 
     const MAX_TAG_LOOP = 200;
@@ -428,11 +429,11 @@ pub const Table = struct {
     }
 
     fn getWithDepth(self: *Table, key: Data, vm: *revo.VM, depth: usize) !?Data {
-        if (self.getRaw(key)) |value| return value;
+        if (self.getRaw(key, vm)) |value| return value;
         if (depth == 0) return null;
         if (self.metatable) |mt_id| {
             const mt = try vm.tables.get(mt_id);
-            if (mt.getRawAtom(revo.core_atoms.atom_id(.__index))) |index_method| {
+            if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), vm)) |index_method| {
                 if (index_method.asTable()) |table_id| {
                     const index_table = try vm.tables.get(table_id);
                     return try index_table.getWithDepth(key, vm, depth - 1);
@@ -524,6 +525,8 @@ test "table float keys stay distinct when non integral" {
 }
 
 test "table push appends positional values" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
@@ -532,9 +535,9 @@ test "table push appends positional values" {
     try table.push(Data.new.num(30));
 
     try std.testing.expectEqual(@as(usize, 3), table.count());
-    try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0)).?);
-    try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1)).?);
-    try std.testing.expectEqual(Data.new.num(30), table.getRaw(Data.new.num(2)).?);
+    try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0), &vm).?);
+    try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1), &vm).?);
+    try std.testing.expectEqual(Data.new.num(30), table.getRaw(Data.new.num(2), &vm).?);
 }
 
 //
@@ -542,13 +545,15 @@ test "table push appends positional values" {
 //
 
 test "putRaw: integer key in range 0..<len overwrites existing element" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
     try table.push(Data.new.num(30));
 
-    try table.putRaw(Data.new.num(1), Data.new.num(99));
+    try table.putRaw(Data.new.num(1), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 3), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(10), table.array.items[0]);
     try std.testing.expectEqual(Data.new.num(99), table.array.items[1]);
@@ -556,89 +561,105 @@ test "putRaw: integer key in range 0..<len overwrites existing element" {
 }
 
 test "putRaw: integer key == len appends to array" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
 
-    try table.putRaw(Data.new.num(2), Data.new.num(30));
+    try table.putRaw(Data.new.num(2), Data.new.num(30), &vm);
     try std.testing.expectEqual(@as(usize, 3), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(30), table.array.items[2]);
 }
 
 test "putRaw: integer key > len goes to hash" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
 
-    try table.putRaw(Data.new.num(5), Data.new.num(99));
+    try table.putRaw(Data.new.num(5), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
-    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(5)).?);
+    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(5), &vm).?);
 }
 
 test "putRaw: negative integer key always goes to hash" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
 
-    try table.putRaw(Data.new.num(-1), Data.new.num(99));
+    try table.putRaw(Data.new.num(-1), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
-    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(-1)).?);
+    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(-1), &vm).?);
 }
 
 test "putRaw: float key always goes to hash" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
-    try table.putRaw(Data.new.num(1.5), Data.new.num(99));
+    try table.putRaw(Data.new.num(1.5), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 0), table.array.items.len);
-    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(1.5)).?);
+    try std.testing.expectEqual(Data.new.num(99), table.hash.get(Data.new.num(1.5), &vm).?);
 }
 
 test "putRaw: NaN and Infinity keys go to hash" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
-    try table.putRaw(Data.new.num(std.math.nan(f64)), Data.new.num(1));
-    try table.putRaw(Data.new.num(std.math.inf(f64)), Data.new.num(2));
+    try table.putRaw(Data.new.num(std.math.nan(f64)), Data.new.num(1), &vm);
+    try table.putRaw(Data.new.num(std.math.inf(f64)), Data.new.num(2), &vm);
     try std.testing.expectEqual(@as(usize, 0), table.array.items.len);
     try std.testing.expectEqual(@as(usize, 2), table.hash.count);
 }
 
 test "putRaw: getRaw retrieves from array for integer keys" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
 
-    try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0)).?);
-    try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1)).?);
-    try std.testing.expectEqual(null, table.getRaw(Data.new.num(2)));
+    try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0), &vm).?);
+    try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1), &vm).?);
+    try std.testing.expectEqual(null, table.getRaw(Data.new.num(2), &vm));
 }
 
 test "putRaw: getRaw retrieves from hash for negative and float keys" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
-    try table.putRaw(Data.new.num(-1), Data.new.num(42));
-    try table.putRaw(Data.new.num(1.5), Data.new.num(99));
+    try table.putRaw(Data.new.num(-1), Data.new.num(42), &vm);
+    try table.putRaw(Data.new.num(1.5), Data.new.num(99), &vm);
 
-    try std.testing.expectEqual(Data.new.num(42), table.getRaw(Data.new.num(-1)).?);
-    try std.testing.expectEqual(Data.new.num(99), table.getRaw(Data.new.num(1.5)).?);
+    try std.testing.expectEqual(Data.new.num(42), table.getRaw(Data.new.num(-1), &vm).?);
+    try std.testing.expectEqual(Data.new.num(99), table.getRaw(Data.new.num(1.5), &vm).?);
 }
 
 test "putRaw: integer key > len in empty table goes to hash" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
     var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
-    try table.putRaw(Data.new.num(0), Data.new.num(10));
+    try table.putRaw(Data.new.num(0), Data.new.num(10), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(10), table.array.items[0]);
 
-    try table.putRaw(Data.new.num(6), Data.new.num(42));
+    try table.putRaw(Data.new.num(6), Data.new.num(42), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
-    try std.testing.expectEqual(Data.new.num(42), table.hash.get(Data.new.num(6)).?);
+    try std.testing.expectEqual(Data.new.num(42), table.hash.get(Data.new.num(6), &vm).?);
 
-    try table.putRaw(Data.new.num(1), Data.new.num(20));
+    try table.putRaw(Data.new.num(1), Data.new.num(20), &vm);
     try std.testing.expectEqual(@as(usize, 2), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(20), table.array.items[1]);
 }

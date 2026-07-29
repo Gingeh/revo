@@ -212,7 +212,7 @@ pub fn map_fn(args: []const Data, vm: *VM) !NativeResult {
             var hash_it = table.hash.orderedIterator();
             while (hash_it.next()) |entry| {
                 const fn_result = try vm.callFunction(fn_data, &[_]Data{entry.val});
-                try result_table.putRaw(entry.key, fn_result);
+                try result_table.putRaw(entry.key, fn_result, vm);
             }
 
             return .okData(Data.new.table(result_table_id));
@@ -236,8 +236,8 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
 
     const it_id = try vm.tables.create();
     const it = try vm.tables.get(it_id);
-    try it.putRaw(Data.new.atom(atom_iter), iter);
-    try it.putRaw(Data.new.atom(atom_pred), pred);
+    try it.putRaw(Data.new.atom(atom_iter), iter, vm);
+    try it.putRaw(Data.new.atom(atom_pred), pred, vm);
 
     const mt_id = try vm.tables.create();
     const mt = try vm.tables.get(mt_id);
@@ -246,7 +246,7 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
         .param_types = &.{.any},
         .func = filterNext,
     });
-    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id));
+    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id), vm);
     try vm.setTableMetatable(it_id, mt_id);
 
     return .okData(Data.new.table(it_id));
@@ -277,8 +277,8 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 fn filterNext(args: []const Data, vm: *VM) !NativeResult {
     const tbl_id = args[0].asTable().?;
     const tbl = try vm.tables.get(tbl_id);
-    const iter = tbl.getRawAtom(revo.core_atoms.iter.atom_id()).?;
-    const pred = tbl.getRawAtom(revo.core_atoms.pred.atom_id()).?;
+    const iter = tbl.getRawAtom(revo.core_atoms.iter.atom_id(), vm).?;
+    const pred = tbl.getRawAtom(revo.core_atoms.pred.atom_id(), vm).?;
     const done_id = revo.core_atoms.atom_id(.done);
 
     while (true) {
@@ -578,8 +578,8 @@ fn makeCallableIterator(vm: *VM, obj: Data) !NativeResult {
 
     const it_id = try vm.tables.create();
     const it = try vm.tables.get(it_id);
-    try it.putRaw(Data.new.atom(atom_obj), obj);
-    try it.putRaw(Data.new.atom(atom_pos), Data.new.num(0));
+    try it.putRaw(Data.new.atom(atom_obj), obj, vm);
+    try it.putRaw(Data.new.atom(atom_pos), Data.new.num(0), vm);
 
     const mt_id = try vm.tables.create();
     const mt = try vm.tables.get(mt_id);
@@ -588,7 +588,7 @@ fn makeCallableIterator(vm: *VM, obj: Data) !NativeResult {
         .param_types = &.{.any},
         .func = iteratorNext,
     });
-    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id));
+    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id), vm);
     try vm.setTableMetatable(it_id, mt_id);
 
     return .okData(Data.new.table(it_id));
@@ -603,8 +603,8 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
     const atom_obj = revo.core_atoms.obj.atom_id();
     const atom_pos = revo.core_atoms.pos.atom_id();
 
-    const obj = tbl.getRaw(Data.new.atom(atom_obj)) orelse return .okData(revo.Data.new.core(.done));
-    const pos_val = tbl.getRaw(Data.new.atom(atom_pos)) orelse return .okData(revo.Data.new.core(.done));
+    const obj = tbl.getRaw(Data.new.atom(atom_obj), vm) orelse return .okData(revo.Data.new.core(.done));
+    const pos_val = tbl.getRaw(Data.new.atom(atom_pos), vm) orelse return .okData(revo.Data.new.core(.done));
     const pos = @as(usize, @intFromFloat(pos_val.asNum().?));
 
     const val: ?Data = switch (obj.tag()) {
@@ -629,7 +629,7 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
     };
 
     if (val) |v| {
-        try tbl.putRaw(Data.new.atom(atom_pos), Data.new.num(@as(f64, @floatFromInt(pos + 1))));
+        try tbl.putRaw(Data.new.atom(atom_pos), Data.new.num(@as(f64, @floatFromInt(pos + 1))), vm);
         return .okData(v);
     }
     return .okData(revo.Data.new.core(.done));

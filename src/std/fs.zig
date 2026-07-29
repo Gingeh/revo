@@ -157,12 +157,12 @@ const FileHandle = struct {
 fn wrapFile(vm: *VM, path: []const u8) !Data {
     const file_table = try vm.tables.create();
     var table = try vm.tables.get(file_table);
-    try table.putRaw(try vm.dataAtom(path_key), try vm.ownDataString(path));
+    try table.putRaw(try vm.dataAtom(path_key), try vm.ownDataString(path), vm);
 
     const metatable = try vm.tables.create();
     var mt = try vm.tables.get(metatable);
     const file_module = vm.globals.get(revo.core_atoms.file.atom_id()) orelse return error.FileModuleNotFound;
-    try mt.putRaw(try vm.dataAtom("__index"), file_module);
+    try mt.putRaw(try vm.dataAtom("__index"), file_module, vm);
 
     const set_result = try meta.set_metatable_(&.{ Data.new.table(file_table), Data.new.table(metatable) }, vm);
     if (set_result != .ok) return error.SetMetatableFailed;
@@ -173,7 +173,7 @@ fn parseFileHandle(value: Data, vm: *VM) !FileHandle {
     if (!value.isTable()) return error.InvalidFile;
     const table = try vm.tables.get(value.asTable().?);
 
-    const path_data = table.getRaw(try vm.dataAtom(path_key)) orelse return error.InvalidFile;
+    const path_data = table.getRaw(try vm.dataAtom(path_key), vm) orelse return error.InvalidFile;
 
     return .{
         .path = if (path_data.asString()) |id| vm.stringValue(id) else return error.InvalidFile,
@@ -215,12 +215,12 @@ fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
     const table = try vm.tables.create();
     var t = try vm.tables.get(table);
 
-    try t.putRaw(try vm.dataAtom("size"), Data.new.num(stat.size));
-    try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(@tagName(stat.kind)));
-    try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@intFromEnum(stat.permissions)));
-    try t.putRaw(try vm.dataAtom("mtime"), Data.new.num(stat.mtime.toSeconds()));
-    try t.putRaw(try vm.dataAtom("atime"), Data.new.num((stat.atime orelse stat.mtime).toSeconds()));
-    try t.putRaw(try vm.dataAtom("ctime"), Data.new.num(stat.ctime.toSeconds()));
+    try t.putRaw(try vm.dataAtom("size"), Data.new.num(stat.size), vm);
+    try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(@tagName(stat.kind)), vm);
+    try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@intFromEnum(stat.permissions)), vm);
+    try t.putRaw(try vm.dataAtom("mtime"), Data.new.num(stat.mtime.toSeconds()), vm);
+    try t.putRaw(try vm.dataAtom("atime"), Data.new.num((stat.atime orelse stat.mtime).toSeconds()), vm);
+    try t.putRaw(try vm.dataAtom("ctime"), Data.new.num(stat.ctime.toSeconds()), vm);
 
     return Data.new.table(table);
 }
@@ -353,15 +353,15 @@ fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
     while (try iter.next(vm.runtime.io)) |ent| {
         const entry_table = try vm.tables.create();
         var t = try vm.tables.get(entry_table);
-        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name));
-        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)));
+        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name), vm);
+        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)), vm);
         try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
     }
 
     const result_table = try vm.tables.create();
     var t = try vm.tables.get(result_table);
     for (entries.items, 0..) |entry, i| {
-        try t.putRaw(Data.new.num(i), entry);
+        try t.putRaw(Data.new.num(i), entry, vm);
     }
 
     return try NativeResult.Ok(vm, Data.new.table(result_table));
@@ -445,15 +445,15 @@ fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
     while (try iter.next(vm.runtime.io)) |ent| {
         const entry_table = try vm.tables.create();
         var t = try vm.tables.get(entry_table);
-        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name));
-        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)));
+        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name), vm);
+        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)), vm);
         try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
     }
 
     const result_table = try vm.tables.create();
     var t = try vm.tables.get(result_table);
     for (entries.items, 0..) |entry, i| {
-        try t.putRaw(Data.new.num(i), entry);
+        try t.putRaw(Data.new.num(i), entry, vm);
     }
 
     return try NativeResult.Ok(vm, Data.new.table(result_table));
