@@ -289,7 +289,7 @@ pub const Compiler = struct {
         state_mod.popRegister(self);
     }
 
-    fn validateName(self: *Compiler, name: []const u8, span: ast.Span) InternalLowerError!void {
+    pub fn validateName(self: *Compiler, name: []const u8, span: ast.Span) InternalLowerError!void {
         if (ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>")) return;
         if (std.mem.findAny(u8, name[0..name.len -| 1], "!?") != null) {
             try self.appendFailureReport(.ParseError, &.{

@@ -40,6 +40,40 @@ pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
     return inferVarType(self, name);
 }
 
+const TypeParamSubst = struct {
+    entries: [4]struct { name: []const u8, type: TypeInfo } = undefined,
+    count: usize = 0,
+
+    pub fn get(self: *const TypeParamSubst, name: []const u8) ?TypeInfo {
+        var i: usize = self.count;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, self.entries[i].name, name)) return self.entries[i].type;
+        }
+        return null;
+    }
+};
+
+fn genericSubstReturnType(self: *Compiler, type_params: []const []const u8, type_args: []const []const u8, args: []const *Node, return_type: TypeInfo) TypeInfo {
+    if (type_params.len <= 4) {
+        var subst: TypeParamSubst = .{ .count = type_params.len };
+        for (type_params, 0..) |tp, i| {
+            subst.entries[i] = .{
+                .name = tp,
+                .type = if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any,
+            };
+        }
+        return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch .any;
+    }
+    // fallback: heap-allocated map for many type params
+    var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
+    defer param_map.deinit();
+    for (type_params, 0..) |tp, i| {
+        param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
+    }
+    return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch .any;
+}
+
 pub fn inferCallReturnType(
     self: *Compiler,
     callee: *const Node,
@@ -50,32 +84,16 @@ pub fn inferCallReturnType(
     if (callee_type == .function) {
         const fn_sig = callee_type.function;
         const ret = fn_sig.return_type;
-        // generic fn with type params? substitute from arg types
-        if (fn_sig.type_params.len > 0 and ret != .any) {
-            var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
-            defer param_map.deinit();
-            for (fn_sig.type_params, 0..) |tp, i| {
-                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
-            }
-            return types_mod.substituteTypeParams(self.alloc, ret, &param_map) catch .any;
-        }
+        if (fn_sig.type_params.len > 0 and ret != .any)
+            return genericSubstReturnType(self, fn_sig.type_params, type_args, args, ret);
         if (ret != .any) return ret;
-        // .function type hint with .any return? maybe findFnSignature
-        // for the compiled sig with inferred return type
     }
 
     if (callee.expr == .ident) {
         const fn_name = callee.expr.ident;
         const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
-        // generic fn with type params? subst from arg types
-        if (sig.type_params.len > 0 and sig.return_type != .any) {
-            var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
-            defer param_map.deinit();
-            for (sig.type_params, 0..) |tp, i| {
-                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
-            }
-            return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
-        }
+        if (sig.type_params.len > 0 and sig.return_type != .any)
+            return genericSubstReturnType(self, sig.type_params, type_args, args, sig.return_type);
         return sig.return_type;
     }
 

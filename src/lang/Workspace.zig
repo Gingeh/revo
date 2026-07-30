@@ -460,7 +460,7 @@ pub fn analyzeDetailed(
 
     const root = parsed.ok.root;
     const symbols = try self.collectSymbolsFromParsed(root);
-    defer self.alloc.free(symbols);
+    defer freeSymbols(self.alloc, symbols);
     const deps = try self.collectDepsFromParsed(snap, root);
     errdefer self.alloc.free(deps);
     try self.updateDeps(id, deps);
@@ -916,7 +916,7 @@ pub fn inspectDetailed(
 
     const root = parsed.ok.root;
     const symbols = try self.collectSymbolsFromParsed(root);
-    errdefer freeSymbols(self.alloc, symbols);
+    defer freeSymbols(self.alloc, symbols);
     const deps = try self.collectDepsFromParsed(snap, root);
     errdefer self.alloc.free(deps);
     try self.updateDeps(id, deps);
@@ -1768,6 +1768,7 @@ fn copyError(
 fn copySymbols(alloc: std.mem.Allocator, symbols: []const Symbol) ![]Symbol {
     const dupes = try alloc.dupe(Symbol, symbols);
     for (dupes) |*s| {
+        s.name = try alloc.dupe(u8, s.name);
         if (s.type_name) |ti| {
             s.type_name = try types.clone(ti, alloc);
         }
@@ -1777,6 +1778,7 @@ fn copySymbols(alloc: std.mem.Allocator, symbols: []const Symbol) ![]Symbol {
 
 fn freeSymbols(alloc: std.mem.Allocator, symbols: []Symbol) void {
     for (symbols) |*sym| {
+        alloc.free(sym.name);
         if (sym.type_name) |*ti| types.deinitType(ti, alloc);
     }
     alloc.free(symbols);
