@@ -328,6 +328,14 @@ pub const Compiler = struct {
         try self.recordLoad(.load_const, dst, idx);
     }
 
+    /// emit bind_local/store_local that reads from source_reg directly,
+    /// bypassing the value_stack. avoids a redundant move in patterns like
+    /// `move Rsrc,Rdst + bind_local slot,Rdst` -> `bind_local slot,Rsrc`.
+    pub fn emitBind(self: *Compiler, op: Opcode, slot: Operand, source_reg: Register) !void {
+        try self.spans.append(self.alloc, self.active_span);
+        _ = try self.record(op, &.{}, false, source_reg, slot);
+    }
+
     pub fn emit(self: *Compiler, op: Opcode, op_arg: Operand) !void {
         var d = self.active_registers;
         var result_reg: Register = 0;

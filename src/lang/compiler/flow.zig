@@ -168,19 +168,13 @@ pub fn compileRangeLoopBody(
     const end_jump = try self.jump(.jump_if_false);
 
     if (value_slot) |slot| {
-        const temp_reg = try state.pushRegister(self);
-        try self.spans.append(self.alloc, self.active_span);
-        _ = try self.record(.move, &.{.{ .reg = value_reg }}, true, temp_reg, 0);
         state.markLocalInitialized(self, slot);
-        try self.emit(.bind_local, slot);
+        try self.emitBind(.bind_local, slot, value_reg);
     }
 
     if (index_slot) |slot| {
-        const temp_reg = try state.pushRegister(self);
-        try self.spans.append(self.alloc, self.active_span);
-        _ = try self.record(.move, &.{.{ .reg = index_reg }}, true, temp_reg, 0);
         state.markLocalInitialized(self, slot);
-        try self.emit(.bind_local, slot);
+        try self.emitBind(.bind_local, slot, index_reg);
     }
 
     if (needs_index) try self.regRelease();

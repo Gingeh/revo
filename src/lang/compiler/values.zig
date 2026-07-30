@@ -86,12 +86,10 @@ pub fn bindDeclaredPattern(
     switch (pattern.expr) {
         .ident => |name| {
             if (ast.isDiscardName(name)) return;
-            const mv_dst = try state.pushRegister(self);
-            try self.spans.append(self.alloc, self.active_span);
-            _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst, 0);
             const slot = try state.reuseOrDeclareLocal(self, name, kind != .con);
             state.markLocalInitialized(self, slot);
-            try self.emit(.bind_local, slot);
+            try self.emitBind(.bind_local, slot, try toRegister(source_idx));
+            _ = try self.pop();
             state.reserveLocalSlots(self);
         },
         .tuple_pattern => |items| {
