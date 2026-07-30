@@ -90,8 +90,6 @@ pub const LoopFrame = struct {
     function_index: usize,
 };
 
-pub const Temps = struct { pipe: usize = 0, match_subject: usize = 0, bind: usize = 0, match_temp: usize = 0 };
-
 pub fn LoopScope(comptime T: type) type {
     return struct {
         compiler: *T,

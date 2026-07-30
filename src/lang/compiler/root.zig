@@ -97,24 +97,17 @@ pub const Compiler = struct {
     const LocalValueKind = state_mod.LocalValueKind;
     const LocalVar = state_mod.LocalVar;
     const FunctionState = state_mod.FunctionState;
-    const Temps = state_mod.Temps;
 
     vm: *VM,
-    comp_vm: *VM,
     alloc: std.mem.Allocator,
     runtime_alloc: std.mem.Allocator,
-    arena: std.heap.ArenaAllocator,
     test_mode: bool,
     functions: std.ArrayList(FunctionState),
     slot_allocators: std.ArrayList(LocalSlot),
-    temps: Temps = .{},
+
     loop_stack: std.ArrayList(state_mod.LoopFrame),
     test_suite_names: std.ArrayList([]const u8),
     in_loop_depth: usize = 0,
-    failure: ?LowerFailure = null,
-    failure_message: []const u8 = "",
-    failure_message_owned: bool = false,
-    failure_parts: std.ArrayList(diagnostic.Part),
     failure_reports: std.ArrayList(LowerFailure),
     spans: std.ArrayList(ast.Span),
     active_span: ast.Span = .{
@@ -143,10 +136,8 @@ pub const Compiler = struct {
     ) !Compiler {
         return .{
             .vm = vm,
-            .comp_vm = vm,
             .alloc = arena,
             .runtime_alloc = runtime_alloc,
-            .arena = std.heap.ArenaAllocator.init(arena),
             .test_mode = test_mode,
             .functions = try std.ArrayList(FunctionState).initCapacity(arena, 4),
             .slot_allocators = try std.ArrayList(LocalSlot).initCapacity(arena, 4),
@@ -161,16 +152,13 @@ pub const Compiler = struct {
             .type_aliases = std.StringHashMap(types.TypeInfo).init(arena),
             .declared_globals = std.StringHashMap(void).init(arena),
             .pending_prototypes = try std.ArrayList(revo.PrototypeID).initCapacity(arena, 4),
-            .failure_parts = .{ .items = &.{}, .capacity = 0 },
         };
     }
 
     pub fn deinit(self: *Compiler) void {
-        if (self.failure_message_owned) self.runtime_alloc.free(self.failure_message);
         for (self.functions.items) |*s| s.deinit(self.alloc);
         self.functions.deinit(self.alloc);
         self.slot_allocators.deinit(self.alloc);
-        self.failure_parts.deinit(self.alloc);
         self.failure_reports.deinit(self.alloc);
         self.spans.deinit(self.alloc);
         for (self.loop_stack.items) |*frame| frame.break_jumps.deinit(self.alloc);
@@ -179,9 +167,9 @@ pub const Compiler = struct {
         var layout_it = self.struct_layouts.iterator();
         while (layout_it.next()) |entry| self.alloc.free(entry.value_ptr.*);
         self.struct_layouts.deinit();
+        self.pending_prototypes.deinit(self.alloc);
         self.ir_builder.deinit();
         self.value_stack.deinit(self.alloc);
-        self.arena.deinit();
     }
 
     // ctx interface for types.zig
@@ -299,6 +287,24 @@ pub const Compiler = struct {
     pub fn regRelease(self: *Compiler) !void {
         std.debug.assert(self.active_registers != 0);
         state_mod.popRegister(self);
+    }
+
+    fn validateName(self: *Compiler, name: []const u8, span: ast.Span) InternalLowerError!void {
+        if (ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>")) return;
+        if (std.mem.findAny(u8, name[0..name.len -| 1], "!?") != null) {
+            try self.appendFailureReport(.ParseError, &.{
+                .{ .@"error" = "! and ? are only allowed at the end of names" },
+                .{ .span = .{ .span = span, .role = .primary, .message = name } },
+            });
+            return error.LoweringFailed;
+        }
+        if (std.mem.endsWith(u8, name, "!")) {
+            try self.appendFailureReport(.ParseError, &.{
+                .{ .@"error" = "name with ! is reserved for macros" },
+                .{ .span = .{ .span = span, .role = .primary, .message = name } },
+            });
+            return error.LoweringFailed;
+        }
     }
 
     pub fn pushNil(self: *Compiler) !void {
@@ -489,28 +495,16 @@ pub const Compiler = struct {
 
     pub fn compileRoot(self: *Compiler, expr: *const Node) InternalLowerError!void {
         try self.compileFn(&.{}, null, expr, "__main", null, &.{});
-        if (self.failure_reports.items.len != 0 or self.failure != null) return error.LoweringFailed;
+        if (self.failure_reports.items.len != 0) return error.LoweringFailed;
         try self.emit(.call, 0);
         try self.emit(.halt, 0);
     }
 
     pub fn formatSuiteTestName(self: *Compiler, test_name: []const u8) ![]u8 {
-        var out = try std.ArrayList(u8).initCapacity(self.alloc, test_name.len + 16);
-        errdefer out.deinit(self.alloc);
-
-        if (self.test_suite_names.items.len == 0) {
-            try out.appendSlice(self.alloc, test_name);
-            return out.toOwnedSlice(self.alloc);
-        }
-
-        try out.appendSlice(self.alloc, self.test_suite_names.items[0]);
-        for (self.test_suite_names.items[1..]) |s| {
-            try out.appendSlice(self.alloc, "::");
-            try out.appendSlice(self.alloc, s);
-        }
-        try out.appendSlice(self.alloc, "::");
-        try out.appendSlice(self.alloc, test_name);
-        return out.toOwnedSlice(self.alloc);
+        const prefix = try std.mem.join(self.alloc, "::", self.test_suite_names.items);
+        if (prefix.len == 0) return self.alloc.dupe(u8, test_name);
+        defer self.alloc.free(prefix);
+        return std.fmt.allocPrint(self.alloc, "{s}::{s}", .{ prefix, test_name });
     }
 
     pub fn compileValue(self: *Compiler, expr: *const Node) InternalLowerError!void {
@@ -1258,11 +1252,7 @@ pub const Compiler = struct {
         temp_compiler.compileRoot(expr) catch |err| switch (err) {
             error.LoweringFailed => {
                 const nested_failure = try temp_compiler.finishFailure() orelse unreachable;
-                const report = try nested_failure.report.copy(self.runtime_alloc);
-                self.failure = .{
-                    .kind = nested_failure.kind,
-                    .report = report,
-                };
+                try self.appendFailureReport(nested_failure.kind, nested_failure.report.parts);
                 return error.LoweringFailed;
             },
             else => return err,
@@ -1271,7 +1261,7 @@ pub const Compiler = struct {
         defer self.vm.runtime.alloc.free(artifact.instructions);
         defer self.vm.runtime.alloc.free(artifact.spans);
         const result = try VM.module.runCompiledModuleReport(
-            self.comp_vm,
+            self.vm,
             "<comp>",
             artifact.instructions,
         );
@@ -1291,18 +1281,10 @@ pub const Compiler = struct {
                     };
                 }
             }
-            self.failure = .{
-                .kind = .ParseError,
-                .report = .{
-                    .parts = parts,
-                    .message = msg,
-                    .source_name = eval_failure.report.source_name,
-                    .source = eval_failure.report.source,
-                },
-            };
+            try self.appendFailureReport(.ParseError, parts);
             return error.LoweringFailed;
         }
-        try self.@"const"(self.comp_vm.mainResult());
+        try self.@"const"(self.vm.mainResult());
     }
 
     pub fn compileBlock(self: *Compiler, exprs: []const *Node) InternalLowerError!void {
@@ -1315,12 +1297,11 @@ pub const Compiler = struct {
             try state_mod.predeclareTypeAliases(self, exprs);
             try state_mod.predeclareFunctionBindings(self, exprs);
         }
+        self.upvalue_cache.clearRetainingCapacity();
         for (exprs, 0..) |expr, idx| {
-            self.upvalue_cache.clearRetainingCapacity();
             const before = self.active_registers;
             self.compile(expr, true) catch |err| switch (err) {
                 error.LoweringFailed => {
-                    try self.recordFailure();
                     self.active_registers = before;
                     continue;
                 },
@@ -1350,20 +1331,7 @@ pub const Compiler = struct {
 
         if (binding.target.expr == .ident) {
             const name = binding.target.expr.ident;
-            if (!ast.isDiscardName(name) and std.mem.findAny(u8, name[0..name.len -| 1], "!?") != null)
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = binding.target.span, .role = .primary, .message = name },
-                    "! and ? are only allowed at the end of names",
-                    &.{},
-                );
-            if (std.mem.endsWith(u8, name, "!") and !ast.isDiscardName(name))
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = binding.target.span, .role = .primary, .message = name },
-                    "name with ! is reserved for macros",
-                    &.{},
-                );
+            try self.validateName(name, binding.target.span);
             if (binding.value.expr == .fn_expr) {
                 try self.compileFn(
                     binding.value.expr.fn_expr.params,
@@ -1427,24 +1395,7 @@ pub const Compiler = struct {
         loop_sym: ?revo.AtomID,
         type_params: []const []const u8,
     ) InternalLowerError!void {
-        if (!ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>")) {
-            if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_| {
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = body.span, .role = .primary, .message = name },
-                    "! and ? are only allowed at the end of names",
-                    &.{},
-                );
-            }
-            if (std.mem.endsWith(u8, name, "!")) {
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = body.span, .role = .primary, .message = name },
-                    "function name with ! is reserved for macros",
-                    &.{},
-                );
-            }
-        }
+        try self.validateName(name, body.span);
 
         const jump_over = try self.jump(.jump);
         const body_addr: ProgramCounter = @intCast(self.irLen());
@@ -1526,7 +1477,7 @@ pub const Compiler = struct {
                 }
             }
         }
-        if (self.failure_reports.items.len != 0 or self.failure != null) return error.LoweringFailed;
+        if (self.failure_reports.items.len != 0) return error.LoweringFailed;
         if (self.active_registers == 0) try self.pushNil();
         if (loop_sym) |sym| try flow.emitLoopRecurse(self, params.len, sym) else try self.emit(.ret, 1);
 
@@ -1594,7 +1545,7 @@ pub const Compiler = struct {
         });
     }
 
-    fn appendFailureReport(
+    pub fn appendFailureReport(
         self: *Compiler,
         kind: LowerErrorKind,
         parts: []const diagnostic.Part,
@@ -1612,47 +1563,7 @@ pub const Compiler = struct {
         });
     }
 
-    pub fn setFailureParts(
-        self: *Compiler,
-        kind: LowerErrorKind,
-        primary_span: ?diagnostic.SpanPart,
-        message: []const u8,
-        extra_parts: []const diagnostic.Part,
-    ) error{LoweringFailed} {
-        const owned_msg = self.runtime_alloc.dupe(u8, message) catch "out of memory while formatting error message";
-        if (self.failure_message_owned) self.runtime_alloc.free(self.failure_message);
-        self.failure_message = owned_msg;
-        self.failure_message_owned = owned_msg.ptr != message.ptr;
-
-        self.failure_parts.clearRetainingCapacity();
-        self.failure_parts.append(self.alloc, .{ .@"error" = owned_msg }) catch {};
-        if (primary_span) |span|
-            self.failure_parts.append(self.alloc, .{ .span = span }) catch {};
-        for (extra_parts) |part|
-            self.failure_parts.append(self.alloc, part) catch {};
-
-        self.failure = .{
-            .kind = kind,
-            .report = .{
-                .parts = self.failure_parts.items,
-                .message = owned_msg,
-            },
-        };
-        return error.LoweringFailed;
-    }
-
-    fn recordFailure(self: *Compiler) !void {
-        const current = self.failure orelse return;
-        const copied = try current.report.copy(self.alloc);
-        try self.failure_reports.append(self.alloc, .{
-            .kind = current.kind,
-            .report = copied,
-        });
-        self.failure = null;
-    }
-
-    fn finishFailure(self: *Compiler) !?LowerFailure {
-        if (self.failure != null) try self.recordFailure();
+    pub fn finishFailure(self: *Compiler) !?LowerFailure {
         if (self.failure_reports.items.len == 0) return null;
         if (self.failure_reports.items.len == 1) return self.failure_reports.items[0];
 
@@ -1675,13 +1586,16 @@ pub const Compiler = struct {
         };
     }
 
-    // compat wrapper,,, failures should through this
     pub fn fail(
         self: *Compiler,
         kind: LowerErrorKind,
         expr: *const Node,
         message: []const u8,
     ) error{LoweringFailed} {
-        return self.setFailureParts(kind, .{ .span = expr.span, .role = .primary }, message, &.{});
+        self.appendFailureReport(kind, &.{
+            .{ .@"error" = message },
+            .{ .span = .{ .span = expr.span, .role = .primary } },
+        }) catch {};
+        return error.LoweringFailed;
     }
 };

@@ -5,6 +5,7 @@ const Compiler = revo.lang.compiler.Compiler;
 const Data = revo.Data;
 const ProgramCounter = revo.ProgramCounter;
 const Operand = revo.Operand;
+const Opcode = revo.opcode.Opcode;
 const Register = revo.opcode.Register;
 const LocalSlot = revo.LocalSlot;
 
@@ -15,15 +16,22 @@ const toRegister = state.toRegister;
 const type_check = @import("type_check.zig");
 const types_mod = @import("types.zig");
 
-const TypeHint = struct {
-    name: []const u8,
-    type_info: types_mod.TypeInfo,
-};
+const TypeHint = state.FunctionState.TypeHint;
 
 pub const VarStorage = union(enum) {
     local: Operand,
     global: revo.AtomID,
 };
+
+fn normalizeLoopResult(self: *Compiler) !void {
+    const body_result: Register = @intCast(self.active_registers - 1);
+    const loop_result: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
+    if (body_result != loop_result) {
+        try self.spans.append(self.alloc, self.active_span);
+        _ = try self.record(.move, &.{.{ .reg = body_result }}, true, loop_result, 0);
+    }
+    try self.regRelease();
+}
 
 pub fn compileLoop(self: *Compiler, body: *const Node, label: ?[]const u8) !void {
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
@@ -55,13 +63,7 @@ pub fn compileWhile(
     const exit_jump = try self.jump(.jump_if_false);
     try self.compile(body, true);
 
-    const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
-    if (body_result_reg != loop_result_reg) {
-        try self.spans.append(self.alloc, self.active_span);
-        _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
-    }
-    try self.regRelease();
+    try normalizeLoopResult(self);
     try self.emit(.jump, loop_start);
 
     self.patchJump(exit_jump);
@@ -126,7 +128,8 @@ pub fn compileRangeLoopBody(
                     "range loop variable must be int, got {s}",
                     .{@tagName(declared)},
                 );
-                return self.setFailureParts(.ParseError, null, msg, &.{});
+                try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
+                return error.LoweringFailed;
             }
         }
         state.setLocalType(self, value_slot.?, .int);
@@ -142,7 +145,8 @@ pub fn compileRangeLoopBody(
                     "range loop variable must be int, got {s}",
                     .{@tagName(declared)},
                 );
-                return self.setFailureParts(.ParseError, null, msg, &.{});
+                try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
+                return error.LoweringFailed;
             }
         }
         state.setLocalType(self, index_slot.?, .int);
@@ -187,14 +191,7 @@ pub fn compileRangeLoopBody(
 
     try self.compile(body, true);
 
-    // normalise into loop result slot so break and natural exit agree
-    const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
-    if (body_result_reg != loop_result_reg) {
-        try self.spans.append(self.alloc, self.active_span);
-        _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
-    }
-    try self.regRelease();
+    try normalizeLoopResult(self);
 
     try self.emit(.jump, loop_check);
     self.patchJump(end_jump);
@@ -293,14 +290,7 @@ pub fn compileFor(
 
     try self.compile(body, true);
 
-    // normalise result into loop result slot
-    const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
-    if (body_result_reg != loop_result_reg) {
-        try self.spans.append(self.alloc, self.active_span);
-        try self.recordMove(loop_result_reg);
-    }
-    try self.regRelease();
+    try normalizeLoopResult(self);
 
     // idx += 1
     try self.emit(.load_local, idx_slot);
@@ -757,36 +747,25 @@ fn narrowMatchPattern(
     }
 }
 
-pub fn compileAnd(self: *Compiler, left: *const Node, right: *const Node) !void {
-    // short-circuit: false left skips right, returns left
+fn compileShortCircuit(self: *Compiler, left: *const Node, right: *const Node, short_op: Opcode) !void {
     try self.compile(left, true);
     try self.regDupe();
-    const short = try self.jump(.jump_if_false);
+    const short = try self.jump(short_op);
     try self.regRelease();
-    const left_inst = try self.pop(); // non-constant
+    const left_inst = try self.pop();
     try self.compile(right, true);
     const end = try self.jump(.jump);
     self.patchJump(short);
     self.patchJump(end);
-    // push left's inst so value_stack has non-constant ref (prevents fold pass
-    // from treating add/mul/whatever operands as constants across the branch)
     try self.value_stack.append(self.alloc, left_inst);
 }
 
+pub fn compileAnd(self: *Compiler, left: *const Node, right: *const Node) !void {
+    try compileShortCircuit(self, left, right, .jump_if_false);
+}
+
 pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
-    // short-circuit: true left skips right, returns left
-    try self.compile(left, true);
-    try self.regDupe();
-    const short = try self.jump(.jump_if_true);
-    try self.regRelease();
-    const left_inst = try self.pop(); // non-constant
-    try self.compile(right, true);
-    const end = try self.jump(.jump);
-    self.patchJump(short);
-    self.patchJump(end);
-    // push left's inst so value_stack has non-constant ref (prevents fold pass
-    // from treating add/mul/whatever operands as constants across the branch)
-    try self.value_stack.append(self.alloc, left_inst);
+    try compileShortCircuit(self, left, right, .jump_if_true);
 }
 
 fn findLoopFrame(self: *Compiler, label: ?[]const u8) !?*state.LoopFrame {
@@ -819,11 +798,8 @@ pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, lab
     if (value) |v| try self.compile(v, true) else try self.pushNil();
 
     const r = self.active_registers - 1;
-    // round-trip: value must be in both the result slot and the stack top callers expect
     try self.spans.append(self.alloc, self.active_span);
     _ = try self.record(.move, &.{.{ .reg = try toRegister(r) }}, true, try toRegister(frame.result_reg), 0);
-    try self.spans.append(self.alloc, self.active_span);
-    _ = try self.record(.move, &.{.{ .reg = try toRegister(frame.result_reg) }}, true, try toRegister(r), 0);
     const jump_idx = try self.jump(.jump);
     try frame.break_jumps.append(self.alloc, jump_idx);
 }
@@ -846,13 +822,7 @@ pub fn compileLabeledBlock(self: *Compiler, label: []const u8, body: *const Node
     self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = self.irLen();
     try self.compile(body, true);
 
-    const body_result_reg: Register = @intCast(self.active_registers - 1);
-    const loop_result_reg: Register = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg;
-    if (body_result_reg != loop_result_reg) {
-        try self.spans.append(self.alloc, self.active_span);
-        _ = try self.record(.move, &.{.{ .reg = body_result_reg }}, true, loop_result_reg, 0);
-    }
-    try self.regRelease();
+    try normalizeLoopResult(self);
 
     self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }

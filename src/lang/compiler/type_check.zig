@@ -9,11 +9,6 @@ pub const TypeInfo = types_mod.TypeInfo;
 const FunctionSignature = types_mod.FunctionSignature;
 const state_mod = @import("state.zig");
 
-pub const TypeError = struct {
-    message: []const u8,
-    span: ast.Span,
-};
-
 pub fn checkType(expected: TypeInfo, actual: TypeInfo) !void {
     if (expected == .any or actual == .any) return;
     if (expected.eql(actual)) return;

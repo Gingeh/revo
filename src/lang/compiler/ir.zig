@@ -6,7 +6,7 @@ const Opcode = revo.opcode.Opcode;
 const Operand = revo.Operand;
 const Register = revo.opcode.Register;
 
-pub const IrValue = union(enum) { reg: Register, const_idx: usize, inst: *IrInst };
+pub const IrValue = union(enum) { reg: Register, inst: *IrInst };
 
 pub const IrInst = struct {
     opcode: Opcode,
@@ -18,14 +18,11 @@ pub const IrInst = struct {
 pub const IrBuilder = struct {
     alloc: std.mem.Allocator,
     instructions: std.ArrayList(*IrInst),
-    constants: std.ArrayList([]const u8),
 
     pub fn init(alloc: std.mem.Allocator) !IrBuilder {
         return .{
             .alloc = alloc,
-            // 'alloc' will be an arena
             .instructions = try std.ArrayList(*IrInst).initCapacity(alloc, 32),
-            .constants = try std.ArrayList([]const u8).initCapacity(alloc, 16),
         };
     }
 
@@ -35,8 +32,6 @@ pub const IrBuilder = struct {
             self.alloc.destroy(inst);
         }
         self.instructions.deinit(self.alloc);
-        for (self.constants.items) |c| self.alloc.free(c);
-        self.constants.deinit(self.alloc);
     }
 };
 
@@ -79,7 +74,6 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
             const source_reg = switch (inst.operands[0]) {
                 .inst => |ptr| ptr.result_reg,
                 .reg => |reg| reg,
-                .const_idx => unreachable,
             };
             bc = .{ .op = op, .a = r, .b = source_reg };
         },

@@ -23,30 +23,16 @@ pub fn compileLocalBinding(
     mutable: bool,
     type_name: ?*ast.TypeExpr,
 ) !void {
-    if (ast.isDiscardName(name)) {} else if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_|
-        return self.setFailureParts(
-            .ParseError,
-            .{ .span = value.span, .role = .primary, .message = name },
-            "! and ? are only allowed at the end of names",
-            &.{},
-        )
-    else if (std.mem.endsWith(u8, name, "!"))
-        return self.setFailureParts(
-            .ParseError,
-            .{ .span = value.span, .role = .primary, .message = name },
-            "name with ! is reserved for macros",
-            &.{},
-        )
-    else if (!ast.isDiscardName(name))
-        if (state.currentFunctionState(self)) |fn_state|
-            for (fn_state.import_locals.items) |il|
-                if (std.mem.eql(u8, il.name, name))
-                    return self.setFailureParts(
-                        .ParseError,
-                        .{ .span = value.span, .role = .primary, .message = name },
-                        "name conflicts with an import",
-                        &.{},
-                    );
+    try self.validateName(name, value.span);
+    if (!ast.isDiscardName(name)) if (state.currentFunctionState(self)) |fn_state|
+        for (fn_state.import_locals.items) |il|
+            if (std.mem.eql(u8, il.name, name)) {
+                try self.appendFailureReport(.ParseError, &.{
+                    .{ .@"error" = "name conflicts with an import" },
+                    .{ .span = .{ .span = value.span, .role = .primary, .message = name } },
+                });
+                return error.LoweringFailed;
+            };
     // fn slots can be reused if not initialized
     const slot = if (value.expr == .fn_expr)
         try state.reuseOrDeclareLocal(self, name, mutable)
