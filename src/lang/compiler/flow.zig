@@ -129,7 +129,7 @@ pub fn compileRangeLoopBody(
                 return self.setFailureParts(.ParseError, null, msg, &.{});
             }
         }
-        state.setLocalType(self, value_slot.?, "int");
+        state.setLocalType(self, value_slot.?, .int);
         try state.setLocalTypeHint(self, params[0].name, .int);
     }
     if (params.len == 2 and !ast.isDiscardName(params[1].name)) {
@@ -145,7 +145,7 @@ pub fn compileRangeLoopBody(
                 return self.setFailureParts(.ParseError, null, msg, &.{});
             }
         }
-        state.setLocalType(self, index_slot.?, "int");
+        state.setLocalType(self, index_slot.?, .int);
         try state.setLocalTypeHint(self, params[1].name, .int);
     }
 
@@ -647,6 +647,7 @@ fn conditionTypeHint(condition: *const Node) ?TypeHint {
         .call => |call| blk: {
             if (call.args.len != 1 or call.callee.expr != .ident or !std.mem.endsWith(u8, call.callee.expr.ident, "?")) break :blk null;
             if (call.args[0].expr != .ident) break :blk null;
+
             const type_info = if (std.mem.eql(u8, call.callee.expr.ident, "number?"))
                 typeNameInfo("number")
             else if (std.mem.eql(u8, call.callee.expr.ident, "string?"))
@@ -657,6 +658,7 @@ fn conditionTypeHint(condition: *const Node) ?TypeHint {
                 typeNameInfo("table")
             else
                 null;
+
             const unwrapped = type_info orelse break :blk null;
             break :blk .{ .name = call.args[0].expr.ident, .type_info = unwrapped };
         },
@@ -672,10 +674,12 @@ fn conditionTypeHint(condition: *const Node) ?TypeHint {
 fn typeCompareHint(type_expr: *const Node, value_expr: *const Node) ?TypeHint {
     if (type_expr.expr != .call) return null;
     const call = type_expr.expr.call;
+
     if (call.args.len != 1 or call.callee.expr != .ident) return null;
     if (!std.mem.eql(u8, call.callee.expr.ident, "type")) return null;
     if (call.args[0].expr != .ident) return null;
     if (value_expr.expr != .hash) return null;
+
     const type_info = typeNameInfo(value_expr.expr.hash) orelse return null;
     return .{ .name = call.args[0].expr.ident, .type_info = type_info };
 }
@@ -687,16 +691,7 @@ fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
             .{ .name = "", .types = &.{.float} },
         },
     };
-    if (std.mem.eql(u8, name, "string")) return .string;
-    if (std.mem.eql(u8, name, "bool")) return .bool;
-    if (std.mem.eql(u8, name, "table")) return .{ .struct_type = "table" };
-    if (std.mem.eql(u8, name, "int")) return .int;
-    if (std.mem.eql(u8, name, "float")) return .float;
-    if (std.mem.eql(u8, name, "atom")) return .{ .atom = "" };
-    if (std.mem.eql(u8, name, "nil")) return .{ .atom = ":nil" };
-    if (std.mem.eql(u8, name, "any")) return .any;
-    if (std.mem.eql(u8, name, "tuple")) return .{ .tuple = &.{} };
-    return null;
+    return types_mod.type_name_map.get(name);
 }
 
 fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {

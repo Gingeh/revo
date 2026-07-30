@@ -14,13 +14,6 @@ pub const TypeError = struct {
     span: ast.Span,
 };
 
-pub fn storedTypeName(self: *Compiler, t: TypeInfo) ?[]const u8 {
-    if (t == .any or t == .function or t == .tuple or t == .@"union") return null;
-    const name = types_mod.typeName(t);
-    const roundtrip = types_mod.resolveTypeName(self, name);
-    return if (roundtrip.eql(t)) name else null;
-}
-
 pub fn checkType(expected: TypeInfo, actual: TypeInfo) !void {
     if (expected == .any or actual == .any) return;
     if (expected.eql(actual)) return;
@@ -39,7 +32,7 @@ pub fn inferExprType(self: *Compiler, node: *const Node) TypeInfo {
 fn inferVarType(self: *Compiler, name: []const u8) TypeInfo {
     if (state_mod.resolveLocalTypeHint(self, name)) |hint| return hint;
     const local = state_mod.resolveLocalVar(self, name) orelse return inferTypeMap(self, name);
-    if (local.type_name) |tn| return types_mod.resolveTypeName(self, tn);
+    if (local.type_info) |ti| return ti;
     return inferTypeMap(self, name);
 }
 

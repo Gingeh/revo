@@ -4,6 +4,8 @@ const revo = @import("revo");
 const VM = revo.VM;
 
 const lang = @import("./root.zig");
+const types = lang.types;
+const type_parser = @import("type_parser.zig");
 const semantic = @import("semantic.zig");
 
 //
@@ -39,7 +41,7 @@ const CacheEntry = struct {
 /// cached fn sig: params as name+type pairs, return type, doc
 pub const FnSig = struct {
     params: []ParamInfo,
-    return_type: []const u8,
+    return_type: ?types.TypeInfo = null,
     doc: ?[]const u8,
 };
 
@@ -101,7 +103,7 @@ pub const Symbol = struct {
     name: []const u8,
     kind: SymbolKind,
     range: Range,
-    type_name: []const u8 = "",
+    type_name: ?types.TypeInfo = null,
 };
 
 pub const Hover = struct {
@@ -115,24 +117,24 @@ pub const Hover = struct {
 
 pub const ParamInfo = struct {
     name: []const u8,
-    type_name: []const u8,
+    type_name: ?types.TypeInfo = null,
 };
 
 pub const SignatureHelp = struct {
     name: []const u8,
     params: []ParamInfo,
-    return_type: []const u8,
+    return_type: ?types.TypeInfo = null,
     doc: ?[]const u8,
     active_param: u32,
 
     pub fn deinit(self: *SignatureHelp, alloc: std.mem.Allocator) void {
         alloc.free(self.name);
-        for (self.params) |p| {
+        for (self.params) |*p| {
             alloc.free(p.name);
-            alloc.free(p.type_name);
+            if (p.type_name) |*ti| types.deinitType(ti, alloc);
         }
         alloc.free(self.params);
-        alloc.free(self.return_type);
+        if (self.return_type) |*ti| types.deinitType(ti, alloc);
         if (self.doc) |d| alloc.free(d);
     }
 };
@@ -614,7 +616,7 @@ pub fn hover(
             if (std.mem.eql(u8, sym.name, name) and
                 sym.range.start.line == def.range.start.line)
             {
-                type_name = sym.type_name;
+                type_name = if (sym.type_name) |ti| try ti.formatType(alloc) else "";
                 break;
             }
         }
@@ -623,10 +625,7 @@ pub fn hover(
         defer def_analysis.deinit(alloc);
         for (def_analysis.symbols) |sym| {
             if (std.mem.eql(u8, sym.name, name)) {
-                type_name = if (sym.type_name.len > 0)
-                    try alloc.dupe(u8, sym.type_name)
-                else
-                    "";
+                type_name = if (sym.type_name) |ti| try ti.formatType(alloc) else "";
                 break;
             }
         }
@@ -654,7 +653,8 @@ pub fn hover(
                 const fid = mod_id orelse id;
                 try buf.writer.writeAll("- `");
                 if (try self.fnSig(alloc, fid, s.name) != null) {
-                    try buf.writer.writeAll(try renderDefinition(alloc, s.name, s.type_name, self, fid));
+                    const sym_tn = if (s.type_name) |ti| try ti.formatType(alloc) else "";
+                    try buf.writer.writeAll(try renderDefinition(alloc, s.name, sym_tn, self, fid));
                 } else {
                     if (self.snapshot(fid)) |ss| {
                         var line = sourceLine(ss.text, s.range.start.line);
@@ -737,11 +737,15 @@ pub fn renderDefinition(
         try buf.writer.print("fn {s}(", .{name});
         for (sig.params, 0..) |p, i| {
             if (i > 0) try buf.writer.print(", ", .{});
-            try buf.writer.print("{s}: {s}", .{ p.name, p.type_name });
+            const pt = if (p.type_name) |ti| try ti.formatType(alloc) else "";
+            try buf.writer.print("{s}: {s}", .{ p.name, pt });
+            if (p.type_name != null) alloc.free(pt);
         }
         try buf.writer.writeByte(')');
-        if (sig.return_type.len > 0)
-            try buf.writer.print(" -> {s}", .{sig.return_type});
+        if (sig.return_type) |rt| {
+            const rt_str = try rt.formatType(alloc);
+            try buf.writer.print(" -> {s}", .{rt_str});
+        }
         return buf.toOwnedSlice();
     }
     if (type_name.len > 0 and std.mem.startsWith(u8, type_name, "fn(")) {
@@ -772,14 +776,36 @@ pub fn signatureHelp(
             const params = try alloc.alloc(ParamInfo, spec.params.len);
             errdefer alloc.free(params);
             for (spec.params, 0..) |p, i| {
+                const pt = if (p[1].len > 0) pt: {
+                    const StdlibCtx = struct {
+                        alloc: std.mem.Allocator,
+                        pub fn isTypeParam(_: @This(), _: []const u8) bool {
+                            return false;
+                        }
+                        pub fn resolveTypeAlias(_: @This(), _: []const u8) ?types.TypeInfo {
+                            return null;
+                        }
+                    };
+                    break :pt try type_parser.parseTypeString(StdlibCtx{ .alloc = alloc }, p[1]);
+                } else null;
                 params[i] = .{
                     .name = try alloc.dupe(u8, p[0]),
-                    .type_name = try alloc.dupe(u8, p[1]),
+                    .type_name = pt,
                 };
             }
 
-            const ret = try alloc.dupe(u8, spec.ret);
-            errdefer alloc.free(ret);
+            const ret: ?types.TypeInfo = if (spec.ret.len > 0) ret: {
+                const RetCtx = struct {
+                    alloc: std.mem.Allocator,
+                    pub fn isTypeParam(_: @This(), _: []const u8) bool {
+                        return false;
+                    }
+                    pub fn resolveTypeAlias(_: @This(), _: []const u8) ?types.TypeInfo {
+                        return null;
+                    }
+                };
+                break :ret try type_parser.parseTypeString(RetCtx{ .alloc = alloc }, spec.ret);
+            } else null;
 
             const doc: ?[]const u8 = if (spec.doc.len > 0) try alloc.dupe(u8, spec.doc) else null;
             errdefer if (doc) |d| alloc.free(d);
@@ -807,11 +833,10 @@ pub fn signatureHelp(
     for (sig.params, 0..) |p, i| {
         params_copy[i] = .{
             .name = try alloc.dupe(u8, p.name),
-            .type_name = try alloc.dupe(u8, p.type_name),
+            .type_name = if (p.type_name) |ti| try types.clone(ti, alloc) else null,
         };
     }
-    const ret_copy = try alloc.dupe(u8, sig.return_type);
-    errdefer alloc.free(ret_copy);
+    const ret_copy = if (sig.return_type) |rt| try types.clone(rt, alloc) else null;
     const doc_copy = if (sig.doc) |d| try alloc.dupe(u8, d) else null;
     errdefer if (doc_copy) |d| alloc.free(d);
 
@@ -898,13 +923,13 @@ pub fn inspectDetailed(
     const known_globals = try getKnownGlobals(self, alloc);
     defer alloc.free(known_globals);
 
-    // name -> type_name, populated by sem checker
-    var type_map = std.StringHashMap([]const u8).init(alloc);
+    // name -> type, populated by sem checker
+    var type_map = std.StringHashMap(lang.types.TypeInfo).init(alloc);
     defer {
         var it = type_map.iterator();
         while (it.next()) |entry| {
             alloc.free(entry.key_ptr.*);
-            alloc.free(entry.value_ptr.*);
+            lang.types.deinitType(entry.value_ptr, alloc);
         }
         type_map.deinit();
     }
@@ -944,7 +969,7 @@ pub fn inspectDetailed(
 
     for (symbols) |*sym| {
         if (type_map.get(sym.name)) |t| {
-            sym.type_name = try self.alloc.dupe(u8, t);
+            sym.type_name = try lang.types.clone(t, self.alloc);
         }
     }
 
@@ -953,13 +978,20 @@ pub fn inspectDetailed(
     errdefer if (sig_map.size > 0) freeSigMap(self.alloc, &sig_map);
     self.collectSigsFromParsed(root, &sig_map);
 
-    // annotate param types from type_map where not explicitly set
+    // annotate param and return types from type_map where not explicitly set
     var sig_it = sig_map.iterator();
     while (sig_it.next()) |sig_entry| {
         for (sig_entry.value_ptr.params) |*p| {
-            if (p.type_name.len == 0) {
+            if (p.type_name == null) {
                 if (type_map.get(p.name)) |t| {
-                    p.type_name = try self.alloc.dupe(u8, t);
+                    p.type_name = try types.clone(t, self.alloc);
+                }
+            }
+        }
+        if (sig_entry.value_ptr.return_type == null) {
+            if (type_map.get(sig_entry.key_ptr.*)) |t| {
+                if (t == .function) {
+                    sig_entry.value_ptr.return_type = try types.clone(t.function.return_type, self.alloc);
                 }
             }
         }
@@ -993,7 +1025,7 @@ pub fn inspectDetailed(
 pub const InlayHint = struct {
     position: Position,
     label: []const u8,
-    kind: enum { @"type", parameter },
+    kind: enum { type, parameter },
 };
 
 /// compute type inlay hints for a range in a file
@@ -1012,20 +1044,21 @@ pub fn inlayHints(
     errdefer hints.deinit(alloc);
 
     for (analysis.symbols) |sym| {
-        if (sym.type_name.len == 0) continue;
+        const sym_tn = if (sym.type_name) |ti| try ti.formatType(alloc) else continue;
+        defer alloc.free(sym_tn);
         if (sym.kind == .function) continue;
-        if (std.mem.startsWith(u8, sym.type_name, "fn(")) continue;
+        if (std.mem.startsWith(u8, sym_tn, "fn(")) continue;
         if (sym.range.end.line < range.start.line or sym.range.start.line > range.end.line) continue;
 
         const line = sourceLine(snap.text, sym.range.start.line);
-        const needle = try std.fmt.allocPrint(alloc, ": {s}", .{sym.type_name});
+        const needle = try std.fmt.allocPrint(alloc, ": {s}", .{sym_tn});
         defer alloc.free(needle);
         if (std.mem.indexOf(u8, line, needle) != null) continue;
 
         try hints.append(alloc, .{
             .position = .{ .line = sym.range.end.line, .character = sym.range.end.character },
-            .label = try std.fmt.allocPrint(alloc, ": {s}", .{sym.type_name}),
-            .kind = .@"type",
+            .label = try std.fmt.allocPrint(alloc, ": {s}", .{sym_tn}),
+            .kind = .type,
         });
     }
 
@@ -1221,7 +1254,7 @@ pub fn importedModuleSymbols(
                     .name = try alloc.dupe(u8, s.name),
                     .kind = s.kind,
                     .range = s.range,
-                    .type_name = if (s.type_name.len > 0) try alloc.dupe(u8, s.type_name) else "",
+                    .type_name = if (s.type_name) |ti| try types.clone(ti, alloc) else null,
                 };
             }
             return out;
@@ -1476,20 +1509,11 @@ const SigVisitor = struct {
                 for (fn_expr.params, params) |src, *dst| {
                     dst.* = .{
                         .name = self.alloc.dupe(u8, src.name) catch return,
-                        .type_name = if (src.type_name) |tn| switch (tn.kind) {
-                            .named => |n| self.alloc.dupe(u8, n) catch return,
-                            else => self.alloc.dupe(u8, @tagName(tn.kind)) catch return,
-                        } else "",
+                        .type_name = null,
                     };
                 }
 
-                const return_type = if (fn_expr.return_type) |rt|
-                    switch (rt.kind) {
-                        .named => |n| self.alloc.dupe(u8, n) catch return,
-                        else => self.alloc.dupe(u8, @tagName(rt.kind)) catch return,
-                    }
-                else
-                    "";
+                const return_type: ?types.TypeInfo = null;
                 const doc = if (fn_expr.doc) |d|
                     self.alloc.dupe(u8, d) catch return
                 else
@@ -1744,16 +1768,16 @@ fn copyError(
 fn copySymbols(alloc: std.mem.Allocator, symbols: []const Symbol) ![]Symbol {
     const dupes = try alloc.dupe(Symbol, symbols);
     for (dupes) |*s| {
-        if (s.type_name.len > 0) {
-            s.type_name = try alloc.dupe(u8, s.type_name);
+        if (s.type_name) |ti| {
+            s.type_name = try types.clone(ti, alloc);
         }
     }
     return dupes;
 }
 
 fn freeSymbols(alloc: std.mem.Allocator, symbols: []Symbol) void {
-    for (symbols) |sym| {
-        if (sym.type_name.len > 0) alloc.free(sym.type_name);
+    for (symbols) |*sym| {
+        if (sym.type_name) |*ti| types.deinitType(ti, alloc);
     }
     alloc.free(symbols);
 }
@@ -1762,12 +1786,12 @@ fn freeSigMap(alloc: std.mem.Allocator, map: *const std.StringHashMapUnmanaged(F
     var it = map.iterator();
     while (it.next()) |entry| {
         alloc.free(entry.key_ptr.*);
-        for (entry.value_ptr.params) |p| {
+        for (entry.value_ptr.params) |*p| {
             if (p.name.len > 0) alloc.free(p.name);
-            if (p.type_name.len > 0) alloc.free(p.type_name);
+            if (p.type_name) |*ti| types.deinitType(ti, alloc);
         }
         alloc.free(entry.value_ptr.params);
-        if (entry.value_ptr.return_type.len > 0) alloc.free(entry.value_ptr.return_type);
+        if (entry.value_ptr.return_type) |*rt| types.deinitType(rt, alloc);
         if (entry.value_ptr.doc) |d| alloc.free(d);
     }
     const mut = @constCast(map);

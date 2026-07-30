@@ -23,6 +23,7 @@ pub const TypeInfo = union(enum) {
     struct_type: []const u8,
     function: *const FunctionSignature,
     any,
+    never,
     type_var: []const u8,
 
     pub fn eql(self: TypeInfo, other: TypeInfo) bool {
@@ -63,6 +64,84 @@ pub const TypeInfo = union(enum) {
             } else false,
             .type_var => |name| if (other == .type_var) std.mem.eql(u8, name, other.type_var) else false,
             .any => true,
+            .never => other == .never,
+        };
+    }
+
+    /// alloc version of typeName, formats unions as well
+    pub fn formatType(self: TypeInfo, alloc: std.mem.Allocator) ![]const u8 {
+        return switch (self) {
+            .never => try alloc.dupe(u8, "never"),
+            .type_var => |n| try alloc.dupe(u8, n),
+            .table => |tbl| blk: {
+                var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+                errdefer buf.deinit(alloc);
+                try buf.appendSlice(alloc, "table<");
+                if (tbl.key) |k| {
+                    const kf = try k.*.formatType(alloc);
+                    defer alloc.free(kf);
+                    try buf.appendSlice(alloc, kf);
+                    try buf.appendSlice(alloc, ", ");
+                }
+                const vf = try tbl.value.*.formatType(alloc);
+                defer alloc.free(vf);
+                try buf.appendSlice(alloc, vf);
+                try buf.append(alloc, '>');
+                break :blk try buf.toOwnedSlice(alloc);
+            },
+            .@"union" => |variants| blk: {
+                var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+                errdefer buf.deinit(alloc);
+                for (variants, 0..) |v, i| {
+                    if (i > 0) try buf.appendSlice(alloc, " | ");
+                    if (v.name.len > 0) {
+                        try buf.append(alloc, ':');
+                        try buf.appendSlice(alloc, v.name);
+                    }
+                    for (v.types, 0..) |vt, j| {
+                        if (j > 0 or v.name.len > 0) try buf.append(alloc, ' ');
+                        const formatted = try vt.formatType(alloc);
+                        defer alloc.free(formatted);
+                        try buf.appendSlice(alloc, formatted);
+                    }
+                }
+                break :blk try buf.toOwnedSlice(alloc);
+            },
+            .tuple => |items| blk: {
+                if (items.len == 0) break :blk try alloc.dupe(u8, "tuple");
+                var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+                errdefer buf.deinit(alloc);
+                try buf.append(alloc, '(');
+                for (items, 0..) |item, i| {
+                    if (i > 0) try buf.appendSlice(alloc, ", ");
+                    const formatted = try item.formatType(alloc);
+                    defer alloc.free(formatted);
+                    try buf.appendSlice(alloc, formatted);
+                }
+                try buf.append(alloc, ')');
+                break :blk try buf.toOwnedSlice(alloc);
+            },
+            .function => |sig| blk: {
+                var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+                errdefer buf.deinit(alloc);
+                try buf.appendSlice(alloc, "fn(");
+                for (sig.params, 0..) |param, i| {
+                    if (i > 0) try buf.appendSlice(alloc, ", ");
+                    if (i < sig.param_names.len and sig.param_names[i].len > 0) {
+                        try buf.appendSlice(alloc, sig.param_names[i]);
+                        try buf.appendSlice(alloc, ": ");
+                    }
+                    const formatted = try param.formatType(alloc);
+                    defer alloc.free(formatted);
+                    try buf.appendSlice(alloc, formatted);
+                }
+                try buf.appendSlice(alloc, ") -> ");
+                const ret = try sig.return_type.formatType(alloc);
+                defer alloc.free(ret);
+                try buf.appendSlice(alloc, ret);
+                break :blk try buf.toOwnedSlice(alloc);
+            },
+            else => try alloc.dupe(u8, typeName(self)),
         };
     }
 };
@@ -74,8 +153,8 @@ pub fn atomPayload(name: []const u8) []const u8 {
 pub const FieldDef = struct {
     name: []const u8,
     field_type: TypeInfo,
-    type_name: ?[]const u8 = null,
     default_val: ?revo.memory.Data = null,
+    type_name: ?[]const u8 = null,
 };
 
 pub const FunctionSignature = struct {
@@ -91,87 +170,109 @@ pub const FunctionSignature = struct {
 /// ptr identity;; only matches when &ANY_FN_SIG is used
 pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any, .param_names = &.{}, .is_any_fn_sig = true };
 
+/// sentinel type info for `any` used by the generic table sentinel
+const ANY_TI: TypeInfo = .{ .any = {} };
+/// sentinel for a generic table (no key/value constraints)
+pub const TABLE_GENERIC: TypeInfo = .{ .table = .{ .key = null, .value = &ANY_TI } };
+
 pub fn typeName(T: TypeInfo) []const u8 {
     return switch (T) {
-        .struct_type, .atom, .type_var => |s| s,
+        .atom => |s| if (s.len == 0) "atom" else s,
+        .struct_type, .type_var => |s| s,
         .table => "table",
         else => @tagName(T),
     };
 }
 
-/// alloc version of typeName, formats unions as well
-pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
+/// deep-clone a TypeInfo into a new allocator
+pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
     return switch (ti) {
-        .type_var => |n| try alloc.dupe(u8, n),
-        .table => |tbl| blk: {
-            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
-            errdefer buf.deinit(alloc);
-            try buf.appendSlice(alloc, "table<");
-            if (tbl.key) |k| {
-                const kf = try formatType(alloc, k.*);
-                defer alloc.free(kf);
-                try buf.appendSlice(alloc, kf);
-                try buf.appendSlice(alloc, ", ");
-            }
-            const vf = try formatType(alloc, tbl.value.*);
-            defer alloc.free(vf);
-            try buf.appendSlice(alloc, vf);
-            try buf.append(alloc, '>');
-            break :blk try buf.toOwnedSlice(alloc);
+        .bool, .int, .float, .string, .any, .never => ti,
+        .atom => |s| TypeInfo{ .atom = try alloc.dupe(u8, s) },
+        .struct_type => |s| TypeInfo{ .struct_type = try alloc.dupe(u8, s) },
+        .type_var => |s| TypeInfo{ .type_var = try alloc.dupe(u8, s) },
+        .tuple => |items| {
+            const owned = try alloc.alloc(TypeInfo, items.len);
+            for (items, 0..) |item, i| owned[i] = try clone(item, alloc);
+            return .{ .tuple = owned };
         },
-        .@"union" => |variants| blk: {
-            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
-            errdefer buf.deinit(alloc);
+        .@"union" => |variants| {
+            const owned = try alloc.alloc(UnionVariant, variants.len);
             for (variants, 0..) |v, i| {
-                if (i > 0) try buf.appendSlice(alloc, " | ");
-                if (v.name.len > 0) {
-                    try buf.append(alloc, ':');
-                    try buf.appendSlice(alloc, v.name);
-                }
-                for (v.types, 0..) |vt, j| {
-                    if (j > 0 or v.name.len > 0) try buf.append(alloc, ' ');
-                    const formatted = try formatType(alloc, vt);
-                    defer alloc.free(formatted);
-                    try buf.appendSlice(alloc, formatted);
-                }
+                const types_owned = try alloc.alloc(TypeInfo, v.types.len);
+                for (v.types, 0..) |vt, j| types_owned[j] = try clone(vt, alloc);
+                owned[i] = .{
+                    .name = try alloc.dupe(u8, v.name),
+                    .types = types_owned,
+                };
             }
-            break :blk try buf.toOwnedSlice(alloc);
+            return .{ .@"union" = owned };
         },
-        .tuple => |items| blk: {
-            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
-            errdefer buf.deinit(alloc);
-            try buf.append(alloc, '(');
-            for (items, 0..) |item, i| {
-                if (i > 0) try buf.appendSlice(alloc, ", ");
-                const formatted = try formatType(alloc, item);
-                defer alloc.free(formatted);
-                try buf.appendSlice(alloc, formatted);
-            }
-            try buf.append(alloc, ')');
-            break :blk try buf.toOwnedSlice(alloc);
+        .table => |tbl| {
+            const key: ?*TypeInfo = if (tbl.key) |_| try alloc.create(TypeInfo) else null;
+            if (key) |k| k.* = try clone(tbl.key.?.*, alloc);
+            const value = try alloc.create(TypeInfo);
+            value.* = try clone(tbl.value.*, alloc);
+            return .{ .table = .{ .key = key, .value = value } };
         },
-        .function => |sig| blk: {
-            var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
-            errdefer buf.deinit(alloc);
-            try buf.appendSlice(alloc, "fn(");
-            for (sig.params, 0..) |param, i| {
-                if (i > 0) try buf.appendSlice(alloc, ", ");
-                if (i < sig.param_names.len and sig.param_names[i].len > 0) {
-                    try buf.appendSlice(alloc, sig.param_names[i]);
-                    try buf.appendSlice(alloc, ": ");
-                }
-                const formatted = try formatType(alloc, param);
-                defer alloc.free(formatted);
-                try buf.appendSlice(alloc, formatted);
-            }
-            try buf.appendSlice(alloc, ") -> ");
-            const ret = try formatType(alloc, sig.return_type);
-            defer alloc.free(ret);
-            try buf.appendSlice(alloc, ret);
-            break :blk try buf.toOwnedSlice(alloc);
+        .function => |sig| {
+            const owned = try alloc.create(FunctionSignature);
+            const params = try alloc.alloc(TypeInfo, sig.params.len);
+            for (sig.params, 0..) |p, i| params[i] = try clone(p, alloc);
+            const param_names = try alloc.alloc([]const u8, sig.param_names.len);
+            for (sig.param_names, 0..) |n, i| param_names[i] = try alloc.dupe(u8, n);
+            const type_params = try alloc.alloc([]const u8, sig.type_params.len);
+            for (sig.type_params, 0..) |tp, i| type_params[i] = try alloc.dupe(u8, tp);
+            owned.* = .{
+                .params = params,
+                .return_type = try clone(sig.return_type, alloc),
+                .param_names = param_names,
+                .is_any_fn_sig = sig.is_any_fn_sig,
+                .required_count = sig.required_count,
+                .type_params = type_params,
+            };
+            return .{ .function = owned };
         },
-        else => try alloc.dupe(u8, typeName(ti)),
     };
+}
+
+/// free all heap-allocated memory owned by a TypeInfo
+pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
+    switch (ti.*) {
+        .bool, .int, .float, .string, .any, .never => {},
+        .atom, .struct_type, .type_var => |s| if (s.len > 0) alloc.free(s),
+        .tuple => |items| {
+            for (items) |*item| deinitType(@constCast(item), alloc);
+            alloc.free(items);
+        },
+        .@"union" => |variants| {
+            for (variants) |*v| {
+                alloc.free(v.name);
+                for (v.types) |*vt| deinitType(@constCast(vt), alloc);
+                alloc.free(v.types);
+            }
+            alloc.free(variants);
+        },
+        .table => |tbl| {
+            if (tbl.key) |k| {
+                deinitType(@constCast(k), alloc);
+                alloc.destroy(@constCast(k));
+            }
+            deinitType(@constCast(tbl.value), alloc);
+            alloc.destroy(@constCast(tbl.value));
+        },
+        .function => |sig| {
+            for (sig.params) |*p| deinitType(@constCast(p), alloc);
+            alloc.free(sig.params);
+            deinitType(@constCast(&sig.return_type), alloc);
+            for (sig.param_names) |n| alloc.free(n);
+            alloc.free(sig.param_names);
+            for (sig.type_params) |tp| alloc.free(tp);
+            alloc.free(sig.type_params);
+            alloc.destroy(@constCast(sig));
+        },
+    }
+    ti.* = undefined;
 }
 
 pub fn isNumeric(T: TypeInfo) bool {
@@ -179,15 +280,15 @@ pub fn isNumeric(T: TypeInfo) bool {
 }
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
+    if (from == .never) return true;
+    if (to == .never) return false;
     if (from.eql(to) or to == .any or from == .any or from == .type_var or to == .type_var) return true;
-    if (from == .table and to == .struct_type and std.mem.eql(u8, to.struct_type, "table")) return true;
-    if (to == .table and from == .struct_type and std.mem.eql(u8, from.struct_type, "table")) return true;
     if (from == .table and to == .table) {
         const from_table = from.table;
         const to_table = to.table;
         if (!canCoerce(from_table.value.*, to_table.value.*)) return false;
-        if (to_table.key == null) return from_table.key == null;
-        if (from_table.key == null) return false;
+        if (to_table.key == null) return true;
+        if (from_table.key == null) return true;
         return canCoerce(from_table.key.?.*, to_table.key.?.*);
     }
     // function subtyping: contravariant params, covariant return
@@ -204,6 +305,18 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
             if (!canCoerce(tp, fp)) return false;
         }
         return true;
+    }
+    // empty tuple (.len == 0) is a sentinel for "any tuple"
+    if (to == .tuple and from == .tuple) {
+        if (to.tuple.len == 0 or from.tuple.len == 0) return true;
+        if (to.tuple.len != from.tuple.len) return false;
+        for (to.tuple, from.tuple) |tt, ff| if (!canCoerce(ff, tt)) return false;
+        return true;
+    }
+    // empty atom (.atom == "") is a sentinel for "any atom"
+    if (to == .atom and from == .atom) {
+        if (to.atom.len == 0 or from.atom.len == 0) return true;
+        return std.mem.eql(u8, to.atom, from.atom);
     }
     // :true and :false are bool
     if (to == .bool and from == .atom) {
@@ -374,17 +487,16 @@ pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(Typ
     .{ "bool", .bool },
     .{ "any", .any },
     .{ "nil", TypeInfo{ .atom = ":nil" } },
-    .{ "tuple", .any },
-    .{ "table", TypeInfo{ .struct_type = "table" } },
-    .{ "function", .any },
-    .{ "atom", .any },
-    .{ "never", .any },
+    .{ "tuple", .any }, // no better lpaceholder (empty tuple is unit type)
+    .{ "table", TABLE_GENERIC },
+    .{ "function", TypeInfo{ .function = &ANY_FN_SIG } },
+    .{ "atom", .any }, // no better paceholder (empty atom is any atom for display)
+    .{ "never", .never },
     .{ "parked", .any },
 });
 
 pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
     if (type_name_map.get(name)) |res| return res;
-    if (std.mem.eql(u8, name, "function")) return .{ .function = &ANY_FN_SIG };
     if (name.len > 0 and name[0] == ':') return .{ .atom = name };
     if (ctx.resolveTypeAlias(name)) |aliased| return aliased;
     return .{ .struct_type = name };
@@ -588,6 +700,21 @@ test "types: binary op inference - comparison" {
 
     const cmp2 = types.inferBinaryOp(.lt, .float, .float);
     try std.testing.expect(cmp2.eql(.bool));
+}
+
+test "types: empty tuple/atom sentinel coercion" {
+    const types = revo.lang.compiler.types;
+    const empty_tuple: types.TypeInfo = .{ .tuple = &.{} };
+    const int_tuple: types.TypeInfo = .{ .tuple = &.{.int} };
+    try std.testing.expect(types.canCoerce(empty_tuple, int_tuple));
+    try std.testing.expect(types.canCoerce(int_tuple, empty_tuple));
+    try std.testing.expect(types.canCoerce(empty_tuple, empty_tuple));
+
+    const empty_atom: types.TypeInfo = .{ .atom = "" };
+    const named_atom: types.TypeInfo = .{ .atom = ":foo" };
+    try std.testing.expect(types.canCoerce(empty_atom, named_atom));
+    try std.testing.expect(types.canCoerce(named_atom, empty_atom));
+    try std.testing.expect(types.canCoerce(empty_atom, empty_atom));
 }
 
 test "types: unary op inference" {

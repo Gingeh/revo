@@ -132,7 +132,6 @@ pub const Compiler = struct {
     upvalue_cache: std.AutoHashMap(usize, usize) = undefined,
     type_aliases: std.StringHashMap(types.TypeInfo),
     type_annotations: ?*const std.AutoHashMap(*const Node, types.TypeInfo) = null,
-    fn_return_type: ?[]const u8 = null,
     pending_prototypes: std.ArrayList(revo.PrototypeID),
     declared_globals: std.StringHashMap(void),
 
@@ -974,7 +973,7 @@ pub const Compiler = struct {
             .string => "string",
             .tuple => "tuple",
             .table => "table",
-            .struct_type => |name| if (std.mem.eql(u8, name, "table")) "table" else return false,
+            .struct_type => return false,
             else => return false,
         };
 
@@ -1187,8 +1186,8 @@ pub const Compiler = struct {
                 actual_type,
             ) catch |err| switch (err) {
                 error.TypeError => {
-                    const expected_str = try types.formatType(self.alloc, expected_type);
-                    const actual_str = try types.formatType(self.alloc, actual_type);
+                    const expected_str = try expected_type.formatType(self.alloc);
+                    const actual_str = try actual_type.formatType(self.alloc);
                     const label = if (sig.param_names[i].len == 0)
                         try std.fmt.allocPrint(
                             self.alloc,
@@ -1462,10 +1461,6 @@ pub const Compiler = struct {
 
         var s = try FunctionState.init(self.alloc);
         s.type_params = type_params;
-        s.return_type = if (return_type) |rt| switch (rt.kind) {
-            .named => |n| n,
-            else => @tagName(rt.kind),
-        } else if (std.mem.endsWith(u8, name, "?")) "bool" else null;
 
         // push function state early so evalTypeExpr can resolve type params
         const params_len: LocalSlot = @intCast(params.len);
@@ -1488,10 +1483,7 @@ pub const Compiler = struct {
                 .slot = @intCast(idx),
                 .mutable = true,
                 .initialized = true,
-                .type_name = if (param.type_name) |tn| switch (tn.kind) {
-                    .named => |n| n,
-                    else => types.typeName(try type_check.evalTypeExpr(self, tn)),
-                } else null,
+                .type_info = if (param.type_name) |tn| try type_check.evalTypeExpr(self, tn) else null,
                 .type_explicit = param.type_name != null,
             };
             try fn_state.locals.append(self.alloc, local);
@@ -1518,12 +1510,6 @@ pub const Compiler = struct {
         self.upvalue_cache.clearRetainingCapacity();
         if (own_sig) try s.fn_signatures.put(name, sig);
 
-        self.fn_return_type = if (return_type) |rt| switch (rt.kind) {
-            .named => |n| n,
-            else => @tagName(rt.kind),
-        } else null;
-
-        defer self.fn_return_type = null;
         try self.compile(body, true);
         if (return_type) |rt| {
             _ = rt;

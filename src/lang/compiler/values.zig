@@ -83,8 +83,7 @@ pub fn compileLocalBinding(
 
     try state.setLocalTypeHint(self, name, inferred_type);
     if (type_name != null) {
-        if (type_check.storedTypeName(self, inferred_type)) |stored_name|
-            state.setLocalType(self, slot, stored_name);
+        state.setLocalType(self, slot, inferred_type);
         state.setLocalTypeExplicit(self, slot);
     }
 

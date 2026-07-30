@@ -150,6 +150,6 @@ test "json encode and decode round trip" {
     , "[\"a\",\"b\",\"c\"]");
 
     try testing.top_number(
-        \\ json.decode("{\"a\":1}"):unwrap().a
+        \\ json.decode("{{ \"a\" : 1}}"):unwrap().a
     , 1);
 }

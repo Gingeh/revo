@@ -249,15 +249,17 @@ const Handler = struct {
         for (sig.params, 0..) |p, i| {
             if (i > 0) try label.appendSlice(arena, ", ");
             try label.appendSlice(arena, p.name);
-            if (p.type_name.len > 0) {
+            if (p.type_name) |ti| {
+                const pt = try ti.formatType(arena);
                 try label.appendSlice(arena, ": ");
-                try label.appendSlice(arena, p.type_name);
+                try label.appendSlice(arena, pt);
             }
         }
         try label.append(arena, ')');
-        if (sig.return_type.len > 0) {
+        if (sig.return_type) |rt| {
+            const rt_str = try rt.formatType(arena);
             try label.appendSlice(arena, ": ");
-            try label.appendSlice(arena, sig.return_type);
+            try label.appendSlice(arena, rt_str);
         }
         const label_str = try label.toOwnedSlice(arena);
 
@@ -268,7 +270,10 @@ const Handler = struct {
             const start = pos;
             // skip past `name: type` or just `name`
             pos += @as(u32, @intCast(p.name.len));
-            if (p.type_name.len > 0) pos += 2 + @as(u32, @intCast(p.type_name.len));
+            if (p.type_name) |ti| {
+                const pt = try ti.formatType(arena);
+                pos += 2 + @as(u32, @intCast(pt.len));
+            }
             params_list.appendAssumeCapacity(.{
                 .label = .{ .tuple_1 = .{ start, pos } },
                 .documentation = null,
@@ -472,7 +477,7 @@ const Handler = struct {
                 .position = sub1(ws_hint.position),
                 .label = .{ .string = ws_hint.label },
                 .kind = switch (ws_hint.kind) {
-                    .@"type" => T.InlayHint.Kind.Type,
+                    .type => T.InlayHint.Kind.Type,
                     .parameter => T.InlayHint.Kind.Parameter,
                 },
                 .paddingLeft = true,

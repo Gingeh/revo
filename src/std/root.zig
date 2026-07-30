@@ -1401,7 +1401,7 @@ test "array flatten" {
 
 test "stdlib json time and string modules are exposed" {
     try testing.top_string("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
-    try testing.top_number("json.decode(\"{\\\"a\\\":1}\"):unwrap().a", 1);
+    try testing.top_number("json.decode(\"{{ \\\"a\\\" : 1}}\"):unwrap().a", 1);
     try testing.top_true("time.now() > 0");
     try testing.top_number("len(string.split(\"a,b\", \",\"))", 2);
 }

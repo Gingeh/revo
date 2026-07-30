@@ -19,7 +19,7 @@ pub const LocalVar = struct {
     mutable: bool,
     initialized: bool,
     kind: LocalValueKind = .unknown,
-    type_name: ?[]const u8 = null,
+    type_info: ?types.TypeInfo = null,
     type_explicit: bool = false,
     table_fields: ?[]const []const u8 = null,
 };
@@ -38,7 +38,6 @@ pub const FunctionState = struct {
     scope_starts: std.ArrayList(usize),
     type_hints: std.ArrayList(TypeHint),
     type_scope_starts: std.ArrayList(usize),
-    return_type: ?[]const u8 = null,
     fn_signatures: std.StringHashMap(*FnSig),
     type_params: []const []const u8 = &.{},
 
@@ -234,10 +233,10 @@ pub fn markLocalValueKind(self: *Compiler, slot: LocalSlot, kind: LocalValueKind
     if (scanLocals(state.all_locals.items, slot)) |l| l.kind = kind;
 }
 
-pub fn setLocalType(self: *Compiler, slot: LocalSlot, type_name: ?[]const u8) void {
+pub fn setLocalType(self: *Compiler, slot: LocalSlot, type_info: ?types.TypeInfo) void {
     const state = currentFunctionState(self) orelse return;
-    if (scanLocals(state.locals.items, slot)) |l| l.type_name = type_name;
-    if (scanLocals(state.all_locals.items, slot)) |l| l.type_name = type_name;
+    if (scanLocals(state.locals.items, slot)) |l| l.type_info = type_info;
+    if (scanLocals(state.all_locals.items, slot)) |l| l.type_info = type_info;
 }
 
 pub fn setLocalTypeExplicit(self: *Compiler, slot: LocalSlot) void {

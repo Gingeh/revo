@@ -28,7 +28,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "find",
-        .placements = &.{ api.g, api.mod("re") },
+        .placements = &.{api.mod("re")},
         .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
         .ret = "string | :nil",
         .doc = "return first match or nil; pass a string for one-shot compile",

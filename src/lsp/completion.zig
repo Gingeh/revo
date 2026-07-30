@@ -209,11 +209,14 @@ fn addGeneralCompletions(
                             try buf.writer.print("{s}(", .{sym.name});
                             for (sig.params, 0..) |p, i| {
                                 if (i > 0) try buf.writer.print(", ", .{});
-                                try buf.writer.print("{s}: {s}", .{ p.name, p.type_name });
+                                const pt = if (p.type_name) |ti| try ti.formatType(arena) else "";
+                                try buf.writer.print("{s}: {s}", .{ p.name, pt });
                             }
                             try buf.writer.print(")", .{});
-                            if (sig.return_type.len > 0)
-                                try buf.writer.print(" -> {s}", .{sig.return_type});
+                            if (sig.return_type) |rt| {
+                                const rt_str = try rt.formatType(arena);
+                                try buf.writer.print(" -> {s}", .{rt_str});
+                            }
                             detail = buf.written();
                         }
                         // insertText: name(${1:p1}, ${2:p2}) or name()
