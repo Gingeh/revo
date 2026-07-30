@@ -1241,7 +1241,7 @@ pub const Compiler = struct {
                 const type_id = self.vm.struct_types.findTypeByName(type_name) orelse break :blk null;
                 const desc = self.vm.struct_types.getType(type_id) orelse break :blk null;
                 const field_atom = self.vm.internAtom(field_name) catch break :blk null;
-                break :blk desc.fieldIndex(field_atom);
+                break :blk desc.field_index.get(field_atom);
             },
             else => null,
         };

@@ -299,7 +299,7 @@ fn compileAssignSimple(
                         return;
                     };
                     const field_atom = try self.vm.internAtom(field.name);
-                    const field_offset = desc.fieldIndex(field_atom) orelse {
+                    const field_offset = desc.field_index.get(field_atom) orelse {
                         try compileFieldAssign(self, field.object, field.name, value);
                         return;
                     };

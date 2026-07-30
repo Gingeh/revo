@@ -10,8 +10,8 @@ pub inline fn noteGCPressure(self: *VM, bytes: usize) void {
     if (self.gc_bytes_allocated >= trigger)
         self.gc_pending = true;
 
-    self.gc_instr_counter += 1;
-    if ((self.gc_instr_counter & 15) == 0)
+    self.gc_check_counter += 1;
+    if ((self.gc_check_counter & 15) == 0)
         self.maybeCollectGarbage();
 }
 

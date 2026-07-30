@@ -1,4 +1,4 @@
-pub const MAX_FRAMES = 4;
+pub const INITIAL_HOT_FRAMES = 4;
 pub const INIT_REG_COUNT = 256;
 pub const ProgramCounter = usize;
 pub const ConstantID = usize;
@@ -113,9 +113,9 @@ pub const Fiber = struct {
 
         self.registers = try alloc.alloc(Data, reg_count);
         errdefer alloc.free(self.registers);
-        self.frames_hot = try std.ArrayList(FrameHot).initCapacity(alloc, MAX_FRAMES);
+        self.frames_hot = try std.ArrayList(FrameHot).initCapacity(alloc, INITIAL_HOT_FRAMES);
         errdefer self.frames_hot.deinit(alloc);
-        self.frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, MAX_FRAMES);
+        self.frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, INITIAL_HOT_FRAMES);
         errdefer self.frames_cold.deinit(alloc);
         self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 1);
         errdefer self.open_upvalues.deinit(alloc);
@@ -145,8 +145,6 @@ pub const Fiber = struct {
 sched: Scheduler,
 runtime: revo.Runtime,
 
-// TODO: move all pools and sets into one big struct
-// remove useless fns like intern_atom
 constants: std.ArrayList(Data),
 stdlib_globals: Globals,
 tables: TablePool,
@@ -174,7 +172,7 @@ pending_debug_info_id: ?DebugInfoID = null,
 panic_message: ?[]const u8 = null,
 panic_span: ?Span = null,
 runtime_message: ?[]const u8 = null,
-gc_instr_counter: usize = 0,
+gc_check_counter: usize = 0,
 host_call_depth: usize = 0,
 loaded_extensions: std.ArrayList(std.DynLib),
 c_data: ?*anyopaque = null,
@@ -1625,7 +1623,7 @@ fn callStructConstructor(
                 cur = init_table.hash.buckets[cur].next;
                 continue;
             };
-            if (desc.fieldIndex(k_atom) == null) {
+            if (desc.field_index.get(k_atom) == null) {
                 try self.setRuntimeMessageFmt(
                     "unknown field `{s}` for struct `{s}`",
                     .{
@@ -1712,7 +1710,7 @@ pub fn setStructField(
         try self.setRuntimeMessage("invalid struct type");
         return error.Panic;
     };
-    const idx = desc.fieldIndex(field_atom) orelse {
+    const idx = desc.field_index.get(field_atom) orelse {
         try self.setRuntimeMessageFmt(
             "unknown field `{s}` for struct `{s}`",
             .{ self.atomName(field_atom), desc.name },

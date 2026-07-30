@@ -61,8 +61,7 @@ pub const ChannelState = struct {
         return self.queue_count;
     }
 
-    fn pushQueue(self: *ChannelState, alloc: std.mem.Allocator, value: Data) !void {
-        _ = alloc;
+    fn pushQueue(self: *ChannelState, value: Data) !void {
         const cap = self.queue.items.len;
         const tail = (self.queue_head + self.queue_count) % cap;
         self.queue.items[tail] = value;
@@ -412,7 +411,7 @@ pub fn channelSend(
     }
 
     if (channel.cap > 0 and channel.queueLen() < channel.cap) {
-        try channel.pushQueue(self.alloc, value);
+        try channel.pushQueue(value);
         return;
     }
 
@@ -440,7 +439,7 @@ pub fn channelRecv(self: *@This(), channel_id: ChannelID) !?Data {
                 else => false,
             };
             if (!waiting_on_send) continue;
-            try channel.pushQueue(self.alloc, sender.value orelse unreachable);
+            try channel.pushQueue(sender.value orelse unreachable);
             try self.wakeFiber(sender.fiber_id, null);
             break;
         }

@@ -50,30 +50,6 @@ test "nanbox canonicalizes nan through helpers" {
     try testing.expect(std.math.isNan(nan.asNum().?));
 }
 
-test "vm join parks current fiber when target alive" {
-    return error.SkipZigTest;
-    // var vm = try VM.init(vt_runtime());
-    // defer vm.deinit();
-    //
-    // const child = try VM.Fiber.init(vm.runtime.alloc, 1, &.{});
-    // try vm.sched.fibers.append(vm.runtime.alloc, child);
-    // vm.sched.fibers.items[1].state = .ready;
-    //
-    // const handle = try vm.addConstant(Data.new.num(1));
-    // const program = [_]revo.Instruction{
-    //     .{ .op = .load_const, .a = 0, .bx = @intCast(handle) },
-    //     .{ .op = .join, .a = 0 },
-    //     .{ .op = .halt, .a = 0 },
-    // };
-    // vm.mainFiber().program = &program;
-    // _ = try vm.runReport();
-    //
-    // try testing.expectEqual(@as(VM.Fiber.State, .waiting), vm.currentFiber().state);
-    // try testing.expectEqual(@as(bool, false), vm.currentFiber().running);
-    // try testing.expectEqual(@as(usize, 1), vm.sched.fibers.items[1].waiters.items.len);
-    // try testing.expectEqual(@as(usize, 0), vm.sched.fibers.items[1].waiters.items[0]);
-}
-
 test "vm spawn passes n args to child and join returns result" {
     var vm = try VM.init(vt_runtime());
     defer vm.deinit();

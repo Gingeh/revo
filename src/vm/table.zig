@@ -408,7 +408,7 @@ pub const Table = struct {
         return self.hash.get(Data.new.atom(id), vm);
     }
 
-    pub fn removeRaw(self: *Table, key: Data, vm: *revo.VM) bool {
+    pub fn remove(self: *Table, key: Data, vm: *revo.VM) bool {
         self.ic_version +%= 1;
         if (integerArrayIndex(key)) |idx| {
             if (idx >= self.array.items.len) return false;
@@ -416,10 +416,6 @@ pub const Table = struct {
             return true;
         }
         return self.hash.remove(key, vm);
-    }
-
-    pub fn remove(self: *Table, key: Data, vm: *revo.VM) bool {
-        return self.removeRaw(key, vm);
     }
 
     const MAX_TAG_LOOP = 200;

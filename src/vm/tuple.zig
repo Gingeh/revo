@@ -15,10 +15,6 @@ pub const Tuple = struct {
         self.alloc.free(self.items);
     }
 
-    pub fn len(self: *const Tuple) usize {
-        return self.items.len;
-    }
-
     pub fn write(self: *Tuple, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
         return revo.vm.print.writeTuple(self, writer, vm, mode);
     }

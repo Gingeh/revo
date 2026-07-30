@@ -29,7 +29,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
         },
         .tuple => {
             const tuple_id = object.asTuple().?;
-            var instance_mt_id: ?@TypeOf(self.metatables[0].?) = null;
+            var instance_mt_id: ?mem.TableID = null;
             var tuple_ref: ?*revo.tuple.Tuple = null;
             if (self.tuples.get(tuple_id)) |t| {
                 tuple_ref = t;
@@ -70,7 +70,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
                 if (desc.methods.get(self.atomName(atom))) |method| {
                     return .{ .value = method, .from_meta = true };
                 }
-                if (desc.fieldIndex(atom)) |i| {
+                if (desc.field_index.get(atom)) |i| {
                     return .{ .value = instance.fields[i], .from_meta = false };
                 }
             }
@@ -94,7 +94,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
     }
 }
 
-fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: @TypeOf(self.metatables[0].?)) VM.EvalError!?FieldLookup {
+fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID) VM.EvalError!?FieldLookup {
     const mt = try self.tables.get(mt_id);
     if (mt.getRaw(key, self)) |value| {
         return .{ .value = value, .from_meta = true };
@@ -230,7 +230,7 @@ pub fn setTableMetatable(self: *VM, id: mem.TableID, mt: ?mem.TableID) !void {
 
 pub fn getMetatable(self: *VM, val: Data) !?*revo.table.Table {
     const id = try self.getMetatableId(val) orelse return null;
-    return self.tables.get(id) catch return null;
+    return self.tables.get(id);
 }
 
 pub fn getMetamethod(self: *VM, val: Data, name: []const u8) !?Data {

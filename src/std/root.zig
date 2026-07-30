@@ -743,7 +743,7 @@ pub fn string_(args: []const Data, vm: *VM) !NativeResult {
 pub fn try_(args: []const Data, vm: *VM) !NativeResult {
     const t_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
     const tuple = try vm.tuples.get(t_id);
-    if (tuple.len() < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
+    if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
     const tag = tuple.items[0];
     const atom = tag.asAtom() orelse return .errType(0, "tuple starting with atom", "tuple starting with non-atom");
     const ok_id = revo.core_atoms.atom_id(.ok);

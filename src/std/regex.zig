@@ -192,7 +192,7 @@ fn freeFn(args: []const Data, vm: *VM) !NativeResult {
     const regex_ptr = ptr_val.asForeign().?;
     const regex: *mvzr.Regex = @ptrCast(@alignCast(regex_ptr));
 
-    _ = table.removeRaw(try vm.dataAtom("_ptr"), vm);
+    _ = table.remove(try vm.dataAtom("_ptr"), vm);
     vm.runtime.alloc.destroy(regex);
     vm.unregisterFinalizer(tid);
 
@@ -207,7 +207,7 @@ fn itGcFn(args: []const Data, vm: *VM) !NativeResult {
         return .okData(Data.new.nil());
     const regex_ptr = ptr_val.asForeign().?;
     const regex: *mvzr.Regex = @ptrCast(@alignCast(regex_ptr));
-    _ = table.removeRaw(Data.new.atom(atom_regex), vm);
+    _ = table.remove(Data.new.atom(atom_regex), vm);
     vm.runtime.alloc.destroy(regex);
     return .okData(Data.new.nil());
 }
@@ -219,7 +219,7 @@ fn gcFn(args: []const Data, vm: *VM) !NativeResult {
         return .okData(Data.new.nil());
     const regex_ptr = ptr_val.asForeign().?;
     const regex: *mvzr.Regex = @ptrCast(@alignCast(regex_ptr));
-    _ = table.removeRaw(try vm.dataAtom("_ptr"), vm);
+    _ = table.remove(try vm.dataAtom("_ptr"), vm);
     vm.runtime.alloc.destroy(regex);
     return .okData(Data.new.nil());
 }

@@ -68,7 +68,7 @@ pub const specs: []const api.FnSpec = &.{
 fn len(args: []const Data, vm: *VM) !NativeResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
     const t = try vm.tuples.get(id);
-    return .{ .ok = Data.new.num(t.len()) };
+    return .{ .ok = Data.new.num(t.items.len) };
 }
 
 fn index(args: []const Data, vm: *VM) !NativeResult {

@@ -521,7 +521,7 @@ fn string_of(args: []const Data, vm: *VM) !NativeResult {
     }
     if (args[0].asTuple()) |tuple_id| {
         const tuple = try vm.tuples.get(tuple_id);
-        var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, tuple.len());
+        var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, tuple.items.len);
         defer buf.deinit(vm.runtime.alloc);
         for (tuple.items) |val| {
             if (val.asNum()) |n| {

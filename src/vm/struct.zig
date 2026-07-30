@@ -26,9 +26,6 @@ pub const StructDescriptor = struct {
         self.methods.deinit();
     }
 
-    pub fn fieldIndex(self: *const StructDescriptor, name_atom: memory.AtomID) ?usize {
-        return self.field_index.get(name_atom);
-    }
 };
 
 pub const StructTypePool = struct {
