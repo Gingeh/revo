@@ -16,6 +16,7 @@ const Binding = ast.Binding;
 const expander = @import("../expander.zig");
 const flow = @import("flow.zig");
 const fold = @import("fold.zig");
+const dce = @import("dce.zig");
 pub const ir = @import("ir.zig");
 const state_mod = @import("state.zig");
 
@@ -189,6 +190,7 @@ pub const Compiler = struct {
 
     pub fn finishArtifact(self: *Compiler) !Artifact {
         try fold.foldIr(self);
+        try dce.dceIr(self);
         const lowered = try self.lowerToVerifyBytecode();
         const instr_copy = try self.runtime_alloc.dupe(Instruction, lowered);
         defer self.alloc.free(lowered);

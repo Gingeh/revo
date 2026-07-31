@@ -1003,7 +1003,6 @@ pub fn inspectDetailed(
     errdefer self.alloc.free(cache_deps);
     try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps, cache_diag, sig_map);
 
-    defer freeSymbols(self.alloc, symbols);
     if (semantic_error) |err| {
         return .{
             .snapshot = snap,
