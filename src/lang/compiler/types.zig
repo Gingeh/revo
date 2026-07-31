@@ -404,11 +404,17 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
         .@"union", .concat => .any,
-        .add, .sub, .mul, .div, .mod => blk: {
+        .add, .sub, .mul, .div, .mod, .pow => blk: {
             if (l == .int and r == .int) break :blk .int;
             if (isNumeric(l) and isNumeric(r)) break :blk .float;
             break :blk .any;
         },
+        .int_div => blk: {
+            if (l == .int and r == .int) break :blk .int;
+            if (isNumeric(l) and isNumeric(r)) break :blk .float;
+            break :blk .any;
+        },
+        .band, .bor, .bxor, .shl, .shr => if (l == .int and r == .int) .int else .any,
         .eq, .neq, .lt, .gt, .lte, .gte => .bool,
     };
 }

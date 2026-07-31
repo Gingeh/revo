@@ -43,7 +43,7 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
     var bc: Instruction = undefined;
 
     switch (op) {
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .div_floor_float, .pow, .pow_int, .pow_float, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .negate, .not, .negate_int, .negate_float => bc = .{ .op = op, .a = r, .b = r },
         .load_global, .load_stdlib_global, .load_upval, .closure => bc = .{ .op = op, .a = r, .bx = bxi },
         .load_local => bc = .{ .op = op, .a = r, .b = @intCast(bx) },

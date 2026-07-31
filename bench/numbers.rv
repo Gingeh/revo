@@ -1,8 +1,0 @@
-let sum = 0
-for i in 0..100000 do
-  sum = sum + i
-  sum = sum - i / 2
-  sum = sum * 1
-  sum = sum / 1
-end
-sum

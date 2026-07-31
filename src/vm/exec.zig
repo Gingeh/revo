@@ -405,6 +405,92 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             };
             return self.fail(error.IncompatibleTypes, "cannot mod {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         },
+        .band => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (numToI64(ln)) |li| if (numToI64(rn)) |ri| {
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li & ri))));
+
+                    if (!fetchNext(fiber, &instr)) break :dispatch;
+                    continue :dispatch instr.op;
+                };
+            };
+            return self.fail(error.IncompatibleTypes, "cannot band {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .bor => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (numToI64(ln)) |li| if (numToI64(rn)) |ri| {
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li | ri))));
+
+                    if (!fetchNext(fiber, &instr)) break :dispatch;
+                    continue :dispatch instr.op;
+                };
+            };
+            return self.fail(error.IncompatibleTypes, "cannot bor {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .bxor => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (numToI64(ln)) |li| if (numToI64(rn)) |ri| {
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li ^ ri))));
+
+                    if (!fetchNext(fiber, &instr)) break :dispatch;
+                    continue :dispatch instr.op;
+                };
+            };
+            return self.fail(error.IncompatibleTypes, "cannot bxor {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .shl => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (numToI64(ln)) |li| if (numToI64(rn)) |ri| {
+                    if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+                    const shifted: i64 = @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri)));
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(shifted))));
+
+                    if (!fetchNext(fiber, &instr)) break :dispatch;
+                    continue :dispatch instr.op;
+                };
+            };
+            return self.fail(error.IncompatibleTypes, "cannot shift {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .shr => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (numToI64(ln)) |li| if (numToI64(rn)) |ri| {
+                    if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li >> @as(u6, @intCast(ri))))));
+
+                    if (!fetchNext(fiber, &instr)) break :dispatch;
+                    continue :dispatch instr.op;
+                };
+            };
+            return self.fail(error.IncompatibleTypes, "cannot shift {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .int_div => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                if (rn == 0) return self.evalFailure(error.DivisionByZero);
+                const li = numToI64(ln);
+                const ri = numToI64(rn);
+                if (li != null and ri != null) {
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li.?, ri.?)))));
+                } else {
+                    regWrite(regs, base, instr.a, Data.new.num(@floor(ln / rn)));
+                }
+
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+            return self.fail(error.IncompatibleTypes, "cannot divide {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
         .mod_int => {
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
@@ -416,6 +502,94 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .band_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li & ri))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .bor_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li | ri))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .bxor_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li ^ ri))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .shl_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+            const shifted: i64 = @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri)));
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(shifted))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .shr_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li >> @as(u6, @intCast(ri))))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .div_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            if (ri == 0) return self.evalFailure(error.DivisionByZero);
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -498,6 +672,93 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             }
             if (@as(f64, @bitCast(rhs.bits)) == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) / @as(f64, @bitCast(rhs.bits))));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .div_floor_float => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const rn = @as(f64, @bitCast(rhs.bits));
+            if (rn == 0) return self.evalFailure(error.DivisionByZero);
+            regWrite(regs, base, instr.a, Data.new.num(@floor(@as(f64, @bitCast(lhs.bits)) / rn)));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .pow => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                const li = numToI64(ln);
+                const ri = numToI64(rn);
+                if (li != null and ri != null and ri.? >= 0) {
+                    var acc: i64 = 1;
+                    var b: i64 = li.?;
+                    var e: i64 = ri.?;
+                    while (e > 0) {
+                        if (e & 1 == 1) acc = acc *% b;
+                        e >>= 1;
+                        if (e > 0) b = b *% b;
+                    }
+                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
+                } else {
+                    const result = std.math.pow(f64, ln, rn);
+                    if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+                    regWrite(regs, base, instr.a, Data.new.num(result));
+                }
+
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+            return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
+        .pow_int => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            if (ri >= 0) {
+                var acc: i64 = 1;
+                var b: i64 = li;
+                var e: i64 = ri;
+                while (e > 0) {
+                    if (e & 1 == 1) acc = acc *% b;
+                    e >>= 1;
+                    if (e > 0) b = b *% b;
+                }
+                regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
+            } else {
+                const ln = @as(f64, @bitCast(lhs.bits));
+                const rn = @as(f64, @bitCast(rhs.bits));
+                const result = std.math.pow(f64, ln, rn);
+                if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+                regWrite(regs, base, instr.a, Data.new.num(result));
+            }
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .pow_float => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+            if (debug_assert_types) {
+                std.debug.assert(lhs.isNumber());
+                std.debug.assert(rhs.isNumber());
+            }
+            const ln = @as(f64, @bitCast(lhs.bits));
+            const rn = @as(f64, @bitCast(rhs.bits));
+            const result = std.math.pow(f64, ln, rn);
+            if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            regWrite(regs, base, instr.a, Data.new.num(result));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1182,4 +1443,14 @@ pub fn trace(self: *VM, instr: Instruction) void {
         fiber.pc - 1,
         @tagName(instr.op),
     });
+}
+
+/// integral f64 -> i64, else null (used by bitwise + `//` runtime checks)
+fn numToI64(n: f64) ?i64 {
+    if (!std.math.isFinite(n)) return null;
+    if (n < @as(f64, @floatFromInt(std.math.minInt(i64)))) return null;
+    if (n >= @as(f64, @floatFromInt(std.math.maxInt(i64)))) return null;
+    const t: i64 = @intFromFloat(n);
+    if (@as(f64, @floatFromInt(t)) != n) return null;
+    return t;
 }

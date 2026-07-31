@@ -1114,6 +1114,7 @@ pub const EvalError = error{
     TypeError,
     IncompatibleTypes,
     DivisionByZero,
+    ShiftAmountOutOfRange,
     UndefinedVariable,
     NotAFunction,
     WrongArity,

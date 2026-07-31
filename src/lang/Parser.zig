@@ -1760,7 +1760,16 @@ const infix_binding_table: InfixBindingTable = blk: {
     table.set(.minus, .{ .left = 40, .right = 41, .op = .sub });
     table.set(.star, .{ .left = 50, .right = 51, .op = .mul });
     table.set(.slash, .{ .left = 50, .right = 51, .op = .div });
+    table.set(.slash_slash, .{ .left = 50, .right = 51, .op = .int_div });
     table.set(.percent, .{ .left = 50, .right = 51, .op = .mod });
+    // exponent: right-assoc, binds tighter than unary minus (python: -2^2 == -4)
+    table.set(.caret, .{ .left = 62, .right = 61, .op = .pow });
+    // bitwise; C-ish precedence: shifts bind tightest, then band, bxor, bor
+    table.set(.kw_shl, .{ .left = 48, .right = 49, .op = .shl });
+    table.set(.kw_shr, .{ .left = 48, .right = 49, .op = .shr });
+    table.set(.kw_band, .{ .left = 44, .right = 45, .op = .band });
+    table.set(.kw_bxor, .{ .left = 43, .right = 44, .op = .bxor });
+    table.set(.kw_bor, .{ .left = 42, .right = 43, .op = .bor });
     break :blk table;
 };
 
@@ -1914,6 +1923,7 @@ const compound_assign_table: CompoundAssignTable = blk: {
     table.set(.star_assign, .mul);
     table.set(.slash_assign, .div);
     table.set(.percent_assign, .mod);
+    table.set(.caret_assign, .pow);
     table.set(.concat_assign, .concat);
     break :blk table;
 };

@@ -28,6 +28,7 @@ pub const BinOp = enum {
     sub,
     mul,
     div,
+    int_div,
     mod,
     concat,
     eq,
@@ -36,6 +37,12 @@ pub const BinOp = enum {
     gt,
     lte,
     gte,
+    band,
+    bor,
+    bxor,
+    shl,
+    shr,
+    pow,
     @"union",
 };
 
@@ -767,6 +774,8 @@ fn binOpName(op: BinOp) []const u8 {
         .sub => "-",
         .mul => "*",
         .div => "/",
+        .int_div => "//",
+        .pow => "^",
         .mod => "%",
         .concat => "~",
         .eq => "==",
@@ -775,6 +784,11 @@ fn binOpName(op: BinOp) []const u8 {
         .gt => ">",
         .lte => "<=",
         .gte => ">=",
+        .band => "band",
+        .bor => "bor",
+        .bxor => "bxor",
+        .shl => "shl",
+        .shr => "shr",
         .@"union" => "|",
     };
 }

@@ -16,7 +16,7 @@ pub fn foldIr(self: *Compiler) !void {
 
 fn tryFoldInst(self: *Compiler, inst: *ir.IrInst) !bool {
     switch (inst.opcode) {
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
             return tryFoldBinary(self, inst);
         },
         .negate, .not, .negate_int, .negate_float => {
@@ -74,9 +74,79 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             else => false,
         };
         const is_int = switch (inst.opcode) {
-            .add_int, .sub_int, .mul_int, .mod_int, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => true,
+            .add_int, .sub_int, .mul_int, .mod_int, .div_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => true,
             else => false,
         };
+
+        // bitwise folds only on integral values; `//` folds for floats too
+        // (floor), no fold on div-by-zero or non-finite results
+        const is_int_only = switch (inst.opcode) {
+            .band, .bor, .bxor, .shl, .shr, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int => true,
+            else => false,
+        };
+        const is_floor_div = switch (inst.opcode) {
+            .int_div, .div_int, .div_floor_float => true,
+            else => false,
+        };
+        const is_pow = switch (inst.opcode) {
+            .pow, .pow_int, .pow_float => true,
+            else => false,
+        };
+        if (is_int_only or is_floor_div or is_pow) {
+            if (is_int_only) {
+                const li = numToI64(ln) orelse return false;
+                const ri = numToI64(rn) orelse return false;
+                const raw: f64 = switch (inst.opcode) {
+                    .band, .band_int => @floatFromInt(li & ri),
+                    .bor, .bor_int => @floatFromInt(li | ri),
+                    .bxor, .bxor_int => @floatFromInt(li ^ ri),
+                    .shl, .shl_int => blk: {
+                        if (ri < 0 or ri > 63) break :blk std.math.nan(f64);
+                        const shifted: i64 = @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri)));
+                        break :blk @floatFromInt(shifted);
+                    },
+                    .shr, .shr_int => blk: {
+                        if (ri < 0 or ri > 63) break :blk std.math.nan(f64);
+                        break :blk @floatFromInt(li >> @as(u6, @intCast(ri)));
+                    },
+                    else => unreachable,
+                };
+                if (!std.math.isFinite(raw)) return false;
+                try rewriteToConst(self, inst, Data.new.num(raw));
+                return true;
+            }
+            if (is_floor_div) {
+                if (rn == 0) return false;
+                const li = numToI64(ln);
+                const ri = numToI64(rn);
+                const raw: f64 = if (li != null and ri != null)
+                    @floatFromInt(@divFloor(li.?, ri.?))
+                else
+                    @floor(ln / rn);
+                if (!std.math.isFinite(raw)) return false;
+                try rewriteToConst(self, inst, Data.new.num(raw));
+                return true;
+            }
+            if (is_pow) {
+                const li = numToI64(ln);
+                const ri = numToI64(rn);
+                const raw: f64 = if (li != null and ri != null and ri.? >= 0) blk: {
+                    var acc: i64 = 1;
+                    var b: i64 = li.?;
+                    var e: i64 = ri.?;
+                    while (e > 0) {
+                        if (e & 1 == 1) acc = acc *% b;
+                        e >>= 1;
+                        if (e > 0) b = b *% b;
+                    }
+                    break :blk @floatFromInt(acc);
+                } else std.math.pow(f64, ln, rn);
+                if (!std.math.isFinite(raw)) return false;
+                try rewriteToConst(self, inst, Data.new.num(raw));
+                return true;
+            }
+            unreachable;
+        }
 
         const raw: f64 = switch (inst.opcode) {
             .add, .add_int => ln + rn,
@@ -122,6 +192,15 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
     }
 
     return false;
+}
+
+fn numToI64(n: f64) ?i64 {
+    if (!std.math.isFinite(n)) return null;
+    if (n < @as(f64, @floatFromInt(std.math.minInt(i64)))) return null;
+    if (n >= @as(f64, @floatFromInt(std.math.maxInt(i64)))) return null;
+    const t: i64 = @intFromFloat(n);
+    if (@as(f64, @floatFromInt(t)) != n) return null;
+    return t;
 }
 
 fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {

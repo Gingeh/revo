@@ -60,6 +60,11 @@ pub const TokenType = enum {
     kw_and,
     kw_or,
     kw_not,
+    kw_band,
+    kw_bor,
+    kw_bxor,
+    kw_shl,
+    kw_shr,
     kw_comp,
     kw_proc,
     kw_orelse,
@@ -68,7 +73,10 @@ pub const TokenType = enum {
     minus,
     star,
     slash,
+    slash_slash,
     percent,
+    caret,
+    caret_assign,
     eq,
     neq,
     lt,
@@ -107,8 +115,8 @@ pub const TokenType = enum {
             .number => .number,
             .string, .multiline_string, .backtick_string => .string,
             .hash => .enum_member,
-            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
-            .plus, .minus, .star, .slash, .percent, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
+            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
+            .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
             .comment => .comment,
             .ident, .eof => null,
         };
@@ -149,8 +157,31 @@ pub const TokenType = enum {
         .{ "and", .kw_and },
         .{ "or", .kw_or },
         .{ "not", .kw_not },
+        .{ "band", .kw_band },
+        .{ "bor", .kw_bor },
+        .{ "bxor", .kw_bxor },
+        .{ "shl", .kw_shl },
+        .{ "shr", .kw_shr },
         .{ "orelse", .kw_orelse },
         .{ "pub", .kw_pub },
+        // maybe TODO:
+        //
+        // .{ "🐗", .kw_bor },
+        // .{ "🎺🥁📯🎶", .kw_band },
+        // .{ "📥", .kw_import },
+        // .{ "🛬", .kw_import },
+        // .{ "🍺", .kw_pub },
+        // .{ "📤", .kw_pub },
+        // .{ "🛫", .kw_pub },
+        // .{ "💔", .kw_break },
+        // .{ "⛓️‍💥", .kw_break },
+        // .{ "🔁", .kw_loop },
+        // .{ "🔚", .kw_end },
+        // .{ "🧪", .kw_test },
+        // .{ "👩‍🔬", .kw_test },
+        // .{ "👨‍🔬", .kw_test },
+        // .{ "🧑‍🔬", .kw_test },
+        // .{ "🗺️", .kw_global },
     });
 };
 
@@ -339,12 +370,18 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.star, start, self.pos, line, column),
         '/' => if (self.matchChar('='))
             self.makeToken(.slash_assign, start, self.pos, line, column)
+        else if (self.matchChar('/'))
+            self.makeToken(.slash_slash, start, self.pos, line, column)
         else
             self.makeToken(.slash, start, self.pos, line, column),
         '%' => if (self.matchChar('='))
             self.makeToken(.percent_assign, start, self.pos, line, column)
         else
             self.makeToken(.percent, start, self.pos, line, column),
+        '^' => if (self.matchChar('='))
+            self.makeToken(.caret_assign, start, self.pos, line, column)
+        else
+            self.makeToken(.caret, start, self.pos, line, column),
         ':' => if (self.peekIsIdentStart())
             self.lexHash(start, line, column)
         else
@@ -898,6 +935,32 @@ test "lexes float numbers and range without conflict" {
         .{ .t = .number, .v = "0" },
         .{ .t = .dotdot, .v = ".." },
         .{ .t = .number, .v = "10" },
+        .{ .t = .eof, .v = "" },
+    });
+}
+
+test "lexes floor division and bitwise keywords" {
+    try testing.expectTokens("5 // 2 band bor bxor shl shr", &.{
+        .{ .t = .number, .v = "5" },
+        .{ .t = .slash_slash, .v = "//" },
+        .{ .t = .number, .v = "2" },
+        .{ .t = .kw_band, .v = "band" },
+        .{ .t = .kw_bor, .v = "bor" },
+        .{ .t = .kw_bxor, .v = "bxor" },
+        .{ .t = .kw_shl, .v = "shl" },
+        .{ .t = .kw_shr, .v = "shr" },
+        .{ .t = .eof, .v = "" },
+    });
+}
+
+test "lexes caret and caret assign" {
+    try testing.expectTokens("2 ^ 3 x ^= 4", &.{
+        .{ .t = .number, .v = "2" },
+        .{ .t = .caret, .v = "^" },
+        .{ .t = .number, .v = "3" },
+        .{ .t = .ident, .v = "x" },
+        .{ .t = .caret_assign, .v = "^=" },
+        .{ .t = .number, .v = "4" },
         .{ .t = .eof, .v = "" },
     });
 }

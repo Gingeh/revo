@@ -343,7 +343,7 @@ pub const Compiler = struct {
         var result_reg: Register = 0;
 
         switch (op) {
-            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
+            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .div_float, .div_floor_float, .pow, .pow_int, .pow_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
                 std.debug.assert(d >= 2);
                 result_reg = try toRegister(d - 2);
                 d -= 1;
@@ -635,7 +635,14 @@ pub const Compiler = struct {
                         .sub => if (any_float) .sub else .sub_int,
                         .mul => if (any_float) .mul else .mul_int,
                         .div => .div_float,
+                        .int_div => if (any_float) .div_floor_float else .div_int,
                         .mod => .mod_int,
+                        .pow => if (any_float) .pow_float else .pow_int,
+                        .band => if (any_float) .band else .band_int,
+                        .bor => if (any_float) .bor else .bor_int,
+                        .bxor => if (any_float) .bxor else .bxor_int,
+                        .shl => if (any_float) .shl else .shl_int,
+                        .shr => if (any_float) .shr else .shr_int,
                         .concat => .concat,
                         .eq => .eq_int,
                         .neq => .neq_int,
