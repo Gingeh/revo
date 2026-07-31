@@ -10,11 +10,139 @@
 //
 // some dataflow edges go through .reg operands (move instructions that
 // reference a register by number rather than popping from the value
-// stack). for those we scan backward from the consumer to find the most
-// recent writer of that register
+// stack)
+//
+// registers also carry values across control flow :(((
+//
+// if/else and loop results converge onto one shared register written by several
+// instructions, so a linear backward scan can only see the last writer
+// and would eliminate the others. register liveness is therefore
+// computed per basic block over the register lowering encoding
 //
 // runs after `fold.foldIr` so folded-to-constant operands are already
 // freed, dce cleans up the dead constants that folding leaves behind
+
+const Block = struct { start: usize, end: usize };
+
+/// registers read by an instruction in its lowering encoding
+///
+/// reads may be over-estimated (that keeps more code),
+/// so call/call_field read the whole argument range
+fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
+    const r = inst.result_reg;
+    switch (inst.opcode) {
+        // zig fmt: off
+        .jump, .yield,
+        .load_global, .load_stdlib_global, .load_local, .load_upval,
+        .closure, .table_new, .struct_new, .load_nil, .load_small_int,
+        .load_const => return 0,
+
+        .move => {
+            out[0] = switch (inst.operands[0]) {
+                .inst => |ptr| ptr.result_reg,
+                .reg => |reg| reg,
+            };
+            return 1;
+        },
+
+        .range_next => {
+            out[0] = r - 3;
+            out[1] = r - 2;
+            out[2] = r - 1;
+            return 3;
+        },
+
+        .tuple_new => {
+            const cnt = inst.op_arg;
+            for (0..cnt) |k| out[k] = r + @as(Register, @intCast(k));
+            return cnt;
+        },
+
+        .call, .spawn => {
+            const cnt = inst.op_arg + 1;
+            for (0..cnt) |k| out[k] = r + @as(Register, @intCast(k));
+            return cnt;
+        },
+
+        .call_field => {
+            const cnt = (inst.op_arg & ~@as(usize, 1 << 7)) + 2;
+            for (0..cnt) |k| out[k] = r + @as(Register, @intCast(k));
+            return cnt;
+        },
+
+        .halt, .ret, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err,
+        .jump_if_err, .store_global, .store_global_const, .store_upval,
+        .store_local, .bind_local, .negate, .not, .negate_int, .negate_float,
+        .table_get_atom, .tuple_get_const, .struct_get_offset, .join,
+        .unwrap_result => {
+            out[0] = r;
+            return 1;
+        },
+
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int,
+        .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int,
+        .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .div_float, .div_floor_float,
+        .pow, .pow_int, .pow_float, .eq, .neq, .lt, .gt, .lte, .gte,
+        .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int,
+        .@"and", .@"or", .tuple_get, .table_get,
+        .table_set_atom, .struct_set_offset => {
+            out[0] = r;
+            out[1] = r + 1;
+            return 2;
+        },
+
+        .table_set, .struct_set_method, .range_init => {
+            out[0] = r;
+            out[1] = r + 1;
+            out[2] = r + 2;
+            return 3;
+        },
+
+        .slice => {
+            out[0] = r;
+            out[1] = r + 1;
+            out[2] = r + 2;
+            out[3] = r + 3;
+            return 4;
+        },
+        // zig fmt: on
+    }
+}
+
+/// registers written by an instruction. must be exact: over-estimating
+/// would kill registers that are still live at runtime
+fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
+    const r = inst.result_reg;
+    switch (inst.opcode) {
+        // zig fmt: off
+        .ret, .halt, .jump, .jump_if_false, .jump_if_true,
+        .jump_if_not_nil_and_not_err, .jump_if_err,
+        .store_global, .store_global_const, .store_upval,
+        .store_local, .bind_local, .yield => return 0,
+
+        .range_init => {
+            out[0] = r;
+            out[1] = r + 1;
+            out[2] = r + 2;
+            return 3;
+        },
+
+        .range_next => {
+            out[0] = r;
+            out[1] = r + 1;
+            if (inst.op_arg != 0) {
+                out[2] = r + 2;
+                return 3;
+            }
+            return 2;
+        },
+        // zig fmt: on
+        else => {
+            out[0] = r;
+            return 1;
+        },
+    }
+}
 
 const std = @import("std");
 
@@ -62,96 +190,90 @@ pub fn dceIr(self: *Compiler) !void {
         if (isSideEffect(inst.opcode)) live[i] = true;
     }
 
-    // make forward register => last-writer map
-    // for each pos, last_writer[r] = index of most recent
-    // instruction whose result_reg == r. used to resolve
-    // register-based data flow that `emitBind` skips
-    var last_writer = try self.alloc.alloc(usize, std.math.maxInt(Register) + 1);
-    defer self.alloc.free(last_writer);
-    {
-        var i: usize = 0;
-        while (i < last_writer.len) : (i += 1) last_writer[i] = std.math.maxInt(usize);
+    // -- [pass 2a] -----------------------------------------------------------
+    // split into basic blocks: a block starts at index 0, at every jump
+    // target, and after every terminator
+    var is_block_start = try self.alloc.alloc(bool, n);
+    defer self.alloc.free(is_block_start);
+    @memset(is_block_start, false);
+    is_block_start[0] = true;
+    for (insts) |inst| {
+        switch (inst.opcode) {
+            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+                if (inst.op_arg < n) is_block_start[inst.op_arg] = true;
+            },
+            else => {},
+        }
+    }
+    for (insts, 0..) |inst, i| {
+        if (i + 1 < n) switch (inst.opcode) {
+            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err, .ret, .halt => is_block_start[i + 1] = true,
+            else => {},
+        };
     }
 
-    // -- [pass 2] ------------------------------------------------------------
+    var blocks = try std.ArrayList(Block).initCapacity(self.alloc, 0);
+    defer blocks.deinit(self.alloc);
+    var block_of = try self.alloc.alloc(usize, n);
+    defer self.alloc.free(block_of);
+    {
+        var start: usize = 0;
+        while (start < n) {
+            var end = start + 1;
+            while (end < n and !is_block_start[end]) : (end += 1) {}
+            for (start..end) |j| block_of[j] = blocks.items.len;
+            try blocks.append(self.alloc, .{ .start = start, .end = end });
+            start = end;
+        }
+    }
+    const nb = blocks.items.len;
+
+    // registers can hold values written on multiple control-flow paths,
+    // so register liveness is per-block (see readRegs/writeRegs)
+    var max_reg: usize = 0;
+    for (insts) |inst| {
+        const r = @as(usize, inst.result_reg);
+        if (r + 2 > max_reg) max_reg = r + 2;
+    }
+    const reg_count = max_reg + 1;
+
+    // there's no concise way to un-ugly this sorry
+    var block_uses = try self.alloc.alloc(bool, nb * reg_count);
+    defer self.alloc.free(block_uses);
+    var block_writes = try self.alloc.alloc(bool, nb * reg_count);
+    defer self.alloc.free(block_writes);
+    var live_in = try self.alloc.alloc(bool, nb * reg_count);
+    defer self.alloc.free(live_in);
+    var live_out = try self.alloc.alloc(bool, nb * reg_count);
+    defer self.alloc.free(live_out);
+    var next_out = try self.alloc.alloc(bool, reg_count);
+    defer self.alloc.free(next_out);
+    var written_regs = try self.alloc.alloc(bool, reg_count);
+    defer self.alloc.free(written_regs);
+    var read_buf = try self.alloc.alloc(Register, reg_count);
+    defer self.alloc.free(read_buf);
+
+    @memset(block_writes, false);
+    for (insts, 0..) |inst, i| {
+        var wbuf: [3]Register = undefined;
+        const wcnt = writeRegs(inst, &wbuf);
+        const row = block_of[i] * reg_count;
+        for (wbuf[0..wcnt]) |reg| block_writes[row + @as(usize, reg)] = true;
+    }
+
+    // -- [pass 2b] -----------------------------------------------------------
     // propagate liveness until stable
     //
-    // propagates thru:
     // ~ backward through .inst operands (data flow)
-    // ~ backward through .reg operands (register data flow)
     // ~ forward to jump targets (control flow)
-    // ~ forward fall-through from conditional branches (control flow)
+    // ~ register liveness across the block graph (backward data flow)
     var changed = true;
     while (changed) {
         changed = false;
 
-        // rebuild last_writer from the beginning each iteration
-        // so that forward refs resolve correctly
-        {
-            var i: usize = 0;
-            while (i < last_writer.len) : (i += 1) last_writer[i] = std.math.maxInt(usize);
-        }
-
+        // dataflow thru .inst operands and control flow
         for (insts, 0..) |inst, i| {
-            // if this instruction is live, mark its register
-            // dependencies (instructions whose results are read
-            // through registers rather than .inst pointers).
-            //
-            // two kinds of register reads exist:
-            // ~ .reg operands on instructions like `move`
-            // ~ instructions emitted via `emitBind` (bind_local,
-            //   store_local) that have empty operands and carry
-            //   their source register in result_reg
-            if (live[i]) {
-                // .reg operands
-                for (inst.operands) |op| {
-                    if (op == .reg) {
-                        const w = last_writer[op.reg];
-                        if (w != std.math.maxInt(usize) and !live[w]) {
-                            live[w] = true;
-                            changed = true;
-                        }
-                    }
-                }
-
-                // emitBind instrs: bind_local, store_local
-                // with empty operands read from result_reg
-                if (inst.operands.len == 0) switch (inst.opcode) {
-                    .bind_local, .store_local => {
-                        const w = last_writer[inst.result_reg];
-                        if (w != std.math.maxInt(usize) and !live[w]) {
-                            live[w] = true;
-                            changed = true;
-                        }
-                    },
-                    else => {},
-                };
-            }
-
-            // record this instruction as the last writer of its
-            // result reg (must happen after the dependency
-            // checks above so that self-references don't occur)
-            last_writer[inst.result_reg] = i;
-
-            // some opcodes write to multiple registers
-            switch (inst.opcode) {
-                .range_init => {
-                    // writes r, r+1, r+2 (range state)
-                    if (inst.result_reg + 1 < last_writer.len) last_writer[inst.result_reg + 1] = i;
-                    if (inst.result_reg + 2 < last_writer.len) last_writer[inst.result_reg + 2] = i;
-                },
-                .range_next => {
-                    // writes r (value), r+1 (index if has_index), r+2 (has_next)
-                    if (inst.result_reg + 1 < last_writer.len) last_writer[inst.result_reg + 1] = i;
-                    if (inst.result_reg + 2 < last_writer.len) last_writer[inst.result_reg + 2] = i;
-                },
-                else => {},
-            }
-
             if (!live[i]) continue;
-
-            // dataflow: mark instructions whose results we consume
-            // via .inst operands
             for (inst.operands) |op| {
                 if (op == .inst) {
                     if (index_of.get(op.inst)) |j| {
@@ -162,8 +284,6 @@ pub fn dceIr(self: *Compiler) !void {
                     }
                 }
             }
-
-            // control flow: mark jump targets
             switch (inst.opcode) {
                 .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
                     const target = inst.op_arg;
@@ -174,17 +294,110 @@ pub fn dceIr(self: *Compiler) !void {
                 },
                 else => {},
             }
+        }
 
-            // fallthru: conditional branches can fall through;
-            // mark the next instruction as live
-            if (i + 1 < n) {
-                const is_cond_jump = switch (inst.opcode) {
-                    .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => true,
-                    else => false,
-                };
-                if (is_cond_jump and !live[i + 1]) {
-                    live[i + 1] = true;
-                    changed = true;
+        // registers read by live instructions, per block
+        //
+        // a register only counts as a block use if it is read before its
+        // first write in the block; otherwise its value is produced inside
+        // the block and the block needs nothing from its predecessors
+        @memset(block_uses, false);
+        for (blocks.items, 0..) |b, bi| {
+            const base = bi * reg_count;
+            @memset(written_regs, false);
+            for (b.start..b.end) |i| {
+                const inst = insts[i];
+                if (live[i]) {
+                    var rcnt = readRegs(inst, read_buf);
+                    for (inst.operands) |op| {
+                        if (op == .reg and rcnt < reg_count) {
+                            read_buf[rcnt] = op.reg;
+                            rcnt += 1;
+                        }
+                    }
+                    for (read_buf[0..rcnt]) |reg| {
+                        if (!written_regs[reg]) block_uses[base + @as(usize, reg)] = true;
+                    }
+                }
+                var wbuf: [3]Register = undefined;
+                const wcnt = writeRegs(inst, &wbuf);
+                for (wbuf[0..wcnt]) |reg| written_regs[reg] = true;
+            }
+        }
+
+        // block liveness: live_out[b] = union of live_in[succ];
+        // live_in[b] = reads[b] | (live_out[b] & ~writes[b])
+        @memset(live_in, false);
+        var liveness_changed = true;
+        while (liveness_changed) {
+            liveness_changed = false;
+            for (blocks.items, 0..) |b, bi| {
+                const base = bi * reg_count;
+                const last_inst = insts[b.end - 1];
+                @memset(next_out, false);
+                switch (last_inst.opcode) {
+                    .jump => {
+                        const tb = block_of[last_inst.op_arg];
+                        for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
+                    },
+                    .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+                        const tb = block_of[last_inst.op_arg];
+                        for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
+                        if (b.end < n) {
+                            const fb = block_of[b.end];
+                            for (0..reg_count) |reg| next_out[reg] = next_out[reg] or live_in[fb * reg_count + reg];
+                        }
+                    },
+                    .ret, .halt => {},
+                    else => {
+                        if (b.end < n) {
+                            const fb = block_of[b.end];
+                            for (0..reg_count) |reg| next_out[reg] = live_in[fb * reg_count + reg];
+                        }
+                    },
+                }
+                for (0..reg_count) |reg| live_out[base + reg] = next_out[reg];
+                for (0..reg_count) |reg| {
+                    const v = block_uses[base + reg] or (next_out[reg] and !block_writes[base + reg]);
+                    if (v != live_in[base + reg]) {
+                        live_in[base + reg] = v;
+                        liveness_changed = true;
+                    }
+                }
+            }
+        }
+
+        // within each block, walk backward marking the writers of
+        // registers that are live at the point they are written
+        for (blocks.items, 0..) |b, bi| {
+            const base = bi * reg_count;
+            var cur: []bool = live_out[base .. base + reg_count];
+            var j: usize = b.end;
+            while (j > b.start) {
+                j -= 1;
+                const inst = insts[j];
+                var wbuf: [3]Register = undefined;
+                const wcnt = writeRegs(inst, &wbuf);
+                var needed = false;
+                for (wbuf[0..wcnt]) |reg| {
+                    if (cur[reg]) needed = true;
+                }
+                if (needed) {
+                    for (wbuf[0..wcnt]) |reg| cur[reg] = false;
+                    if (!live[j]) {
+                        live[j] = true;
+                        changed = true;
+                    }
+                }
+                if (live[j]) {
+                    var rcnt = readRegs(inst, read_buf);
+                    for (inst.operands) |op| {
+                        if (op == .reg and rcnt < reg_count) {
+                            read_buf[rcnt] = op.reg;
+                            rcnt += 1;
+                        }
+                    }
+                    for (read_buf[0..rcnt]) |reg| cur[reg] = true;
                 }
             }
         }
@@ -348,4 +561,37 @@ test "dce: store to discarded local is eliminated" {
         \\let _ = x
         \\99
     , 99);
+}
+
+test "dce: if-else branch values both survive the merge" {
+    // the then and else branches write the same shared branch register,
+    // so a linear last-writer scan only keeps one of them. both must
+    // survive or the if-expression returns a raw number instead of a bool
+    try t.top_number(
+        \\let hold_count = 9297
+        \\let queue_count = 23246
+        \\fn f() do
+        \\  if queue_count == 23246
+        \\    hold_count == 9297
+        \\  else
+        \\    :false
+        \\end
+        \\if f() 1 else 0
+    , 1);
+}
+
+test "dce: loop-back result register survives" {
+    // a while loop's break value flows back through a register; dce must
+    // not treat the loop result as dead just because it is written on both
+    // the loop-back and fall-through paths
+    try t.top_number(
+        \\fn f() do
+        \\  let i = 0
+        \\  while i < 3 do
+        \\    i = i + 1
+        \\  end
+        \\  i
+        \\end
+        \\f()
+    , 3);
 }
