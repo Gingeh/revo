@@ -542,16 +542,22 @@ pub const Compiler = struct {
                 if (state_mod.resolveLocal(self, name)) |slot| {
                     try self.emit(.load_local, slot);
                 } else if (try state_mod.resolveUpvalue(self, name)) |upval_id| {
-                    // reuse cached reg only if still live
-                    if (self.upvalue_cache.get(upval_id)) |cached_reg| {
-                        if (self.active_registers > 0 and cached_reg < self.active_registers - 1) {
-                            const dst = try state_mod.pushRegister(self);
-                            try self.spans.append(self.alloc, self.active_span);
-                            try self.recordMove(dst);
-                        } else {
-                            try self.emit(.load_upval, upval_id);
-                            try self.upvalue_cache.put(upval_id, self.active_registers - 1);
-                        }
+                    // reuse a cached upvalue load ONLY while its result is still
+                    // the topmost live value, once other values are pushed on
+                    // top the cached register coukd be stale or about to be
+                    // reused, so recordMove would copy the wrong register
+                    const top_inst = if (self.value_stack.items.len > 0)
+                        self.value_stack.items[self.value_stack.items.len - 1]
+                    else
+                        null;
+                    if (top_inst != null and
+                        top_inst.?.opcode == .load_upval and
+                        top_inst.?.op_arg == upval_id and
+                        self.upvalue_cache.get(upval_id) == top_inst.?.result_reg)
+                    {
+                        const dst = try state_mod.pushRegister(self);
+                        try self.spans.append(self.alloc, self.active_span);
+                        try self.recordMove(dst);
                     } else {
                         try self.emit(.load_upval, upval_id);
                         try self.upvalue_cache.put(upval_id, self.active_registers - 1);

@@ -596,6 +596,7 @@ pub fn compileIf(
     try self.compile(condition, true);
     const else_jump = try self.jump(.jump_if_false);
     const branch_base_registers = self.active_registers;
+    const join_depth = self.value_stack.items.len;
 
     try state.pushScope(self);
     errdefer state.popScope(self);
@@ -605,6 +606,19 @@ pub fn compileIf(
     try self.compile(then_expr, true);
     state.popScope(self);
     const then_registers = self.active_registers;
+
+    // both paths must leave the if expr's value in the shared branch
+    // register; single-expression branches go there by themselves, but
+    // do/stmt blocks push their value in a fresh register, so copy
+    // it into place before jumping to the join
+    if (self.value_stack.items.len > join_depth) {
+        const then_val = self.value_stack.items[self.value_stack.items.len - 1];
+        if (then_val.result_reg != branch_base_registers) {
+            try self.spans.append(self.alloc, self.active_span);
+            _ = try self.record(.move, &.{.{ .inst = then_val }}, true, @intCast(branch_base_registers), 0);
+        }
+    }
+
     const end_jump = try self.jump(.jump);
     self.patchJump(else_jump);
     self.active_registers = branch_base_registers; // reset before else so both branches start at same depth
@@ -616,6 +630,16 @@ pub fn compileIf(
         _ = type_check.inferExprType(self, branch);
     } else try self.pushNil();
     state.popScope(self);
+
+    // same normalization for the else path, emitted at the join so the
+    // then path (which jumped past it) is unaffected
+    if (self.value_stack.items.len > join_depth) {
+        const else_val = self.value_stack.items[self.value_stack.items.len - 1];
+        if (else_val.result_reg != branch_base_registers) {
+            try self.spans.append(self.alloc, self.active_span);
+            _ = try self.record(.move, &.{.{ .inst = else_val }}, true, @intCast(branch_base_registers), 0);
+        }
+    }
 
     if (then_registers != self.active_registers) {
         // equalize, push nils if else was shorter, then clamp
