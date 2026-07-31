@@ -1,7 +1,31 @@
 import {
-  "proc_lib",
-  m = "math_lib",
+  "./proc_lib.rv",
+  m = "./math_lib.rv",
 }
+## TODO: (bug)
+
+but
+import {
+  "./proc_lib.rv",
+  m = "./math_lib.rv",
+}
+
+would
+~/projects/revo λ zig build run -- ./examples/modules/main.rv
+error: module not found
+ --> ./examples/modules/main.rv:1:1
+ |
+   |   +-vvvvvvvv
+ 1 |  | import {
+ 2 |  |   "proc_lib",
+   |   +------------^
+   |
+ 3 |    m = "math_lib",
+ 4 |  }
+
+stack trace:
+  0: <module> at ./examples/modules/main.rv:1:1
+##
 
 proc_lib.add_one!(m.pi)
   |> m.double()

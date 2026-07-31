@@ -73,8 +73,7 @@ pub fn compileLocalBinding(
         state.setLocalTypeExplicit(self, slot);
     }
 
-    try self.regDupe();
-    try self.emit(.bind_local, slot);
+    try self.emitBind(.bind_local, slot, try toRegister(self.active_registers - 1));
 }
 
 pub fn bindDeclaredPattern(
