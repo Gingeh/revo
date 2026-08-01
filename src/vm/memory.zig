@@ -97,8 +97,8 @@ pub const Data = struct {
     }
 
     pub inline fn tag(self: Data) Type {
-        if (self.bits == CANONICAL_NAN) return .number;
         if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
+        if (self.bits == CANONICAL_NAN) return .number;
         const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
         if (raw > @intFromEnum(Type.foreign)) return .number;
         return @enumFromInt(raw);
@@ -143,8 +143,17 @@ pub const Data = struct {
 
     // inline numeric accessors used in hot paths
     // asNum -> ?f64, as_number -> error-union
+    //
+    // fast path: unboxed bits (ordinary f64s, including +/-inf and -nan)
+    // never match BOX_MASK. only the canonical NaN (tag nibble 8, empty
+    // payload) and boxed values share that pattern, so one compare separates
+    // them from every real number
     pub inline fn asNum(self: Data) ?f64 {
-        return if (self.tag() == .number) @bitCast(self.bits) else null;
+        if ((self.bits & BOX_MASK) == BOX_MASK) {
+            if (self.bits != CANONICAL_NAN)
+                return null;
+        }
+        return @bitCast(self.bits);
     }
 
     pub inline fn as_number(self: Data) !f64 {

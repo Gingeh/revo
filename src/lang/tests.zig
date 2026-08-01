@@ -1816,10 +1816,10 @@ test "top-level locals are real closure locals" {
         \\ x = 42
         \\ get()
     , 42);
-    try t.expectRuntimeError(
+    try t.expectCompileError(
         \\ const x = 1
         \\ x = 2
-    , .ConstantReassignment);
+    , .CompileError);
 }
 
 test "structs with comma-separated items and fn syntax" {
@@ -2159,17 +2159,17 @@ test "recursive calls still evaluate" {
 }
 
 test "assignment to constant fails" {
-    try t.expectRuntimeFailureWithMessage(
+    try t.expectCompileError(
         \\ const a = 1
         \\ a = 2
-    , .ConstantReassignment, "reassignment to constant!");
-    try t.expectRuntimeFailureWithMessage(
+    , .CompileError);
+    try t.expectCompileError(
         \\ const f = fn() do
         \\     const a = 1
         \\     a = 2
         \\ end
         \\ f()
-    , .ConstantReassignment, "reassignment to constant!");
+    , .CompileError);
 }
 
 //

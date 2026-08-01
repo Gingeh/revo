@@ -235,6 +235,8 @@ fn compileAssignSimple(
             try self.compile(value, true);
             try self.regDupe();
             if (state.resolveLocal(self, name)) |slot| {
+                if (state.resolveLocalVar(self, name)) |lv| if (!lv.mutable)
+                    return self.fail(.CompileError, target, "reassignment to constant!");
                 try self.emit(.store_local, slot);
                 state.markLocalValueKind(self, slot, .unknown);
                 try syncLocalTableFields(self, slot, value);

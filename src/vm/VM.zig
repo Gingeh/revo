@@ -1,4 +1,4 @@
-pub const INITIAL_HOT_FRAMES = 4;
+pub const INITIAL_HOT_FRAMES = 16;
 pub const INIT_REG_COUNT = 256;
 pub const ProgramCounter = usize;
 pub const ConstantID = usize;
@@ -36,12 +36,13 @@ pub const DebugInfo = struct {
     source_name: []const u8,
 };
 
-// direct-mapped inline cache for table lookups
-// compare pc/table_id/version then use val
+// 2-way associative inline cache for table lookups
+// compare pc/table_id/version/key then use value
 pub const ICacheEntry = struct {
     pc: ProgramCounter,
     table_id: mem.TableID,
     version: usize,
+    key: Data,
     value: Data,
 };
 
@@ -188,7 +189,7 @@ gc_pause_factor: usize = 2,
 gc_nursery_threshold: usize = 64 * 1024,
 
 /// for table lookups
-icache: [256]ICacheEntry = undefined,
+icache: [2][256]ICacheEntry = undefined,
 
 gc_mark_stack: std.ArrayList(MarkItem),
 gc_finalizers: std.AutoHashMap(mem.TableID, Data),
@@ -259,13 +260,16 @@ pub fn init(runtime: revo.Runtime) !VM {
     errdefer vm.gc_mark_stack.deinit(rt.alloc);
 
     // init icache with max pc to force miss
-    for (&vm.icache) |*entry| {
-        entry.* = .{
-            .pc = std.math.maxInt(ProgramCounter),
-            .table_id = 0,
-            .version = 0,
-            .value = undefined,
-        };
+    for (&vm.icache) |*bank| {
+        for (bank) |*entry| {
+            entry.* = .{
+                .pc = std.math.maxInt(ProgramCounter),
+                .table_id = 0,
+                .version = 0,
+                .key = undefined,
+                .value = undefined,
+            };
+        }
     }
 
     try vm.package_path.appendSlice(rt.alloc, &.{ "./?", "./lib/?", "/usr/local/lib/revo/?" });
@@ -276,8 +280,8 @@ pub fn init(runtime: revo.Runtime) !VM {
         .program = &.{},
         .debug_info_id = null,
         .registers = try runtime.alloc.alloc(Data, INIT_REG_COUNT),
-        .frames_hot = try std.ArrayList(FrameHot).initCapacity(runtime.alloc, 4),
-        .frames_cold = try std.ArrayList(FrameCold).initCapacity(runtime.alloc, 4),
+        .frames_hot = try std.ArrayList(FrameHot).initCapacity(runtime.alloc, INITIAL_HOT_FRAMES),
+        .frames_cold = try std.ArrayList(FrameCold).initCapacity(runtime.alloc, INITIAL_HOT_FRAMES),
         .running = false,
         .open_upvalues = try std.ArrayList(Fiber.OpenUpvalueRef).initCapacity(runtime.alloc, 1),
         .state = .ready,
@@ -546,6 +550,24 @@ pub inline fn regWrite(slots: []Data, base: usize, reg: opcode.Register, value: 
 pub inline fn writeRegisterFast(self: *VM, base: usize, reg: opcode.Register, value: Data) !void {
     const slot = base + reg;
     self.writeRegisterUnsafe(slot, value);
+}
+
+// 2-way associative icache lookups. set index = pc ^ table_id (low bits)
+pub inline fn icacheLookup(self: *VM, pc: ProgramCounter, table_id: mem.TableID, version: usize, key: Data) ?Data {
+    const set = (pc ^ table_id) & (self.icache[0].len - 1);
+    const w0 = &self.icache[0][set];
+    if (w0.pc == pc and w0.table_id == table_id and w0.version == version and w0.key.bits == key.bits)
+        return w0.value;
+    const w1 = &self.icache[1][set];
+    if (w1.pc == pc and w1.table_id == table_id and w1.version == version and w1.key.bits == key.bits)
+        return w1.value;
+    return null;
+}
+
+pub inline fn icacheInsert(self: *VM, pc: ProgramCounter, table_id: mem.TableID, version: usize, key: Data, value: Data) void {
+    const set = (pc ^ table_id) & (self.icache[0].len - 1);
+    self.icache[1][set] = self.icache[0][set];
+    self.icache[0][set] = .{ .pc = pc, .table_id = table_id, .version = version, .key = key, .value = value };
 }
 
 pub fn internAtom(self: *VM, name: []const u8) !mem.AtomID {
@@ -1344,6 +1366,7 @@ fn callNonClosureFunction(
 }
 
 fn fillOptionalSlots(regs: []Data, base: usize, argc: usize, total_arity: u8, register_count: u8) void {
+    if (argc >= total_arity and total_arity >= register_count) return;
     if (argc < total_arity) {
         @memset(
             regs[base + argc .. base + total_arity],

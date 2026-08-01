@@ -141,7 +141,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
 fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
     @setEvalBranchQuota(2000);
     var fiber = self.currentFiber();
-    if (fiber.pc >= fiber.program.len) return null;
+    std.debug.assert(fiber.pc < fiber.program.len);
     var instr = fiber.program[fiber.pc];
     fiber.pc += 1;
     var base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
@@ -149,17 +149,27 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
 
     dispatch: switch (instr.op) {
         .move => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const val = regRead(regs, base, instr.b);
             regWrite(regs, base, instr.a, val);
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .load_const => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             std.debug.assert(instr.bx < self.constants.items.len);
             regWrite(regs, base, instr.a, self.constants.items[instr.bx]);
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .load_nil => {
@@ -169,6 +179,9 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             continue :dispatch instr.op;
         },
         .load_small_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             regWrite(
                 regs,
                 base,
@@ -176,210 +189,68 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
                 Data.new.num(@as(i64, @intCast(instr.bx))),
             );
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .add => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
 
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
                 regWrite(regs, base, instr.a, Data.new.num(ln + rn));
 
-                if (!fetchNext(fiber, &instr)) break :dispatch;
+                if (at_end) break :dispatch;
+                fiber.pc = next_pc + 1;
+                instr = next_instr;
                 continue :dispatch instr.op;
             };
 
             return self.fail(error.IncompatibleTypes, "cannot add {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         },
         .concat => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
+            if (try execConcat(self, regs, base, instr, alloc)) |failure| return failure;
+            fiber = self.currentFiber();
+            base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+            regs = fiber.registers[0..fiber.registers_len];
 
-            // string + string fast path
-            if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
-                const l_str = self.stringValue(ls);
-                const r_str = self.stringValue(rs);
-
-                // empty string shortcuts: "" ~ x = x,  x ~ "" = x
-                if (l_str.len == 0) {
-                    regWrite(regs, base, instr.a, rhs);
-                    if (!fetchNext(fiber, &instr)) break :dispatch;
-                    continue :dispatch instr.op;
-                }
-                if (r_str.len == 0) {
-                    regWrite(regs, base, instr.a, lhs);
-                    if (!fetchNext(fiber, &instr)) break :dispatch;
-                    continue :dispatch instr.op;
-                }
-
-                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
-                const result_str = try self.adoptDataStringNoDedup(
-                    try std.mem.concat(alloc, u8, &.{ l_str, r_str }),
-                );
-                regWrite(regs, base, instr.a, result_str);
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
-            // tuple + tuple fast path
-            if (lhs.asTuple()) |lt| if (rhs.asTuple()) |rt| {
-                const l_tuple = try self.tuples.get(lt);
-                const r_tuple = try self.tuples.get(rt);
-                self.noteGCPressure(l_tuple.items.len * @sizeOf(Data) + r_tuple.items.len * @sizeOf(Data));
-                const combined = try std.mem.concat(alloc, Data, &.{ l_tuple.items, r_tuple.items });
-                defer alloc.free(combined);
-                regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(combined)));
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
-            // number + number fast path
-            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
-                const combined = try std.fmt.allocPrint(alloc, "{d}{d}", .{ ln, rn });
-                self.noteGCPressure(combined.len + @sizeOf(Data));
-                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
-            // string + number fast path
-            if (lhs.asStr()) |ls| if (rhs.asNum()) |rn| {
-                const l_str = self.stringValue(ls);
-                var r_buf: [128]u8 = undefined;
-                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch blk: {
-                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{rn});
-                };
-                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
-                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
-                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
-            // number + string fast path
-            if (lhs.asNum()) |ln| if (rhs.asStr()) |rs| {
-                const r_str = self.stringValue(rs);
-                const combined = try std.fmt.allocPrint(alloc, "{d}{s}", .{ ln, r_str });
-                self.noteGCPressure(combined.len + @sizeOf(Data));
-                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
-            // general: convert both to strings and concat
-            //          same pattern as stdlib's string()
-            const l_src = blk: {
-                if (try self.getMetamethod(lhs, "__tostring")) |mm| {
-                    const call_result = revo.std_lib.callUnaryMetamethod(mm, lhs, self);
-                    fiber = self.currentFiber();
-                    base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
-                    regs = fiber.registers[0..fiber.registers_len];
-                    switch (call_result) {
-                        .ok => |data| {
-                            if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
-                        },
-                        .err => {},
-                    }
-                    return self.fail(
-                        error.IncompatibleTypes,
-                        "cannot concatenate {s} and {s}",
-                        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
-                    );
-                }
-                var wbuf = std.Io.Writer.Allocating.init(alloc);
-                defer wbuf.deinit();
-                lhs.write(&wbuf.writer, self, .display) catch return self.fail(
-                    error.IncompatibleTypes,
-                    "cannot concatenate {s} and {s}",
-                    .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
-                );
-                break :blk try wbuf.toOwnedSlice();
-            };
-            defer alloc.free(l_src);
-
-            const r_src = blk: {
-                if (try self.getMetamethod(rhs, "__tostring")) |mm| {
-                    const call_result = revo.std_lib.callUnaryMetamethod(mm, rhs, self);
-                    fiber = self.currentFiber();
-                    base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
-                    regs = fiber.registers[0..fiber.registers_len];
-                    switch (call_result) {
-                        .ok => |data| {
-                            if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
-                        },
-                        .err => {},
-                    }
-                    return self.fail(
-                        error.IncompatibleTypes,
-                        "cannot concatenate {s} and {s}",
-                        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
-                    );
-                }
-                var wbuf = std.Io.Writer.Allocating.init(alloc);
-                defer wbuf.deinit();
-                rhs.write(&wbuf.writer, self, .display) catch return self.fail(
-                    error.IncompatibleTypes,
-                    "cannot concatenate {s} and {s}",
-                    .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
-                );
-                break :blk try wbuf.toOwnedSlice();
-            };
-            defer alloc.free(r_src);
-
-            const result = try std.mem.concat(alloc, u8, &.{ l_src, r_src });
-            regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .sub => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
                 regWrite(regs, base, instr.a, Data.new.num(ln - rn));
 
-                if (!fetchNext(fiber, &instr)) break :dispatch;
+                if (at_end) break :dispatch;
+                fiber.pc = next_pc + 1;
+                instr = next_instr;
                 continue :dispatch instr.op;
             };
             return self.fail(error.IncompatibleTypes, "cannot subtract {s} from {s}", .{ revo.std_lib.dataToString(rhs), revo.std_lib.dataToString(lhs) });
         },
         .mul => {
-            const slots = regs;
-            const lhs = regRead(slots, base, instr.b);
-            const rhs = regRead(slots, base, instr.c);
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
-                regWrite(slots, base, instr.a, Data.new.num(ln * rn));
+                regWrite(regs, base, instr.a, Data.new.num(ln * rn));
 
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             };
-            const StrNum = struct { s: revo.memory.StringID, n: f64 };
-            const str_and_num: ?StrNum = blk: {
-                if (lhs.asStr()) |ls| if (rhs.asNum()) |n|
-                    break :blk .{ .s = ls, .n = n };
-                if (rhs.asStr()) |rs| if (lhs.asNum()) |n|
-                    break :blk .{ .s = rs, .n = n };
-                break :blk null;
-            };
-            if (str_and_num) |pair| {
-                const str = self.stringValue(pair.s);
-                if (!std.math.isFinite(pair.n))
-                    return self.fail(error.IncompatibleTypes, "cannot multiply string by non-finite number", .{});
-                const count: usize = @intCast(
-                    std.math.clamp(@as(i64, @intFromFloat(pair.n)), 0, std.math.maxInt(i32)),
-                );
-                const total_len = std.math.mul(usize, str.len, count) catch
-                    return self.evalFailure(error.OutOfMemory);
-                self.noteGCPressure(total_len + @sizeOf(Data));
-                const result = try alloc.alloc(u8, total_len);
-                for (0..count) |i|
-                    @memcpy(result[i * str.len ..][0..str.len], str);
-                regWrite(slots, base, instr.a, try self.adoptDataStringNoDedup(result));
 
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            }
-            return self.fail(error.IncompatibleTypes, "cannot multiply {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            if (try execStringRepeat(self, regs, base, instr, lhs, rhs, alloc)) |failure| return failure;
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
         },
         .div => {
             const lhs = regRead(regs, base, instr.b);
@@ -492,6 +363,9 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             return self.fail(error.IncompatibleTypes, "cannot divide {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         },
         .mod_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -503,10 +377,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .band_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -517,10 +396,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li & ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .bor_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -531,10 +415,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li | ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .bxor_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -545,10 +434,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li ^ ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .shl_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -561,10 +455,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const shifted: i64 = @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri)));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(shifted))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .shr_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -576,10 +475,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li >> @as(u6, @intCast(ri))))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .div_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -591,7 +495,9 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .negate => {
@@ -605,23 +511,36 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.std_lib.dataToString(v)});
         },
         .negate_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const v = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(v.isNumber());
             const v_int = @as(i64, @intFromFloat(@as(f64, @bitCast(v.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .negate_float => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const v = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(v.isNumber());
             regWrite(regs, base, instr.a, Data.new.num(-@as(f64, @bitCast(v.bits))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .add_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -632,10 +551,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li + ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .sub_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -646,10 +570,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li - ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .mul_int => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -660,10 +589,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li * ri))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .div_float => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -673,10 +607,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (@as(f64, @bitCast(rhs.bits)) == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) / @as(f64, @bitCast(rhs.bits))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .div_floor_float => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (debug_assert_types) {
@@ -687,89 +626,44 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             if (rn == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@floor(@as(f64, @bitCast(lhs.bits)) / rn)));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .pow => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
-                const li = numToI64(ln);
-                const ri = numToI64(rn);
-                if (li != null and ri != null and ri.? >= 0) {
-                    var acc: i64 = 1;
-                    var b: i64 = li.?;
-                    var e: i64 = ri.?;
-                    while (e > 0) {
-                        if (e & 1 == 1) acc = acc *% b;
-                        e >>= 1;
-                        if (e > 0) b = b *% b;
-                    }
-                    regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
-                } else {
-                    const result = std.math.pow(f64, ln, rn);
-                    if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
-                    regWrite(regs, base, instr.a, Data.new.num(result));
-                }
+            if (try execPow(self, regs, base, instr)) |failure| return failure;
 
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-            return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
         },
         .pow_int => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
-            if (ri >= 0) {
-                var acc: i64 = 1;
-                var b: i64 = li;
-                var e: i64 = ri;
-                while (e > 0) {
-                    if (e & 1 == 1) acc = acc *% b;
-                    e >>= 1;
-                    if (e > 0) b = b *% b;
-                }
-                regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
-            } else {
-                const ln = @as(f64, @bitCast(lhs.bits));
-                const rn = @as(f64, @bitCast(rhs.bits));
-                const result = std.math.pow(f64, ln, rn);
-                if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
-                regWrite(regs, base, instr.a, Data.new.num(result));
-            }
+            if (try execPowInt(self, regs, base, instr)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .pow_float => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const ln = @as(f64, @bitCast(lhs.bits));
-            const rn = @as(f64, @bitCast(rhs.bits));
-            const result = std.math.pow(f64, ln, rn);
-            if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
-            regWrite(regs, base, instr.a, Data.new.num(result));
+            if (try execPowFloat(self, regs, base, instr)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         inline .eq, .neq, .lt, .gt, .lte, .gte => |op| {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             try compare_impl.evalCachedFast(regs, base, self, instr, op);
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const lhs_val = regRead(regs, base, instr.b);
             const rhs_val = regRead(regs, base, instr.c);
             const lhs = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs_val.bits))));
@@ -786,31 +680,48 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             };
             regWrite(regs, base, instr.a, Data.new.boolean(result));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .@"and" => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             regWrite(regs, base, instr.a, Data.new.boolean(
                 !revo.isFalse(regRead(regs, base, instr.b)) and
                     !revo.isFalse(regRead(regs, base, instr.c)),
             ));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .@"or" => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             regWrite(regs, base, instr.a, Data.new.boolean(
                 !revo.isFalse(regRead(regs, base, instr.b)) or
                     !revo.isFalse(regRead(regs, base, instr.c)),
             ));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .not => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             regWrite(regs, base, instr.a, Data.new.boolean(revo.isFalse(regRead(regs, base, instr.b))));
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .table_new => {
@@ -857,73 +768,7 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             continue :dispatch instr.op;
         },
         .slice => {
-            const object = regRead(regs, base, instr.b);
-            const start_value = regRead(regs, base, instr.b + 1);
-            const step_value = regRead(regs, base, instr.b + 2);
-            const end_value = regRead(regs, base, instr.b + 3);
-
-            const nil_atom = revo.core_atoms.atom_id(.nil);
-
-            const step_num = if (step_value.asAtom() == nil_atom)
-                @as(f64, 1)
-            else
-                step_value.asNum() orelse return self.typeError("number for slice step", step_value);
-
-            const source_len: isize = switch (object.tag()) {
-                .string => @intCast(self.stringValue(object.asString().?).len),
-                .tuple => @intCast((try self.tuples.get(object.asTuple().?)).items.len),
-                else => return self.typeError("string or tuple for slice", object),
-            };
-
-            const start_num = if (start_value.asAtom() == nil_atom)
-                if (step_num > 0) @as(f64, 0) else @as(f64, @floatFromInt(source_len - 1))
-            else
-                start_value.asNum() orelse return self.typeError("number for slice start", start_value);
-
-            const end_num = if (end_value.asAtom() == nil_atom)
-                if (step_num > 0) @as(f64, @floatFromInt(source_len)) else @as(f64, -1)
-            else
-                end_value.asNum() orelse return self.typeError("number for slice end", end_value);
-
-            if (!std.math.isFinite(start_num) or !std.math.isFinite(step_num) or !std.math.isFinite(end_num) or
-                @floor(start_num) != start_num or @floor(step_num) != step_num or @floor(end_num) != end_num or
-                step_num == 0)
-                return self.fail(error.TypeError, "slice bounds must be finite integers with a non-zero step", .{});
-
-            switch (object.tag()) {
-                .string => {
-                    const source = self.stringValue(object.asString().?);
-                    const start: isize = @intFromFloat(start_num);
-                    const step: isize = @intFromFloat(step_num);
-                    const end: isize = @intFromFloat(end_num);
-                    var out = std.ArrayList(u8).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
-                    defer out.deinit(self.runtime.alloc);
-                    var i = start;
-                    while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
-                        if (i < 0 or @as(usize, @intCast(i)) >= source.len)
-                            return self.fail(error.TypeError, "string slice index out of range", .{});
-                        try out.append(self.runtime.alloc, source[@intCast(i)]);
-                    }
-                    const data = try self.adoptDataString(try out.toOwnedSlice(self.runtime.alloc));
-                    regWrite(regs, base, instr.a, data);
-                },
-                .tuple => {
-                    const tuple = try self.tuples.get(object.asTuple().?);
-                    const start: isize = @intFromFloat(start_num);
-                    const step: isize = @intFromFloat(step_num);
-                    const end: isize = @intFromFloat(end_num);
-                    var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
-                    defer out.deinit(self.runtime.alloc);
-                    var i = start;
-                    while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
-                        if (i < 0 or @as(usize, @intCast(i)) >= tuple.items.len)
-                            return self.fail(error.TypeError, "tuple slice index out of range", .{});
-                        try out.append(self.runtime.alloc, tuple.items[@intCast(i)]);
-                    }
-                    regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(out.items)));
-                },
-                else => return self.typeError("string or tuple for slice", object),
-            }
+            if (try execSlice(self, regs, base, instr)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -949,17 +794,16 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
 
             if (object.asTable()) |t_id| {
                 const pc = fiber.pc - 1;
-                const ic = &self.icache[(pc ^ t_id) & (self.icache.len - 1)];
                 const t = try self.tableFast(t_id);
 
-                if (ic.pc == pc and ic.table_id == t_id and ic.version == t.ic_version) {
+                if (self.icacheLookup(pc, t_id, t.ic_version, key)) |value| {
                     @branchHint(.likely);
-                    regWrite(regs, base, instr.a, ic.value);
+                    regWrite(regs, base, instr.a, value);
                 } else if (t.getRaw(key, self)) |value| {
-                    ic.* = .{ .pc = pc, .table_id = t_id, .version = t.ic_version, .value = value };
+                    self.icacheInsert(pc, t_id, t.ic_version, key, value);
                     regWrite(regs, base, instr.a, value);
                 } else if (try self.resolveField(object, key)) |resolved| {
-                    ic.* = .{ .pc = pc, .table_id = t_id, .version = t.ic_version, .value = resolved.value };
+                    self.icacheInsert(pc, t_id, t.ic_version, key, resolved.value);
                     regWrite(regs, base, instr.a, resolved.value);
                 } else {
                     regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
@@ -1123,6 +967,9 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             continue :dispatch instr.op;
         },
         .load_local, .bind_local => {
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const dst = base + instr.a;
             const src = base + instr.b;
             if (builtin.mode != .ReleaseFast and src >= regs.len) {
@@ -1131,17 +978,15 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
                 regs[dst] = regs[src];
             }
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .store_local => {
-            if (try self.currentClosure()) |closure| blk: {
-                const proto = try self.functions.getPrototype(closure.prototype);
-                const idx = instr.a / 8;
-                if (idx >= proto.const_local_bits.len) break :blk;
-                const bit: u3 = @intCast(instr.a % 8);
-                if ((proto.const_local_bits[idx] & (@as(u8, 1) << bit)) != 0) return self.evalFailure(error.ConstantReassignment);
-            }
+            const next_pc = fiber.pc;
+            const at_end = next_pc >= fiber.program.len;
+            const next_instr = if (!at_end) fiber.program[next_pc] else undefined;
             const dst = base + instr.a;
             const src = base + instr.b;
             if (builtin.mode != .ReleaseFast and src >= regs.len) {
@@ -1150,42 +995,13 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
                 regs[dst] = regs[src];
             }
 
-            if (!fetchNext(fiber, &instr)) break :dispatch;
+            if (at_end) break :dispatch;
+            fiber.pc = next_pc + 1;
+            instr = next_instr;
             continue :dispatch instr.op;
         },
         .closure => {
-            const proto = try self.functions.getPrototype(instr.bx);
-            self.noteGCPressure(@sizeOf(revo.functions.Closure) + @sizeOf(revo.functions.UpvalueID) * proto.upvalue_specs.len);
-
-            if (proto.upvalue_specs.len <= 8) {
-                var upv_buf: [8]revo.functions.UpvalueID = undefined;
-                for (proto.upvalue_specs, 0..) |spec, i| {
-                    if (spec.is_local) {
-                        const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
-                        upv_buf[i] = try self.captureUpvalue(frame_base + spec.index);
-                    } else {
-                        const closure2 = (try self.currentClosure()) orelse
-                            return self.fail(error.TypeError, "expected closure", .{});
-                        upv_buf[i] = closure2.upvalues[spec.index];
-                    }
-                }
-                regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, upv_buf[0..proto.upvalue_specs.len])));
-            } else {
-                var list = try std.ArrayList(revo.functions.UpvalueID).initCapacity(alloc, proto.upvalue_specs.len);
-                errdefer list.deinit(alloc);
-                for (proto.upvalue_specs) |spec| {
-                    if (spec.is_local) {
-                        const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
-                        try list.append(alloc, try self.captureUpvalue(frame_base + spec.index));
-                    } else {
-                        const closure2 = (try self.currentClosure()) orelse
-                            return self.fail(error.TypeError, "expected closure", .{});
-                        try list.append(alloc, closure2.upvalues[spec.index]);
-                    }
-                }
-                regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, list.items)));
-                list.deinit(alloc);
-            }
+            if (try execClosure(self, regs, base, instr, alloc)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1217,31 +1033,10 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
             continue :dispatch instr.op;
         },
         .call_field => {
-            const colon = (instr.b & 0x80) != 0;
-            const explicit_argc: usize = instr.b & 0x7F;
-            const object = regRead(regs, base, instr.a);
-            const key = regRead(regs, base, instr.a + 1);
-
-            const lookup_result = (try self.resolveField(object, key)) orelse {
-                const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key);
-                return self.fail(error.NotAFunction, "field `{s}` does not exist on {s}", .{ key_name, revo.std_lib.typeof(object) });
+            execCallField(self, regs, base, instr) catch |e| switch (e) {
+                error.Parked => break :dispatch,
+                else => return self.evalFailure(e),
             };
-
-            if (colon) {
-                regWrite(regs, base, instr.a, lookup_result.value);
-                regWrite(regs, base, instr.a + 1, object);
-                self.callRegister(.{ .op = .call, .a = instr.a, .b = @intCast(explicit_argc + 1), .c = instr.c }) catch |e| switch (e) {
-                    error.Parked => break :dispatch,
-                    else => return self.evalFailure(e),
-                };
-            } else {
-                regWrite(regs, base, instr.a + 1, lookup_result.value);
-                self.callRegister(.{ .op = .call, .a = instr.a + 1, .b = @intCast(explicit_argc), .c = instr.c }) catch |e| switch (e) {
-                    error.Parked => break :dispatch,
-                    else => return self.evalFailure(e),
-                };
-            }
-
             base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
             regs = fiber.registers[0..fiber.registers_len];
 
@@ -1437,12 +1232,459 @@ inline fn fetchNext(fiber: *VM.Fiber, instr: *Instruction) bool {
     return true;
 }
 
-pub fn trace(self: *VM, instr: Instruction) void {
+//
+// -- [cold handlers] ---------------------------------------------------------
+// pulled outta the dispatch loop so the hot opcodes stay small in the icache
+//
+// each returns an error-union `?EvalFailure`: null
+// on success, an EvalFailure to report, or an error to unwrap via evalFailure
+
+/// concat with multi-op batching: the compiler lowers a chain `a ~ b ~ c ~ d`
+/// to consecutive concats
+///
+/// R[a]  = R[b] ~ R[c];  R[a'] = R[a'] ~ R[a];  R[a''] = R[a''] ~ R[a']
+///
+/// so one allocation can build the whole result. only fires when every
+/// operand is a string and the chain is straight-line, so the intermediate
+/// result registers are dead temporaries
+noinline fn execConcat(self: *VM, regs_in: []Data, base_in: usize, instr: Instruction, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
+    var regs = regs_in;
+    var base = base_in;
+    var fiber = self.currentFiber();
+    const lhs = regRead(regs, base, instr.b);
+    const rhs = regRead(regs, base, instr.c);
+
+    // string + string fast path
+    if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
+        // try to batch consecutive accumulator concats
+        const batched = blk: {
+            var prev_a = instr.a;
+            var new_ops: [8]opcode.Register = undefined;
+            var new_count: usize = 0;
+            var scan_pc = fiber.pc;
+            while (new_count < new_ops.len and scan_pc < fiber.program.len) {
+                const next = fiber.program[scan_pc];
+                if (next.op != .concat) break;
+                const fwd = next.c == prev_a and next.b == next.a;
+                const rev = next.b == prev_a and next.c == next.a;
+                if (!fwd and !rev) break;
+                new_ops[new_count] = if (fwd) next.b else next.c;
+                new_count += 1;
+                prev_a = next.a;
+                scan_pc += 1;
+            }
+            if (new_count == 0) break :blk false;
+
+            // operands in result order: [n_{k-1}, ..., n_1, b, c]
+            var op_ids: [10]revo.memory.StringID = undefined;
+            var op_lens: [10]usize = undefined;
+            var n: usize = 0;
+            var total_len: usize = 0;
+            var i = new_count;
+            while (i > 0) {
+                i -= 1;
+                const v = regRead(regs, base, new_ops[i]);
+                const sid = v.asStr() orelse break :blk false;
+                const s = self.stringValue(sid);
+                op_ids[n] = sid;
+                op_lens[n] = s.len;
+                total_len += s.len;
+                n += 1;
+            }
+            const bs = self.stringValue(ls);
+            const cs = self.stringValue(rs);
+            op_ids[n] = ls;
+            op_lens[n] = bs.len;
+            total_len += bs.len;
+            n += 1;
+            op_ids[n] = rs;
+            op_lens[n] = cs.len;
+            total_len += cs.len;
+            n += 1;
+
+            self.noteGCPressure(total_len + @sizeOf(Data));
+            const buf = try alloc.alloc(u8, total_len);
+            var off: usize = 0;
+            for (0..n) |j| {
+                const s = self.stringValue(op_ids[j]);
+                @memcpy(buf[off..][0..op_lens[j]], s);
+                off += op_lens[j];
+            }
+            const result = try self.adoptDataStringNoDedup(buf);
+            regWrite(regs, base, prev_a, result);
+            fiber.pc += new_count;
+            break :blk true;
+        };
+        if (batched) return null;
+
+        const l_str = self.stringValue(ls);
+        const r_str = self.stringValue(rs);
+
+        // empty string shortcuts: "" ~ x = x,  x ~ "" = x
+        if (l_str.len == 0) {
+            regWrite(regs, base, instr.a, rhs);
+            return null;
+        }
+        if (r_str.len == 0) {
+            regWrite(regs, base, instr.a, lhs);
+            return null;
+        }
+
+        self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+        const result_str = try self.adoptDataStringNoDedup(
+            try std.mem.concat(alloc, u8, &.{ l_str, r_str }),
+        );
+        regWrite(regs, base, instr.a, result_str);
+        return null;
+    };
+
+    // tuple + tuple fast path
+    if (lhs.asTuple()) |lt| if (rhs.asTuple()) |rt| {
+        const l_tuple = try self.tuples.get(lt);
+        const r_tuple = try self.tuples.get(rt);
+        self.noteGCPressure(l_tuple.items.len * @sizeOf(Data) + r_tuple.items.len * @sizeOf(Data));
+        const combined = try std.mem.concat(alloc, Data, &.{ l_tuple.items, r_tuple.items });
+        defer alloc.free(combined);
+        regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(combined)));
+        return null;
+    };
+
+    // number + number fast path
+    if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+        const combined = try std.fmt.allocPrint(alloc, "{d}{d}", .{ ln, rn });
+        self.noteGCPressure(combined.len + @sizeOf(Data));
+        regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+        return null;
+    };
+
+    // string + number fast path
+    if (lhs.asStr()) |ls2| if (rhs.asNum()) |rn| {
+        const l_str = self.stringValue(ls2);
+        var r_buf: [128]u8 = undefined;
+        const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch blk: {
+            break :blk try std.fmt.allocPrint(alloc, "{d}", .{rn});
+        };
+        self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+        const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+        regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+        return null;
+    };
+
+    // number + string fast path
+    if (lhs.asNum()) |ln| if (rhs.asStr()) |rs2| {
+        const r_str = self.stringValue(rs2);
+        const combined = try std.fmt.allocPrint(alloc, "{d}{s}", .{ ln, r_str });
+        self.noteGCPressure(combined.len + @sizeOf(Data));
+        regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+        return null;
+    };
+
+    // general: convert both to strings and concat
+    //          same pattern as stdlib's string()
+    const l_src = blk: {
+        if (try self.getMetamethod(lhs, "__tostring")) |mm| {
+            const call_result = revo.std_lib.callUnaryMetamethod(mm, lhs, self);
+            fiber = self.currentFiber();
+            base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+            regs = fiber.registers[0..fiber.registers_len];
+            switch (call_result) {
+                .ok => |data| {
+                    if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
+                },
+                .err => {},
+            }
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot concatenate {s} and {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
+        }
+        var wbuf = std.Io.Writer.Allocating.init(alloc);
+        defer wbuf.deinit();
+        lhs.write(&wbuf.writer, self, .display) catch return self.fail(
+            error.IncompatibleTypes,
+            "cannot concatenate {s} and {s}",
+            .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+        );
+        break :blk try wbuf.toOwnedSlice();
+    };
+    defer alloc.free(l_src);
+
+    const r_src = blk: {
+        if (try self.getMetamethod(rhs, "__tostring")) |mm| {
+            const call_result = revo.std_lib.callUnaryMetamethod(mm, rhs, self);
+            fiber = self.currentFiber();
+            base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+            regs = fiber.registers[0..fiber.registers_len];
+            switch (call_result) {
+                .ok => |data| {
+                    if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
+                },
+                .err => {},
+            }
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot concatenate {s} and {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
+        }
+        var wbuf = std.Io.Writer.Allocating.init(alloc);
+        defer wbuf.deinit();
+        rhs.write(&wbuf.writer, self, .display) catch return self.fail(
+            error.IncompatibleTypes,
+            "cannot concatenate {s} and {s}",
+            .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+        );
+        break :blk try wbuf.toOwnedSlice();
+    };
+    defer alloc.free(r_src);
+
+    const result = try std.mem.concat(alloc, u8, &.{ l_src, r_src });
+    regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
+    return null;
+}
+
+noinline fn execSlice(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
+    const object = regRead(regs, base, instr.b);
+    const start_value = regRead(regs, base, instr.b + 1);
+    const step_value = regRead(regs, base, instr.b + 2);
+    const end_value = regRead(regs, base, instr.b + 3);
+
+    const nil_atom = revo.core_atoms.atom_id(.nil);
+
+    const step_num = if (step_value.asAtom() == nil_atom)
+        @as(f64, 1)
+    else
+        step_value.asNum() orelse return self.typeError("number for slice step", step_value);
+
+    const source_len: isize = switch (object.tag()) {
+        .string => @intCast(self.stringValue(object.asString().?).len),
+        .tuple => @intCast((try self.tuples.get(object.asTuple().?)).items.len),
+        else => return self.typeError("string or tuple for slice", object),
+    };
+
+    const start_num = if (start_value.asAtom() == nil_atom)
+        if (step_num > 0) @as(f64, 0) else @as(f64, @floatFromInt(source_len - 1))
+    else
+        start_value.asNum() orelse return self.typeError("number for slice start", start_value);
+
+    const end_num = if (end_value.asAtom() == nil_atom)
+        if (step_num > 0) @as(f64, @floatFromInt(source_len)) else @as(f64, -1)
+    else
+        end_value.asNum() orelse return self.typeError("number for slice end", end_value);
+
+    if (!std.math.isFinite(start_num) or !std.math.isFinite(step_num) or !std.math.isFinite(end_num) or
+        @floor(start_num) != start_num or @floor(step_num) != step_num or @floor(end_num) != end_num or
+        step_num == 0)
+        return self.fail(error.TypeError, "slice bounds must be finite integers with a non-zero step", .{});
+
+    switch (object.tag()) {
+        .string => {
+            const source = self.stringValue(object.asString().?);
+            const start: isize = @intFromFloat(start_num);
+            const step: isize = @intFromFloat(step_num);
+            const end: isize = @intFromFloat(end_num);
+            var out = std.ArrayList(u8).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
+            defer out.deinit(self.runtime.alloc);
+            var i = start;
+            while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
+                if (i < 0 or @as(usize, @intCast(i)) >= source.len)
+                    return self.fail(error.TypeError, "string slice index out of range", .{});
+                try out.append(self.runtime.alloc, source[@intCast(i)]);
+            }
+            const data = try self.adoptDataString(try out.toOwnedSlice(self.runtime.alloc));
+            regWrite(regs, base, instr.a, data);
+        },
+        .tuple => {
+            const tuple = try self.tuples.get(object.asTuple().?);
+            const start: isize = @intFromFloat(start_num);
+            const step: isize = @intFromFloat(step_num);
+            const end: isize = @intFromFloat(end_num);
+            var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
+            defer out.deinit(self.runtime.alloc);
+            var i = start;
+            while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
+                if (i < 0 or @as(usize, @intCast(i)) >= tuple.items.len)
+                    return self.fail(error.TypeError, "tuple slice index out of range", .{});
+                try out.append(self.runtime.alloc, tuple.items[@intCast(i)]);
+            }
+            regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(out.items)));
+        },
+        else => return self.typeError("string or tuple for slice", object),
+    }
+    return null;
+}
+
+noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!void {
+    const colon = (instr.b & 0x80) != 0;
+    const explicit_argc: usize = instr.b & 0x7F;
+    const object = regRead(regs, base, instr.a);
+    const key = regRead(regs, base, instr.a + 1);
+
+    const lookup_result = blk: {
+        if (object.asTable()) |t_id| {
+            const pc = self.currentFiber().pc - 1;
+            const t = try self.tableFast(t_id);
+            if (self.icacheLookup(pc, t_id, t.ic_version, key)) |value|
+                break :blk VM.FieldLookup{ .value = value, .from_meta = false };
+            if (try self.resolveField(object, key)) |resolved| {
+                self.icacheInsert(pc, t_id, t.ic_version, key, resolved.value);
+                break :blk resolved;
+            }
+        } else if (try self.resolveField(object, key)) |resolved| {
+            break :blk resolved;
+        }
+        break :blk null;
+    } orelse {
+        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key);
+        try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{ key_name, revo.std_lib.typeof(object) });
+        return error.NotAFunction;
+    };
+
+    if (colon) {
+        regWrite(regs, base, instr.a, lookup_result.value);
+        regWrite(regs, base, instr.a + 1, object);
+        try self.callRegister(.{ .op = .call, .a = instr.a, .b = @intCast(explicit_argc + 1), .c = instr.c });
+    } else {
+        regWrite(regs, base, instr.a + 1, lookup_result.value);
+        try self.callRegister(.{ .op = .call, .a = instr.a + 1, .b = @intCast(explicit_argc), .c = instr.c });
+    }
+}
+
+noinline fn execClosure(self: *VM, regs: []Data, base: usize, instr: Instruction, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
     const fiber = self.currentFiber();
-    std.debug.print("[{d:>4}] {s:<16}\n", .{
-        fiber.pc - 1,
-        @tagName(instr.op),
-    });
+    const proto = try self.functions.getPrototype(instr.bx);
+    self.noteGCPressure(@sizeOf(revo.functions.Closure) + @sizeOf(revo.functions.UpvalueID) * proto.upvalue_specs.len);
+
+    if (proto.upvalue_specs.len <= 8) {
+        var upv_buf: [8]revo.functions.UpvalueID = undefined;
+        for (proto.upvalue_specs, 0..) |spec, i| {
+            if (spec.is_local) {
+                const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                upv_buf[i] = try self.captureUpvalue(frame_base + spec.index);
+            } else {
+                const closure2 = (try self.currentClosure()) orelse
+                    return self.fail(error.TypeError, "expected closure", .{});
+                upv_buf[i] = closure2.upvalues[spec.index];
+            }
+        }
+        regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, upv_buf[0..proto.upvalue_specs.len])));
+    } else {
+        var list = try std.ArrayList(revo.functions.UpvalueID).initCapacity(alloc, proto.upvalue_specs.len);
+        errdefer list.deinit(alloc);
+        for (proto.upvalue_specs) |spec| {
+            if (spec.is_local) {
+                const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                try list.append(alloc, try self.captureUpvalue(frame_base + spec.index));
+            } else {
+                const closure2 = (try self.currentClosure()) orelse
+                    return self.fail(error.TypeError, "expected closure", .{});
+                try list.append(alloc, closure2.upvalues[spec.index]);
+            }
+        }
+        regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, list.items)));
+        list.deinit(alloc);
+    }
+    return null;
+}
+
+noinline fn execPow(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
+    const lhs = regRead(regs, base, instr.b);
+    const rhs = regRead(regs, base, instr.c);
+    if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+        const li = numToI64(ln);
+        const ri = numToI64(rn);
+        if (li != null and ri != null and ri.? >= 0) {
+            var acc: i64 = 1;
+            var b: i64 = li.?;
+            var e: i64 = ri.?;
+            while (e > 0) {
+                if (e & 1 == 1) acc = acc *% b;
+                e >>= 1;
+                if (e > 0) b = b *% b;
+            }
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
+        } else {
+            const result = std.math.pow(f64, ln, rn);
+            if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            regWrite(regs, base, instr.a, Data.new.num(result));
+        }
+        return null;
+    };
+    return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+}
+
+noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
+    const lhs = regRead(regs, base, instr.b);
+    const rhs = regRead(regs, base, instr.c);
+    if (debug_assert_types) {
+        std.debug.assert(lhs.isNumber());
+        std.debug.assert(rhs.isNumber());
+    }
+    const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+    const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+    if (ri >= 0) {
+        var acc: i64 = 1;
+        var b: i64 = li;
+        var e: i64 = ri;
+        while (e > 0) {
+            if (e & 1 == 1) acc = acc *% b;
+            e >>= 1;
+            if (e > 0) b = b *% b;
+        }
+        regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(acc))));
+    } else {
+        const ln = @as(f64, @bitCast(lhs.bits));
+        const rn = @as(f64, @bitCast(rhs.bits));
+        const result = std.math.pow(f64, ln, rn);
+        if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        regWrite(regs, base, instr.a, Data.new.num(result));
+    }
+    return null;
+}
+
+noinline fn execPowFloat(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
+    const lhs = regRead(regs, base, instr.b);
+    const rhs = regRead(regs, base, instr.c);
+    if (debug_assert_types) {
+        std.debug.assert(lhs.isNumber());
+        std.debug.assert(rhs.isNumber());
+    }
+    const ln = @as(f64, @bitCast(lhs.bits));
+    const rn = @as(f64, @bitCast(rhs.bits));
+    const result = std.math.pow(f64, ln, rn);
+    if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+    regWrite(regs, base, instr.a, Data.new.num(result));
+    return null;
+}
+
+/// string * n fallback for .mul (numeric fast path stays inline)
+noinline fn execStringRepeat(self: *VM, regs: []Data, base: usize, instr: Instruction, lhs: Data, rhs: Data, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
+    const StrNum = struct { s: revo.memory.StringID, n: f64 };
+    const str_and_num: ?StrNum = blk: {
+        if (lhs.asStr()) |ls| if (rhs.asNum()) |n|
+            break :blk .{ .s = ls, .n = n };
+        if (rhs.asStr()) |rs| if (lhs.asNum()) |n|
+            break :blk .{ .s = rs, .n = n };
+        break :blk null;
+    };
+    if (str_and_num) |pair| {
+        const str = self.stringValue(pair.s);
+        if (!std.math.isFinite(pair.n))
+            return self.fail(error.IncompatibleTypes, "cannot multiply string by non-finite number", .{});
+        const count: usize = @intCast(
+            std.math.clamp(@as(i64, @intFromFloat(pair.n)), 0, std.math.maxInt(i32)),
+        );
+        const total_len = std.math.mul(usize, str.len, count) catch
+            return self.evalFailure(error.OutOfMemory);
+        self.noteGCPressure(total_len + @sizeOf(Data));
+        const result = try alloc.alloc(u8, total_len);
+        for (0..count) |i|
+            @memcpy(result[i * str.len ..][0..str.len], str);
+        regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
+        return null;
+    }
+    return self.fail(error.IncompatibleTypes, "cannot multiply {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
 }
 
 /// integral f64 -> i64, else null (used by bitwise + `//` runtime checks)

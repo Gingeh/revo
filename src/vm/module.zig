@@ -41,8 +41,10 @@ fn swapFiberAndRun(vm: *revo.VM, source_path: []const u8, program: []const revo.
 
     // clear icache between independent program runs to prevent stale
     // hits when two different compilations reuse the same pc positions
-    for (&vm.icache) |*entry|
-        entry.* = .{ .pc = std.math.maxInt(revo.ProgramCounter), .table_id = 0, .version = 0, .value = undefined };
+    for (&vm.icache) |*bank| {
+        for (bank) |*entry|
+            entry.* = .{ .pc = std.math.maxInt(revo.ProgramCounter), .table_id = 0, .version = 0, .key = undefined, .value = undefined };
+    }
 
     const module_dir = std.fs.path.dirname(source_path) orelse ".";
     const prev_module_dir = vm.module_dir;
