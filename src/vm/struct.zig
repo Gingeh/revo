@@ -25,7 +25,6 @@ pub const StructDescriptor = struct {
         self.field_index.deinit();
         self.methods.deinit();
     }
-
 };
 
 pub const StructTypePool = struct {

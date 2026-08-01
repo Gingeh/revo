@@ -46,6 +46,9 @@ fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         },
 
         .range_next => {
+            // loop state sits in the three registers below the outputs; the
+            // ir builder always emits range_next with result_reg >= 3
+            std.debug.assert(r >= 3);
             out[0] = r - 3;
             out[1] = r - 2;
             out[2] = r - 1;
@@ -153,6 +156,12 @@ const Register = revo.opcode.Register;
 const ir = @import("root.zig");
 
 /// side-effecting opcodes that must never be eliminated
+///
+/// `move` is deliberately absent: moves are pure register copies and are
+/// kept only when register liveness shows their destination is still read.
+/// loop-break and branch-merge results flow through a move into a shared
+/// register that later code reads by name, and the per-block register
+/// liveness below keeps exactly those moves alive
 fn isSideEffect(op: Opcode) bool {
     return switch (op) {
         // zig fmt: off
@@ -161,8 +170,7 @@ fn isSideEffect(op: Opcode) bool {
         .struct_set_offset, .call, .call_field, .spawn,
         .join, .yield, .ret, .halt,
         .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err,
-        .jump_if_err, .range_init, .range_next, .unwrap_result,
-        .move  // loop-break results flow through registers, not .inst
+        .jump_if_err, .range_init, .range_next, .unwrap_result
         // zig fmt: on
         => true,
         else => false,
@@ -267,13 +275,21 @@ pub fn dceIr(self: *Compiler) !void {
     // ~ backward through .inst operands (data flow)
     // ~ forward to jump targets (control flow)
     // ~ register liveness across the block graph (backward data flow)
+    @memset(live_in, false);
     var changed = true;
     while (changed) {
         changed = false;
 
         // dataflow thru .inst operands and control flow
-        for (insts, 0..) |inst, i| {
-            if (!live[i]) continue;
+        //
+        // walk instructions backward: operands always sit at earlier
+        // indices, so one pass propagates a whole dependency chain and
+        // the outer loop only re-runs for forward jump chains
+        var di = n;
+        while (di > 0) {
+            di -= 1;
+            const inst = insts[di];
+            if (!live[di]) continue;
             for (inst.operands) |op| {
                 if (op == .inst) {
                     if (index_of.get(op.inst)) |j| {
@@ -315,6 +331,7 @@ pub fn dceIr(self: *Compiler) !void {
                             rcnt += 1;
                         }
                     }
+                    std.debug.assert(rcnt <= reg_count);
                     for (read_buf[0..rcnt]) |reg| {
                         if (!written_regs[reg]) block_uses[base + @as(usize, reg)] = true;
                     }
@@ -327,7 +344,10 @@ pub fn dceIr(self: *Compiler) !void {
 
         // block liveness: live_out[b] = union of live_in[succ];
         // live_in[b] = reads[b] | (live_out[b] & ~writes[b])
-        @memset(live_in, false);
+        //
+        // live_in is warm-started (not reset)
+        // liveness only grows across outer iterations, so the previous state is a lower bound and the
+        // fixpoint converges from it faster than from empty
         var liveness_changed = true;
         while (liveness_changed) {
             liveness_changed = false;
@@ -397,6 +417,7 @@ pub fn dceIr(self: *Compiler) !void {
                             rcnt += 1;
                         }
                     }
+                    std.debug.assert(rcnt <= reg_count);
                     for (read_buf[0..rcnt]) |reg| cur[reg] = true;
                 }
             }
@@ -594,4 +615,108 @@ test "dce: loop-back result register survives" {
         \\end
         \\f()
     , 3);
+}
+
+test "dce: dead move after break is eliminated" {
+    // the break's move is a pure register copy into a loop-result register
+    // that nothing reads; register liveness must drop it (it used to be
+    // treated as unconditionally side-effecting)
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{ .text =
+        \\loop do
+        \\  break
+        \\  99
+        \\end
+        \\42
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .move) return error.TestUnexpectedResult;
+    }
+}
+
+test "dce: needed loop-break move survives" {
+    // the same loop but the break value is consumed, so its move must live
+    try t.top_number(
+        \\let r = loop do
+        \\  break 42
+        \\end
+        \\r
+    , 42);
+}
+
+test "dce: dead statements after a break are eliminated" {
+    // `1 + 2` is pure arithmetic whose result nothing reads
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{ .text =
+        \\do
+        \\  1 + 2
+        \\  42
+        \\end
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add) return error.TestUnexpectedResult;
+    }
+}
+
+test "dce: jump targets land correctly after dead code" {
+    // a function whose dead leading arithmetic is eliminated, with a
+    // conditional jump inside that must still reach the right branches
+    try t.top_number(
+        \\fn f(x) do
+        \\  7 * 8
+        \\  9 + 10
+        \\  if x == 1
+        \\    10
+        \\  else
+        \\    20
+        \\  end
+        \\if f(1) 100 else 200
+    , 100);
+}
+
+test "dce: folded constants and dead operands are both removed" {
+    // `(1 + 2) * 3` folds to a single constant, and the load_small_int
+    // operands of the folded instructions are reclaimed by dce
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{ .text =
+        \\let _ = (1 + 2) * 3
+        \\42
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    for (built.ok.instructions) |inst| {
+        switch (inst.op) {
+            .add, .mul, .pow, .pow_int, .pow_float => return error.TestUnexpectedResult,
+            else => {},
+        }
+    }
+}
+
+test "dce: function entry pointing at dead code is remapped" {
+    // the function's first statement is a discarded expression, so the
+    // prototype addr points at a now-dead instruction; it must be remapped
+    // or the call lands on the wrong bytecode
+    try t.top_number(
+        \\fn f() do
+        \\  1 + 2
+        \\  42
+        \\end
+        \\f()
+    , 42);
 }

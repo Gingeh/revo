@@ -18,6 +18,7 @@ pub const IrInst = struct {
 pub const IrBuilder = struct {
     alloc: std.mem.Allocator,
     instructions: std.ArrayList(*IrInst),
+    deinited: bool = false,
 
     pub fn init(alloc: std.mem.Allocator) !IrBuilder {
         return .{
@@ -27,6 +28,11 @@ pub const IrBuilder = struct {
     }
 
     pub fn deinit(self: *IrBuilder) void {
+        // dce may have destroyed dead instructions and compacted the list,
+        // leaving only the survivors; deinit frees those. the guard makes a
+        // second deinit a no-op instead of a double-free
+        if (self.deinited) return;
+        self.deinited = true;
         for (self.instructions.items) |inst| {
             self.alloc.free(inst.operands);
             self.alloc.destroy(inst);
@@ -62,7 +68,7 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
         .tuple_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .table_set => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
-        .slice => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
+        .slice => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 }, // vm reads R[b..b+4) as object/start/step/end
         .table_set_atom, .struct_set_offset => bc = .{ .op = op, .a = r, .c = r + 1, .bx = bxi },
         .struct_set_method => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get_atom, .tuple_get_const, .struct_get_offset => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },

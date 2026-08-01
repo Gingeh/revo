@@ -8,6 +8,10 @@ const ir = @import("root.zig");
 /// walk ir and fold constant expressions
 /// safe bc operands use .inst pointers (not register names),
 /// so data flow is correct whatever the control flow is
+///
+/// folding frees the operands of the folded instruction, but the operand
+/// instructions themselves are only reclaimed by `dce.dceIr`; fold must
+/// therefore always be followed by dce before the ir is lowered
 pub fn foldIr(self: *Compiler) !void {
     for (self.ir_builder.instructions.items) |inst| {
         _ = tryFoldInst(self, inst) catch continue;
@@ -16,7 +20,7 @@ pub fn foldIr(self: *Compiler) !void {
 
 fn tryFoldInst(self: *Compiler, inst: *ir.IrInst) !bool {
     switch (inst.opcode) {
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .div_floor_float, .pow, .pow_int, .pow_float, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
             return tryFoldBinary(self, inst);
         },
         .negate, .not, .negate_int, .negate_float => {
@@ -36,6 +40,14 @@ fn extractConst(self: *Compiler, v: *const ir.IrInst) ?Data {
             return null;
         },
         .load_nil => return Data.new.nil(),
+        .move => {
+            // chase the copied value so moves don't block folding; operands
+            // point at earlier instructions so the recursion always ends
+            if (v.operands.len == 1) {
+                if (v.operands[0] == .inst) return extractConst(self, v.operands[0].inst);
+            }
+            return null;
+        },
         else => return null,
     }
 }
@@ -128,8 +140,11 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
                 return true;
             }
             if (is_pow) {
-                const li = numToI64(ln);
-                const ri = numToI64(rn);
+                // .pow_float always does a true float pow in the vm, so it
+                // never takes the integer fast path; .pow and .pow_int do
+                const is_float_pow = inst.opcode == .pow_float;
+                const li = if (is_float_pow) null else numToI64(ln);
+                const ri = if (is_float_pow) null else numToI64(rn);
                 const raw: f64 = if (li != null and ri != null and ri.? >= 0) blk: {
                     var acc: i64 = 1;
                     var b: i64 = li.?;
