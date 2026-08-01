@@ -444,9 +444,9 @@ fn copy(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
     const new_table = try vm.tables.create();
     const new_t = try vm.tables.get(new_table);
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
 
     try new_t.array.appendSlice(vm.runtime.alloc, table.array.items);
 
@@ -466,11 +466,10 @@ fn merge(args: []const Data, vm: *VM) !NativeResult {
     const table1_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const table2_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1]));
 
-    const table1 = vm.tables.get(table1_id) catch return .errType(0, "table", dataToString(args[0]));
-    const table2 = vm.tables.get(table2_id) catch return .errType(1, "table", dataToString(args[1]));
-
     const result_table = try vm.tables.create();
     const result = try vm.tables.get(result_table);
+    const table1 = vm.tables.get(table1_id) catch return .errType(0, "table", dataToString(args[0]));
+    const table2 = vm.tables.get(table2_id) catch return .errType(1, "table", dataToString(args[1]));
 
     try result.array.appendSlice(vm.runtime.alloc, table1.array.items);
     try result.array.appendSlice(vm.runtime.alloc, table2.array.items);
@@ -516,11 +515,11 @@ test "table library" {
 fn tableAdd(args: []const Data, vm: *VM) !NativeResult {
     const left_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const right_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1]));
-    const left = try vm.tables.get(left_id);
-    const right = try vm.tables.get(right_id);
 
     const new_id = try vm.tables.create();
     const new_t = try vm.tables.get(new_id);
+    const left = try vm.tables.get(left_id);
+    const right = try vm.tables.get(right_id);
 
     var hash_it = left.hash.orderedIterator();
     while (hash_it.next()) |entry| {
@@ -620,10 +619,10 @@ fn reverse(args: []const Data, vm: *VM) !NativeResult {
 /// flattens nested tables into single array
 fn flatten(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].asTable().?;
-    const src = try vm.tables.get(table_id);
 
     const result_id = try vm.tables.create();
     const result = try vm.tables.get(result_id);
+    const src = try vm.tables.get(table_id);
 
     for (src.array.items) |item| {
         if (item.asTable()) |nested_id| {
@@ -673,10 +672,10 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
 /// removes duplicate elements
 fn unique(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].asTable().?;
-    const src = try vm.tables.get(table_id);
 
     const result_id = try vm.tables.create();
     const result = try vm.tables.get(result_id);
+    const src = try vm.tables.get(table_id);
 
     for (src.array.items) |item| {
         var found = false;
