@@ -30,6 +30,28 @@ test "lang surface exports parse and build pipeline entrypoints" {
     try std.testing.expect(built.ok.instructions.len != 0);
 }
 
+test "parser treats semicolons as whitespace characters" {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const source =
+        \\ const langs = {
+        \\   "C", "C++",
+        \\   "Java", "C#",
+        \\   "Perl", "PHP",
+        \\ };
+        \\ fn fellow_heart_attacker(lang) do
+        \\   "An old {lang} programmer won't have a heart attack " ~
+        \\   "over a habitually placed closing semicolon.";
+        \\ end
+        \\ for lang in langs do
+        \\   const statement = fellow_heart_attacker(lang);
+        \\   print(statement);
+        \\ end
+    ;
+    const parsed = try lang.parse(arena.allocator(), .{ .text = source }, .{});
+    try std.testing.expect(parsed == .ok);
+}
+
 test "parser reports multiple syntax errors in one pass" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
