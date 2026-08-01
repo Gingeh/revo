@@ -99,6 +99,69 @@ fn binName(b: *std.Build, triple: []const u8, btype: BinaryType) []const u8 {
     };
 }
 
+/// static
+fn buildMimalloc(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, dep: *Build.Dependency) !*std.Build.Step.Compile {
+    const lib = b.addLibrary(
+        .{
+            .name = "mimalloc",
+            .linkage = .static,
+            .use_llvm = true,
+            .root_module = b.createModule(
+                .{
+                    .target = target,
+                    .optimize = optimize,
+                    .link_libc = true,
+                    .pic = true,
+                },
+            ),
+        },
+    );
+
+    lib.root_module.addIncludePath(dep.path("include"));
+
+    lib.root_module.addCSourceFiles(
+        .{
+            .root = dep.path("src"),
+            .files = &.{
+                "alloc.c",
+                "alloc-aligned.c",
+                "alloc-posix.c",
+                "arena.c",
+                "bitmap.c",
+                "heap.c",
+                "init.c",
+                "libc.c",
+                "options.c",
+                "os.c",
+                "page.c",
+                "random.c",
+                "segment.c",
+                "segment-map.c",
+                "stats.c",
+                "prim/prim.c",
+            },
+            .flags = if (lib.root_module.optimize != .Debug)
+                &.{
+                    "-DNDEBUG=1",
+                    "-DMI_SECURE=0",
+                    "-DMI_STAT=0",
+                    "-DMI_SHOW_ERRORS=1",
+                    "-DMI_SKIP_COLLECT_ON_EXIT=1",
+                    "-fno-sanitize=undefined",
+                    "-Wno-date-time",
+                }
+            else
+                &.{
+                    "-DMI_SKIP_COLLECT_ON_EXIT=1",
+                    "-fno-sanitize=undefined",
+                    "-Wno-date-time",
+                },
+        },
+    );
+
+    return lib;
+}
+
 pub fn build(b: *Build) !void {
     var target: std.Build.ResolvedTarget = undefined;
     // Defaults to 'musl' toolchain for linux system because otherwise the build fails with default settings,
@@ -130,6 +193,12 @@ pub fn build(b: *Build) !void {
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
+    const mimalloc_enabled = !is_freestanding and (b.option(
+        bool,
+        "mimalloc",
+        "use mimalloc allocator",
+    ) orelse true);
+
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex") orelse
         // isocline needs libc, lsp is untested on freestanding
         if (is_freestanding) "" else "isocline,lsp,regex";
@@ -152,6 +221,7 @@ pub fn build(b: *Build) !void {
     // used for dev builds
     const debug_options = b.addOptions();
     debug_options.addOption(bool, "is_freestanding", is_freestanding);
+    debug_options.addOption(bool, "mimalloc", mimalloc_enabled);
     debug_options.addOption(bool, "isocline", features.isocline);
     debug_options.addOption(bool, "regex", features.regex);
     debug_options.addOption([]const u8, "version", dev_version);
@@ -163,6 +233,7 @@ pub fn build(b: *Build) !void {
     // this doesn't really matter but it might break something
     const release_options = b.addOptions();
     release_options.addOption(bool, "is_freestanding", is_freestanding);
+    release_options.addOption(bool, "mimalloc", mimalloc_enabled);
     release_options.addOption(bool, "isocline", features.isocline);
     release_options.addOption(bool, "regex", features.regex);
     release_options.addOption([]const u8, "version", VERSION);
@@ -207,6 +278,12 @@ pub fn build(b: *Build) !void {
     });
     const c_mod = b.addModule("c", .{
         .root_source_file = b.path("src/c/root.zig"),
+        .target = target,
+        .optimize = effective_optimize,
+        .link_libc = !is_freestanding,
+    });
+    const mimalloc_mod = b.createModule(.{
+        .root_source_file = b.path("src/mimalloc.zig"),
         .target = target,
         .optimize = effective_optimize,
         .link_libc = !is_freestanding,
@@ -264,6 +341,7 @@ pub fn build(b: *Build) !void {
         });
         try import_list.append(b.allocator, .{ .name = "mvzr", .module = mvzr_mod });
     }
+    try import_list.append(b.allocator, .{ .name = "mimalloc", .module = mimalloc_mod });
     const imports = try import_list.toOwnedSlice(b.allocator);
     const shared_build_options = if (optimize == .Debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
@@ -274,6 +352,17 @@ pub fn build(b: *Build) !void {
     }
 
     exe_mod.addImport("isocline", isocline_mod);
+
+    // only linked into artifacts that reference it
+    const mimalloc_dep = if (mimalloc_enabled) b.lazyDependency("mimalloc", .{}) else null;
+    const mimalloc_lib = if (mimalloc_dep) |dep|
+        try buildMimalloc(b, target, effective_optimize, dep)
+    else
+        null;
+    if (mimalloc_lib) |ml| {
+        exe_mod.linkLibrary(ml);
+        if (erevo_mod) |em| em.linkLibrary(ml);
+    }
 
     const header_wf = b.addWriteFiles();
     const header_data = bindings.data(b.allocator) catch |err| {
@@ -426,6 +515,7 @@ pub fn build(b: *Build) !void {
 
             const rel_options = b.addOptions();
             rel_options.addOption(bool, "is_freestanding", release_is_fs);
+            rel_options.addOption(bool, "mimalloc", !release_is_fs and mimalloc_enabled);
             rel_options.addOption(bool, "isocline", release_isocline_enabled);
             // TODO: regex compiles for freestanding, it isn't the issue here
             rel_options.addOption(
@@ -526,6 +616,11 @@ pub fn build(b: *Build) !void {
                     .{ .name = "lsp_main", .module = rel_revolt_mod },
                 },
             });
+
+            if (!release_is_fs and mimalloc_enabled) {
+                const rel_mimalloc = try buildMimalloc(b, release_target, release_optimize, mimalloc_dep.?);
+                release_mod.linkLibrary(rel_mimalloc);
+            }
 
             const release_exe = b.addExecutable(.{
                 .name = binName(b, target_str, .nightly),

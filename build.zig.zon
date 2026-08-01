@@ -41,6 +41,11 @@
             .hash = "N-V-__8AAI8vEwDBxs8j_tnNzQ_8MiBQBrR3SXBPbov4JY9z",
             .lazy = true,
         },
+        .mimalloc = .{
+            .url = "git+https://github.com/microsoft/mimalloc#a3ca0e5e2eb283c2c9275f30872e30252a91b66c",
+            .hash = "N-V-__8AAIqlVAAxtYUqEp5MwpxhasjkxYzBd6sVeYpAYJbU",
+            .lazy = true,
+        },
         .mvzr = .{
             .url = "git+https://github.com/mnemnion/mvzr.git?ref=HEAD#3efcfe339bd32e122c36b8f1db25b237f93a7ec2",
             .hash = "mvzr-0.3.9-ZSOky6t2AQCA7efmm5EYbPb5sOdbXa4EFsUgYbQ6hZv9",

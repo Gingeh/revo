@@ -3,6 +3,7 @@
 //
 const std = @import("std");
 const revo = @import("revo");
+const build_opts = @import("build_options");
 
 /// opaque handle to a vm instance
 pub const ErevoVM = opaque {};
@@ -123,7 +124,10 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
 
 /// create a new vm instance, returns null on failure
 pub export fn erevo_vm_create() callconv(.c) ?*ErevoVM {
-    const alloc = std.heap.page_allocator; // TODO: switch to c_allocator once GC gets triggered less
+    const alloc = if (build_opts.mimalloc)
+        @import("mimalloc").mim_allocator
+    else
+        std.heap.page_allocator; // TODO: switch to c_allocator once GC gets triggered less
     var io = std.Io.Threaded.init(alloc, .{});
     errdefer io.deinit();
 

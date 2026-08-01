@@ -62,8 +62,11 @@ const Config = struct {
     argv: []const [:0]const u8 = &.{},
 };
 
-pub fn main(init: std.process.Init) void {
+pub fn main(provided_init: std.process.Init) void {
+    var init = provided_init;
     pretty.supports_color = pretty.isColorSupported(init.environ_map, init.io);
+
+    if (build_opts.mimalloc) init.gpa = @import("mimalloc").mim_allocator;
 
     runMain(init) catch |x| switch (x) {
         error.VmInitError,
