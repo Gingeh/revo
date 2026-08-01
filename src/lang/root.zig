@@ -85,5 +85,5 @@ test {
     _ = @import("semantic.zig");
     _ = @import("pipeline.zig");
     _ = @import("Workspace.zig");
-    _ = @import("compiler/dce.zig");
+    _ = @import("ir/dce.zig");
 }

@@ -150,7 +150,7 @@ const revo = @import("revo");
 const Compiler = revo.lang.compiler.Compiler;
 const Opcode = revo.opcode.Opcode;
 const Register = revo.opcode.Register;
-const ir = @import("ir.zig");
+const ir = @import("root.zig");
 
 /// side-effecting opcodes that must never be eliminated
 fn isSideEffect(op: Opcode) bool {

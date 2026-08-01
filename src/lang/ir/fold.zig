@@ -3,7 +3,7 @@ const std = @import("std");
 const revo = @import("revo");
 const Compiler = revo.lang.compiler.Compiler;
 const Data = revo.Data;
-const ir = @import("ir.zig");
+const ir = @import("root.zig");
 
 /// walk ir and fold constant expressions
 /// safe bc operands use .inst pointers (not register names),

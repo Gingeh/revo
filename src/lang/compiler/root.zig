@@ -15,9 +15,9 @@ const Node = ast.Node;
 const Binding = ast.Binding;
 const expander = @import("../expander.zig");
 const flow = @import("flow.zig");
-const fold = @import("fold.zig");
-const dce = @import("dce.zig");
-pub const ir = @import("ir.zig");
+const fold = @import("../ir/fold.zig");
+const dce = @import("../ir/dce.zig");
+pub const ir = @import("../ir/root.zig");
 const state_mod = @import("state.zig");
 
 pub const types = @import("types.zig");
