@@ -332,7 +332,7 @@ pub fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
 fn next(self: *Lexer) !Token {
     while (!self.atEnd()) {
         const c = self.peek();
-        if (std.ascii.isWhitespace(c)) {
+        if (std.ascii.isWhitespace(c) or c == ';') {
             _ = self.advance();
             continue;
         }
