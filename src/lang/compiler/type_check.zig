@@ -24,7 +24,7 @@ pub fn inferExprType(self: *Compiler, node: *const Node) TypeInfo {
     }
     return types_mod.inferExprType(self, node);
 }
-fn inferVarType(self: *Compiler, name: []const u8) TypeInfo {
+pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
     if (state_mod.resolveLocalTypeHint(self, name)) |hint| return hint;
     const local = state_mod.resolveLocalVar(self, name) orelse return inferTypeMap(self, name);
     if (local.type_info) |ti| return ti;
@@ -34,10 +34,6 @@ fn inferVarType(self: *Compiler, name: []const u8) TypeInfo {
 fn inferTypeMap(self: *Compiler, name: []const u8) TypeInfo {
     if (self.type_aliases.get(name)) |aliased| return aliased;
     return .any;
-}
-
-pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
-    return inferVarType(self, name);
 }
 
 const TypeParamSubst = struct {

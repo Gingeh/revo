@@ -234,10 +234,6 @@ fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8) !V
     };
 }
 
-fn handleBuildError(_: std.process.Init, gpa: Allocator, source_name: []const u8, source_text: []const u8, err: anytype) void {
-    revo.printBuildError(gpa, .{ .name = source_name, .text = source_text }, err);
-}
-
 fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: []const u8, source_text: []const u8, test_mode: bool) !Artifact {
     var ws = try revo.lang.Workspace.initWithVm(vm, gpa);
     defer ws.deinit();
@@ -256,7 +252,7 @@ fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: [
     defer analysis.deinit(gpa);
 
     if (analysis.diagnostics) |lang_err| {
-        handleBuildError(init, gpa, source_name, source_text, lang_err);
+        revo.printBuildError(gpa, .{ .name = source_name, .text = source_text }, lang_err);
         analysis.diagnostics = null;
         vm.runtime.resetDiagArena();
         return error.CompilationError;

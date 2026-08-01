@@ -317,18 +317,6 @@ fn writeLineNumber(writer: *std.Io.Writer, num: u32, width: usize) !void {
     try writePipePrefix(writer, 2);
 }
 
-fn writeDimStart(writer: *std.Io.Writer) !void {
-    if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
-}
-
-fn writeDimEnd(writer: *std.Io.Writer) !void {
-    if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
-}
-
-fn writeBlankLineNumber(writer: *std.Io.Writer, width: usize) !void {
-    for (0..width) |_| try writer.writeByte(' ');
-}
-
 fn writePipePrefix(writer: *std.Io.Writer, spaces_after_pipe: usize) !void {
     try writer.writeByte(' ');
     try writer.writeByte('|');
@@ -336,7 +324,7 @@ fn writePipePrefix(writer: *std.Io.Writer, spaces_after_pipe: usize) !void {
 }
 
 fn writeBoxPrefix(writer: *std.Io.Writer, line_width: usize, indent: usize) !void {
-    try writeBlankLineNumber(writer, line_width);
+    for (0..line_width) |_| try writer.writeByte(' ');
     try writePipePrefix(writer, indent);
 }
 
@@ -541,7 +529,7 @@ fn renderSpanBlock(
             const highlight = @max(clamped, 1);
             const pad = if (col > 1) col - 1 else 0;
             const ul_bracket_spaces: usize = if (is_first and is_last) 2 else if (is_last) 2 else 2;
-            try writeBlankLineNumber(writer, line_width);
+            for (0..line_width) |_| try writer.writeByte(' ');
             try writer.writeByte(' ');
             try writer.writeByte('|');
             for (0..ul_bracket_spaces) |_| try writer.writeByte(' ');
@@ -589,10 +577,10 @@ fn renderBoxSpanBlock(
     start_column: u32,
 ) !void {
     try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, start_line, start_column });
-    try writeDimStart(writer);
+    if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
     try writePipePrefix(writer, 0);
     try writer.writeByte('\n');
-    try writeDimEnd(writer);
+    if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
 
     const clamped_start = @min(location.start, source.len);
     const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
@@ -694,11 +682,11 @@ fn renderBoxSpanBlock(
     while (before_idx > 0) {
         before_idx -= 1;
         const cl = ctx_before[before_idx];
-        try writeDimStart(writer);
+        if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
         try writeLineNumber(writer, cl.num, line_width);
         try writer.writeAll(cl.text);
         try writer.writeByte('\n');
-        try writeDimEnd(writer);
+        if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
     }
     if (ctx_before_len > 0) {
         try writeBlankPipeLine(writer, line_width, 0);
@@ -747,14 +735,14 @@ fn renderBoxSpanBlock(
         if (total > bookend_threshold and !in_head and !in_tail) {
             if (!bookend_printed) {
                 // middle collapse: dimmed summary for skipped rows
-                try writeDimStart(writer);
+                if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
                 try writeBoxPrefix(writer, line_width, 3);
                 for (0..marker_offset) |_| try writer.writeByte(' ');
                 try writer.writeAll("...");
                 try writer.print(" {d} lines ", .{total - tail_cut - (total - tail_start)});
                 try writer.writeAll("...");
                 try writer.writeByte('\n');
-                try writeDimEnd(writer);
+                if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
                 bookend_printed = true;
             }
             continue;
@@ -780,11 +768,11 @@ fn renderBoxSpanBlock(
         try writeBlankPipeLine(writer, line_width, 0);
     }
     for (ctx_after[0..ctx_after_len]) |cl| {
-        try writeDimStart(writer);
+        if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
         try writeLineNumber(writer, cl.num, line_width);
         try writer.writeAll(cl.text);
         try writer.writeByte('\n');
-        try writeDimEnd(writer);
+        if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
     }
 }
 

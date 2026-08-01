@@ -126,16 +126,12 @@ pub fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
 
 /// computed-goto dispatch,,, runs current fiber until it yields, halts, or errors
 pub inline fn execFiber(self: *VM) !?VM.EvalFailure {
-    return execFiberGeneric(self, false, 0);
+    return execFiberGenericWithAlloc(self, self.runtime.alloc, false, 0);
 }
 
 /// runs dispatch until fiber.frames_hot.items.len <= target_depth
 pub inline fn execFiberUntilDepth(self: *VM, target_depth: usize) !?VM.EvalFailure {
     return execFiberGenericWithAlloc(self, self.runtime.alloc, true, target_depth);
-}
-
-fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
-    return execFiberGenericWithAlloc(self, self.runtime.alloc, use_depth, target_depth);
 }
 
 fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {

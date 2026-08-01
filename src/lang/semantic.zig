@@ -37,7 +37,7 @@ pub fn analyze(
     var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations);
     defer checker.deinit();
 
-    try checker.loadImportFnSigs(root, module_resolver);
+    try checker.walkImports(root, module_resolver);
     _ = try checker.visit(root);
     if (type_map) |tm| try reparentTypeMap(tm, alloc);
     if (checker.errors.items.len == 0) return null;
@@ -163,10 +163,6 @@ const SemanticChecker = struct {
         self.scopes.deinit(self.alloc);
         self.import_fn_sigs.deinit();
         self.dep_asts.deinit(self.alloc);
-    }
-
-    fn loadImportFnSigs(self: *SemanticChecker, root: *const ast.Node, resolver: ModuleResolver) !void {
-        try self.walkImports(root, resolver);
     }
 
     fn walkImports(self: *SemanticChecker, node: *const ast.Node, resolver: ModuleResolver) !void {

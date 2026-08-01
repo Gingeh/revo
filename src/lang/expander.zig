@@ -97,43 +97,26 @@ fn expandInEnv(allocator: std.mem.Allocator, expr: *Node, env: *MacroEnv) Expand
             try env.map.put(m.name, def);
             break :blk ast.allocNode(allocator, Span{ .start = 0, .end = 0, .line = 0, .column = 0 }, .nil);
         },
-        .binding => |binding| expandCon(allocator, expr.span, binding, env),
+        .binding => |binding| ast.allocNode(allocator, expr.span, .{ .binding = .{
+            .target = try expandInEnv(allocator, binding.target, env),
+            .type_name = binding.type_name,
+            .value = try expandInEnv(allocator, binding.value, env),
+            .mutable = binding.mutable,
+        } }),
         .decl => |d| ast.allocNode(allocator, expr.span, .{ .decl = .{
             .inner = try expandInEnv(allocator, d.inner, env),
             .kind = d.kind,
             .pub_ = d.pub_,
         } }),
         .call => |call| maybeExpandCall(allocator, expr.span, call.callee, call.args, call.implicit_self, env),
-        .ident => |name| expandIdent(expr, name, env),
+        .ident => |name| blk: {
+            if (env.map.get(name)) |def| {
+                if (def.pattern.len == 0) break :blk instantiateTemplate(env.allocator, expr.span, def.template, &.{}, &.{});
+            }
+            break :blk expr;
+        },
         else => ast.walkExpr(allocator, expr, ExpandCtx, .{ .env = env }),
     };
-}
-
-fn expandCon(allocator: std.mem.Allocator, span: Span, binding: ast.Binding, env: *MacroEnv) ExpandError!*Node {
-    return ast.allocNode(allocator, span, .{ .binding = .{
-        .target = try expandInEnv(allocator, binding.target, env),
-        .type_name = binding.type_name,
-        .value = try expandInEnv(allocator, binding.value, env),
-        .mutable = binding.mutable,
-    } });
-}
-
-fn expandIdent(expr: *Node, name: []const u8, env: *MacroEnv) ExpandError!*Node {
-    if (env.map.get(name)) |def| {
-        if (def.pattern.len == 0) return instantiateTemplate(env.allocator, expr.span, def.template, &.{}, &.{});
-    }
-    return expr;
-}
-
-fn expandTuplePattern(allocator: std.mem.Allocator, span: Span, items: []const *Node) ExpandError!*Node {
-    var out = try std.ArrayList(*Node).initCapacity(allocator, items.len);
-    for (items) |item| {
-        try out.append(allocator, switch (item.expr) {
-            .tuple_pattern => try expandTuplePattern(allocator, item.span, item.expr.tuple_pattern),
-            else => @constCast(item),
-        });
-    }
-    return ast.allocNode(allocator, span, .{ .tuple_pattern = try out.toOwnedSlice(allocator) });
 }
 
 fn maybeExpandCall(
@@ -438,7 +421,7 @@ const TemplateBuilder = struct {
     fn parseRef(self: *TemplateBuilder, template: []const u8, start: usize) ExpandError!TemplateRef {
         _ = self;
         var j = start + 1;
-        while (j < template.len and isNameChar(template[j])) : (j += 1) {}
+        while (j < template.len and (std.ascii.isAlphabetic(template[j]) or std.ascii.isDigit(template[j]) or template[j] == '_' or template[j] == '!')) : (j += 1) {}
         const name = template[start + 1 .. j];
         if (name.len == 0) return error.UnsupportedMacroTemplate;
 
@@ -468,7 +451,7 @@ const TemplateBuilder = struct {
 
     fn appendCapture(self: *TemplateBuilder, out: *std.ArrayList(u8), name: []const u8) ExpandError!void {
         const resolved: *Node = blk: {
-            if (findSingle(self.singles, name)) |cap| break :blk cap.expr;
+            for (self.singles) |s| if (std.mem.eql(u8, s.name, name)) break :blk s.expr;
             for (self.groups) |group| {
                 if (std.mem.eql(u8, group.item_name, name)) {
                     if (group.items.len != 1) return error.UnsupportedMacroTemplate;
@@ -710,7 +693,12 @@ const PatternMatcher = struct {
 
     fn matchGroup(self: *PatternMatcher, group: ast.GroupNode, args: []const *Node) bool {
         var items = std.ArrayList(*Node).initCapacity(self.allocator, 8) catch return false;
-        const item_name = firstCaptureName(group.pattern) orelse "";
+        const item_name = blk: {
+            for (group.pattern) |node| {
+                if (node == .capture) break :blk node.capture.name;
+            }
+            break :blk "";
+        };
         var match_count: usize = 0;
 
         while (self.arg_idx < args.len) {
@@ -784,18 +772,6 @@ fn captureMatches(capture_type: ?ast.CaptureType, expr: *Node) bool {
     };
 }
 
-fn firstCaptureName(pattern: []const ast.PatternNode) ?[]const u8 {
-    for (pattern) |node| {
-        if (node == .capture) return node.capture.name;
-    }
-    return null;
-}
-
-fn findSingle(singles: []const SingleCapture, name: []const u8) ?SingleCapture {
-    for (singles) |s| if (std.mem.eql(u8, s.name, name)) return s;
-    return null;
-}
-
 fn findGroup(groups: []const GroupCapture, name: []const u8) ?GroupCapture {
     for (groups) |g| if (std.mem.eql(u8, g.name, name)) return g;
     return null;
@@ -815,10 +791,6 @@ fn findMatchingParen(text: []const u8, open_idx: usize) ?usize {
         }
     }
     return null;
-}
-
-fn isNameChar(c: u8) bool {
-    return std.ascii.isAlphabetic(c) or std.ascii.isDigit(c) or c == '_' or c == '!' or c == '?';
 }
 
 pub const testing = struct {

@@ -183,7 +183,7 @@ fn syncToNextStatement(self: *Parser, terminator: TokenType) void {
     if (self.check(terminator) or self.check(.eof)) return;
     self.pos = @min(self.pos + 1, self.tokens.len - 1);
     while (!self.check(terminator) and !self.check(.eof)) {
-        if (self.peekStartsExpression()) break;
+        if (expr_start_tokens.get(self.peek().type)) break;
         self.pos += 1;
     }
 }
@@ -1539,11 +1539,6 @@ fn recordSyntaxError(self: *Parser, err: anyerror, token: Token) !void {
     try self.recordError(kind, message, token.span());
 }
 
-// token starts expression check for error messages
-fn peekStartsExpression(self: *Parser) bool {
-    return expr_start_tokens.get(self.peek().type);
-}
-
 // peek without consuming
 fn check(self: *Parser, kind: TokenType) bool {
     return self.peek().type == kind;
@@ -1613,7 +1608,7 @@ fn checkIdentText(self: *Parser, text: []const u8) bool {
 fn isStatementBoundary(self: *Parser, left: *const Node) bool {
     if (self.looksLikeTupleAssignStart()) return true;
     if (self.forcesStatementBoundary(left, self.peek().type)) return true;
-    if (!self.peekStartsExpression()) return false;
+    if (!expr_start_tokens.get(self.peek().type)) return false;
     return !self.canContinueExpression(left);
 }
 

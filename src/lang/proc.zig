@@ -306,7 +306,7 @@ fn evalProcMacro(
     const iter_call = try callNode(
         allocator,
         span,
-        try identNode(allocator, span, "__proc_iter"),
+        try ast.allocNode(allocator, span, .{ .ident = "__proc_iter" }),
         &.{items_list},
     );
     const wrapper_fn = try fnNode(allocator, span, &.{def.param}, def.body);
@@ -326,7 +326,7 @@ fn makeRuntimeProcCall(
 ) ExpandError!*Node {
     const items_list = try listNode(allocator, span, args);
     const wrapper_fn = try fnNode(allocator, span, &.{def.param}, def.body);
-    return callNode(allocator, span, try identNode(allocator, span, "__proc_apply"), &.{ wrapper_fn, items_list });
+    return callNode(allocator, span, try ast.allocNode(allocator, span, .{ .ident = "__proc_apply" }), &.{ wrapper_fn, items_list });
 }
 
 const ProcRun = struct {
@@ -805,10 +805,6 @@ fn listNode(allocator: std.mem.Allocator, span: Span, items: []const *Node) Expa
     errdefer out.deinit(allocator);
     for (items) |item| try out.append(allocator, .{ .key = null, .value = @constCast(item) });
     return ast.allocNode(allocator, span, .{ .table = try out.toOwnedSlice(allocator) });
-}
-
-fn identNode(allocator: std.mem.Allocator, span: Span, name: []const u8) ExpandError!*Node {
-    return ast.allocNode(allocator, span, .{ .ident = name });
 }
 
 fn callNode(allocator: std.mem.Allocator, span: Span, callee: *Node, args: []const *Node) ExpandError!*Node {

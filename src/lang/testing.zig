@@ -45,7 +45,7 @@ fn compileChecked(vm: *revo.VM, source: []const u8) ![]revo.Instruction {
             break :blk artifact.instructions;
         },
         .err => |lang_err| {
-            printLangError(source, lang_err);
+            revo.printBuildError(alloc, .{ .text = source }, lang_err);
             vm.runtime.resetDiagArena();
             return error.LangFailure;
         },
@@ -63,7 +63,7 @@ fn compileCheckedMode(vm: *revo.VM, source: []const u8, test_mode: bool) ![]revo
             break :blk artifact.instructions;
         },
         .err => |lang_err| {
-            printLangError(source, lang_err);
+            revo.printBuildError(alloc, .{ .text = source }, lang_err);
             vm.runtime.resetDiagArena();
             return error.LangFailure;
         },
@@ -75,19 +75,11 @@ fn runTopModuleChecked(vm: *revo.VM, source: []const u8, source_name: []const u8
     switch (result) {
         .ok => {},
         .err => |failure| {
-            printRuntimeFailure(source, failure);
+            revo.printEvalError(alloc, source, failure);
             vm.runtime.resetDiagArena();
             return error.RuntimeFailure;
         },
     }
-}
-
-fn printLangError(source: []const u8, failure: lang.Error) void {
-    revo.printBuildError(alloc, .{ .text = source }, failure);
-}
-
-fn printRuntimeFailure(source: []const u8, failure: revo.EvalFailure) void {
-    revo.printEvalError(alloc, source, failure);
 }
 
 pub fn topResult(source: []const u8, module_dir: ?[]const u8) !TopResult {

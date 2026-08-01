@@ -382,7 +382,7 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.caret_assign, start, self.pos, line, column)
         else
             self.makeToken(.caret, start, self.pos, line, column),
-        ':' => if (self.peekIsIdentStart())
+        ':' => if (isIdentStart(self.peek()))
             self.lexHash(start, line, column)
         else
             self.makeToken(.colon, start, self.pos, line, column),
@@ -412,7 +412,7 @@ fn next(self: *Lexer) !Token {
         '`' => self.lexBacktickString(start, line, column),
 
         '$' => return error.UnexpectedCharacter,
-        '@' => if (self.peekIsIdentStart())
+        '@' => if (isIdentStart(self.peek()))
             self.lexAtIdent(start, line, column)
         else
             return error.UnexpectedCharacter,
@@ -853,10 +853,6 @@ fn makeToken(self: *Lexer, kind: TokenType, start: usize, end: usize, line: u32,
         .start = start,
         .end = end,
     };
-}
-
-fn peekIsIdentStart(self: *Lexer) bool {
-    return isIdentStart(self.peek());
 }
 
 pub fn isIdentStart(c: u8) bool {
