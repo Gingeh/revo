@@ -502,9 +502,12 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         vm: *VM,
         fn resolve(ptr: *anyopaque, path: []const u8, a: std.mem.Allocator) ?[]const u8 {
             const self: *@This() = @ptrCast(@alignCast(ptr));
-            const resolved = (resolveModuleFile(self.vm, path) catch return null) orelse return null;
-            defer self.vm.runtime.alloc.free(resolved);
-            return std.Io.Dir.cwd().readFileAlloc(self.vm.runtime.io, resolved, a, std.Io.Limit.unlimited) catch null;
+            if (comptime !revo.is_freestanding) {
+                const resolved = (resolveModuleFile(self.vm, path) catch return null) orelse return null;
+                defer self.vm.runtime.alloc.free(resolved);
+                return std.Io.Dir.cwd().readFileAlloc(self.vm.runtime.io, resolved, a, std.Io.Limit.unlimited) catch null;
+            }
+            return null;
         }
     };
     var pipeline_resolver = PipelineResolver{ .vm = vm };
