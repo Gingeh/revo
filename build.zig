@@ -45,12 +45,6 @@ const Features = packed struct {
     regex: bool = false,
     mimalloc: bool = false,
     zig_backend: bool = false,
-
-    fn isFull(self: Features) bool {
-        const info = @typeInfo(Features).@"struct";
-        const BackInt = info.backing_integer.?;
-        return @popCount(@as(BackInt, @bitCast(self))) == @bitSizeOf(BackInt);
-    }
 };
 
 const BinaryType = enum { nightly, release };
@@ -99,74 +93,6 @@ fn binName(b: *std.Build, triple: []const u8, btype: BinaryType) []const u8 {
         .nightly => b.fmt("revo-nightly-{s}-{s}", .{ triple, date_str }),
         .release => b.fmt("revo-{s}-{s}", .{ VERSION, triple }),
     };
-}
-
-/// static
-fn buildMimalloc(
-    b: *Build,
-    target: Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    dep: *Build.Dependency,
-) !*std.Build.Step.Compile {
-    const lib = b.addLibrary(
-        .{
-            .name = "mimalloc",
-            .linkage = .static,
-            .use_llvm = true,
-            .root_module = b.createModule(
-                .{
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc = true,
-                    .pic = true,
-                },
-            ),
-        },
-    );
-
-    lib.root_module.addIncludePath(dep.path("include"));
-
-    lib.root_module.addCSourceFiles(
-        .{
-            .root = dep.path("src"),
-            .files = &.{
-                "alloc.c",
-                "alloc-aligned.c",
-                "alloc-posix.c",
-                "arena.c",
-                "bitmap.c",
-                "heap.c",
-                "init.c",
-                "libc.c",
-                "options.c",
-                "os.c",
-                "page.c",
-                "random.c",
-                "segment.c",
-                "segment-map.c",
-                "stats.c",
-                "prim/prim.c",
-            },
-            .flags = if (lib.root_module.optimize != .Debug)
-                &.{
-                    "-DNDEBUG=1",
-                    "-DMI_SECURE=0",
-                    "-DMI_STAT=0",
-                    "-DMI_SHOW_ERRORS=1",
-                    "-DMI_SKIP_COLLECT_ON_EXIT=1",
-                    "-fno-sanitize=undefined",
-                    "-Wno-date-time",
-                }
-            else
-                &.{
-                    "-DMI_SKIP_COLLECT_ON_EXIT=1",
-                    "-fno-sanitize=undefined",
-                    "-Wno-date-time",
-                },
-        },
-    );
-
-    return lib;
 }
 
 pub fn build(b: *Build) !void {
@@ -245,27 +171,7 @@ pub fn build(b: *Build) !void {
     //
     // modules
     //
-    const isocline_mod = blk: {
-        if (features.isocline) {
-            if (b.lazyDependency("isocline", .{})) |isocline_dep| {
-                const ioscline_c = b.addTranslateC(.{
-                    .root_source_file = isocline_dep.path("include/isocline.h"),
-                    .target = target,
-                    .optimize = effective_optimize,
-                });
-                ioscline_c.addIncludePath(isocline_dep.path("include/"));
-                const isocline_mod = ioscline_c.createModule();
-                isocline_mod.addCSourceFile(.{
-                    .file = isocline_dep.path("src/isocline.c"),
-                    .flags = &.{},
-                });
-
-                break :blk isocline_mod;
-            }
-        }
-
-        break :blk b.createModule(.{ .root_source_file = b.addWriteFiles().add("no_isocline.zig", "") });
-    };
+    const isocline_mod = builds.isocline(b, features.isocline, target, effective_optimize, "dev");
     const vm_mod = b.addModule("vm", .{
         .root_source_file = b.path("src/vm/root.zig"),
         .target = target,
@@ -335,14 +241,11 @@ pub fn build(b: *Build) !void {
     try import_list.append(b.allocator, .{ .name = "revo", .module = revo_mod });
     try import_list.append(b.allocator, .{ .name = "vm", .module = vm_mod });
     try import_list.append(b.allocator, .{ .name = "c", .module = c_mod });
-    { // shouldn't get compiled in if regex flag unspecified
-        const mvzr_mod = b.createModule(.{
-            .root_source_file = mvzr_dep.path("src/mvzr.zig"),
-            .target = target,
-            .optimize = effective_optimize,
-        });
-        try import_list.append(b.allocator, .{ .name = "mvzr", .module = mvzr_mod });
-    }
+    // shouldn't get compiled in if regex flag unspecified
+    try import_list.append(b.allocator, .{
+        .name = "mvzr",
+        .module = builds.mvzr(b, mvzr_dep, target, effective_optimize),
+    });
     try import_list.append(b.allocator, .{ .name = "mimalloc", .module = mimalloc_mod });
     const imports = try import_list.toOwnedSlice(b.allocator);
     const shared_build_options = if (optimize == .Debug) debug_options_mod else release_options_mod;
@@ -358,7 +261,7 @@ pub fn build(b: *Build) !void {
     // only linked into artifacts that reference it
     const mimalloc_dep = if (mimalloc_enabled) b.lazyDependency("mimalloc", .{}) else null;
     const mimalloc_lib = if (mimalloc_dep) |dep|
-        try buildMimalloc(b, target, effective_optimize, dep)
+        try builds.mimalloc(b, target, effective_optimize, dep)
     else
         null;
     if (mimalloc_lib) |ml| {
@@ -555,11 +458,7 @@ pub fn build(b: *Build) !void {
                 .link_libc = !release_is_fs,
             });
 
-            const rel_mvzr_mod = b.createModule(.{
-                .root_source_file = mvzr_dep.path("src/mvzr.zig"),
-                .target = release_target,
-                .optimize = release_optimize,
-            });
+            const rel_mvzr_mod = builds.mvzr(b, mvzr_dep, release_target, release_optimize);
             const rel_core_mods: []const *Module = &.{ rel_vm_mod, rel_revo_mod, rel_c_mod };
             for (rel_core_mods) |mod| {
                 mod.addImport("revo", rel_revo_mod);
@@ -569,30 +468,13 @@ pub fn build(b: *Build) !void {
                 mod.addImport("build_options", rel_options_mod);
             }
 
-            const rel_isocline_mod = blk: {
-                if (release_isocline_enabled) {
-                    if (b.lazyDependency("isocline", .{})) |isocline_dep| {
-                        const isocline_c = b.addTranslateC(.{
-                            .root_source_file = isocline_dep.path("include/isocline.h"),
-                            .target = release_target,
-                            .optimize = release_optimize,
-                        });
-                        isocline_c.addIncludePath(isocline_dep.path("include/"));
-                        const mod = isocline_c.createModule();
-                        mod.addCSourceFile(.{
-                            .file = isocline_dep.path("src/isocline.c"),
-                            .flags = &.{},
-                        });
-                        break :blk mod;
-                    }
-                }
-                break :blk b.createModule(.{
-                    .root_source_file = b.addWriteFiles().add(
-                        b.fmt("no_isocline_release_{s}.zig", .{target_str}),
-                        "",
-                    ),
-                });
-            };
+            const rel_isocline_mod = builds.isocline(
+                b,
+                release_isocline_enabled,
+                release_target,
+                release_optimize,
+                b.fmt("release_{s}", .{target_str}),
+            );
 
             const rel_revolt_mod = b.createModule(.{
                 .root_source_file = if (release_lsp_enabled)
@@ -627,7 +509,7 @@ pub fn build(b: *Build) !void {
             });
 
             if (!release_is_fs and mimalloc_enabled) {
-                const rel_mimalloc = try buildMimalloc(b, release_target, release_optimize, mimalloc_dep.?);
+                const rel_mimalloc = try builds.mimalloc(b, release_target, release_optimize, mimalloc_dep.?);
                 release_mod.linkLibrary(rel_mimalloc);
             }
 
@@ -642,3 +524,115 @@ pub fn build(b: *Build) !void {
         }
     }
 }
+const builds = struct {
+    fn mvzr(
+        b: *Build,
+        mvzr_dep: *Build.Dependency,
+        target: Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+    ) *Module {
+        return b.createModule(.{
+            .root_source_file = mvzr_dep.path("src/mvzr.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+    }
+
+    /// build translate-c mod when enabled else stub
+    fn isocline(
+        b: *Build,
+        enabled: bool,
+        target: Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        tag: []const u8,
+    ) *Module {
+        if (enabled) {
+            if (b.lazyDependency("isocline", .{})) |isocline_dep| {
+                const isocline_c = b.addTranslateC(.{
+                    .root_source_file = isocline_dep.path("include/isocline.h"),
+                    .target = target,
+                    .optimize = optimize,
+                });
+                isocline_c.addIncludePath(isocline_dep.path("include/"));
+                const mod = isocline_c.createModule();
+                mod.addCSourceFile(.{
+                    .file = isocline_dep.path("src/isocline.c"),
+                    .flags = &.{},
+                });
+                return mod;
+            }
+        }
+
+        return b.createModule(.{
+            .root_source_file = b.addWriteFiles().add(b.fmt("no_isocline_{s}.zig", .{tag}), ""),
+        });
+    }
+
+    /// static
+    fn mimalloc(
+        b: *Build,
+        target: Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        dep: *Build.Dependency,
+    ) !*std.Build.Step.Compile {
+        const lib = b.addLibrary(
+            .{
+                .name = "mimalloc",
+                .linkage = .static,
+                .use_llvm = true,
+                .root_module = b.createModule(
+                    .{
+                        .target = target,
+                        .optimize = optimize,
+                        .link_libc = true,
+                        .pic = true,
+                    },
+                ),
+            },
+        );
+
+        lib.root_module.addIncludePath(dep.path("include"));
+
+        lib.root_module.addCSourceFiles(
+            .{
+                .root = dep.path("src"),
+                .files = &.{
+                    "alloc.c",
+                    "alloc-aligned.c",
+                    "alloc-posix.c",
+                    "arena.c",
+                    "bitmap.c",
+                    "heap.c",
+                    "init.c",
+                    "libc.c",
+                    "options.c",
+                    "os.c",
+                    "page.c",
+                    "random.c",
+                    "segment.c",
+                    "segment-map.c",
+                    "stats.c",
+                    "prim/prim.c",
+                },
+                .flags = if (lib.root_module.optimize != .Debug)
+                    &.{
+                        "-DNDEBUG=1",
+                        "-DMI_SECURE=0",
+                        "-DMI_STAT=0",
+                        "-DMI_SHOW_ERRORS=1",
+                        "-DMI_SKIP_COLLECT_ON_EXIT=1",
+                        "-fno-sanitize=undefined",
+                        "-Wno-date-time",
+                    }
+                else
+                    &.{
+                        "-DMI_SKIP_COLLECT_ON_EXIT=1",
+                        "-fno-sanitize=undefined",
+                        "-Wno-date-time",
+                    },
+            },
+        );
+
+        return lib;
+    }
+};

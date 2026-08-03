@@ -209,7 +209,7 @@ fn drainPipe(vm: *revo.VM, bs: *BackendState) !bool {
     return any;
 }
 
-fn pollImpl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bool {
+pub fn pollAll(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bool {
     const vm: *revo.VM = @ptrCast(@alignCast(vm_ptr));
     // the async backend owns the completion pipe, but socket recv/send
     // waiters are still driven by std_net.pollIoWaiters. poll both sources in
@@ -251,8 +251,4 @@ fn pollImpl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!boo
     // it also removes completed waiters safely
     const io_woke = try revo.std_net.pollIoWaiters(vm, 0);
     return woke_any or io_woke;
-}
-
-pub fn pollAll(bs: *BackendState, vm: *anyopaque, timeout_ms: i32) anyerror!bool {
-    return pollImpl(bs, vm, timeout_ms);
 }
