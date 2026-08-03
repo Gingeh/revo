@@ -5,6 +5,7 @@ const revo = @import("revo");
 const mem = revo.memory;
 const Data = mem.Data;
 const t = revo.lang.testing;
+const pool = @import("pool.zig");
 
 pub const NativeError = revo.vm.NativeError;
 pub const NativeErrPayload = revo.std_lib.NativeErrPayload;
@@ -17,13 +18,14 @@ pub const RegisterCount = Register;
 pub const PrototypeID = usize;
 pub const UpvalueID = usize;
 
-pub const FrameHot = struct {
+/// a single call frame. the hot fields (return_addr, base, program) come
+/// first so the dispatch loop's per-instruction frame reads hit the same
+/// offsets as the old dedicated hot frame; the cold fields are only touched
+/// on return, stack traces, and gc marking
+pub const Frame = struct {
     return_addr: ProgramCounter,
     base: usize,
     program: []const revo.Instruction,
-};
-
-pub const FrameCold = struct {
     call_site_pc: ?ProgramCounter,
     result_register: Register,
     register_count: RegisterCount,
@@ -156,10 +158,16 @@ pub const FunctionPool = struct {
     functions: std.ArrayList(?Function),
     function_marks: std.DynamicBitSet,
     function_dead: std.ArrayList(mem.FunctionID),
+    function_first: usize = pool.end,
+    function_last: usize = pool.end,
+    function_next: std.ArrayList(usize),
     prototypes: std.ArrayList(Prototype),
     upvalues: std.ArrayList(?Upvalue),
     upvalue_marks: std.DynamicBitSet,
     upvalue_dead: std.ArrayList(UpvalueID),
+    upvalue_first: usize = pool.end,
+    upvalue_last: usize = pool.end,
+    upvalue_next: std.ArrayList(usize),
     segments: std.ArrayList([]const revo.Instruction),
 
     pub fn init(alloc: std.mem.Allocator) !FunctionPool {
@@ -168,22 +176,28 @@ pub const FunctionPool = struct {
             .functions = undefined,
             .function_marks = undefined,
             .function_dead = .empty,
+            .function_next = undefined,
             .prototypes = undefined,
             .upvalues = undefined,
             .upvalue_marks = undefined,
             .upvalue_dead = .empty,
+            .upvalue_next = undefined,
             .segments = undefined,
         };
         self.functions = try std.ArrayList(?Function).initCapacity(alloc, 16);
         errdefer self.functions.deinit(alloc);
         self.function_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
         errdefer self.function_marks.deinit();
+        self.function_next = try std.ArrayList(usize).initCapacity(alloc, 16);
+        errdefer self.function_next.deinit(alloc);
         self.prototypes = try std.ArrayList(Prototype).initCapacity(alloc, 16);
         errdefer self.prototypes.deinit(alloc);
         self.upvalues = try std.ArrayList(?Upvalue).initCapacity(alloc, 16);
         errdefer self.upvalues.deinit(alloc);
         self.upvalue_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
         errdefer self.upvalue_marks.deinit();
+        self.upvalue_next = try std.ArrayList(usize).initCapacity(alloc, 16);
+        errdefer self.upvalue_next.deinit(alloc);
         self.segments = try std.ArrayList([]const revo.Instruction).initCapacity(alloc, 4);
         errdefer self.segments.deinit(alloc);
 
@@ -208,24 +222,17 @@ pub const FunctionPool = struct {
         self.functions.deinit(self.alloc);
         self.function_marks.deinit();
         self.function_dead.deinit(self.alloc);
+        self.function_next.deinit(self.alloc);
         self.prototypes.deinit(self.alloc);
         self.upvalues.deinit(self.alloc);
         self.upvalue_marks.deinit();
         self.upvalue_dead.deinit(self.alloc);
+        self.upvalue_next.deinit(self.alloc);
         self.segments.deinit(self.alloc);
     }
 
     pub inline fn create(self: *FunctionPool, func: Function) !mem.FunctionID {
-        if (self.function_dead.pop()) |id| {
-            self.functions.items[id] = func;
-            return id;
-        }
-        const id: mem.FunctionID = @intCast(self.functions.items.len);
-        try self.functions.append(self.alloc, func);
-        if (id >= self.function_marks.capacity()) {
-            try self.function_marks.resize(self.functions.items.len, false);
-        }
-        return id;
+        return pool.create(self.alloc, Function, mem.FunctionID, &self.functions, &self.function_marks, &self.function_dead, &self.function_first, &self.function_last, &self.function_next, func);
     }
 
     pub fn createPrototype(self: *FunctionPool, proto: Prototype) !PrototypeID {
@@ -286,16 +293,7 @@ pub const FunctionPool = struct {
     }
 
     pub inline fn createUpvalue(self: *FunctionPool, upvalue: Upvalue) !UpvalueID {
-        if (self.upvalue_dead.pop()) |id| {
-            self.upvalues.items[id] = upvalue;
-            return id;
-        }
-        const id: UpvalueID = @intCast(self.upvalues.items.len);
-        try self.upvalues.append(self.alloc, upvalue);
-        if (id >= self.upvalue_marks.capacity()) {
-            try self.upvalue_marks.resize(self.upvalues.items.len, false);
-        }
-        return id;
+        return pool.create(self.alloc, Upvalue, UpvalueID, &self.upvalues, &self.upvalue_marks, &self.upvalue_dead, &self.upvalue_first, &self.upvalue_last, &self.upvalue_next, upvalue);
     }
 
     pub inline fn get(self: *FunctionPool, id: mem.FunctionID) !*Function {
@@ -332,50 +330,26 @@ pub const FunctionPool = struct {
     }
 
     pub fn sweep(self: *FunctionPool) void {
-        {
-            const max_dead = self.functions.items.len;
-            self.function_dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-            self.function_dead.items.len = 0;
-            for (self.functions.items, 0..) |*maybe_f, idx| {
-                if (maybe_f.* == null) continue;
-                if (self.function_marks.isSet(idx)) continue;
-                switch (maybe_f.*.?) {
-                    .closure => |closure| self.alloc.free(closure.upvalues),
-                    .native, .c_function => {},
-                }
-                maybe_f.* = null;
-                self.function_dead.appendAssumeCapacity(@intCast(idx));
-            }
-            self.function_marks.unmanaged.unsetAll();
-        }
-        {
-            const max_dead = self.upvalues.items.len;
-            self.upvalue_dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-            self.upvalue_dead.items.len = 0;
-            for (self.upvalues.items, 0..) |*maybe_u, idx| {
-                if (maybe_u.* == null) continue;
-                if (self.upvalue_marks.isSet(idx)) continue;
-                maybe_u.* = null;
-                self.upvalue_dead.appendAssumeCapacity(@intCast(idx));
-            }
-            self.upvalue_marks.unmanaged.unsetAll();
-        }
+        pool.sweep(self.alloc, Function, mem.FunctionID, &self.functions, &self.function_marks, &self.function_dead, &self.function_first, &self.function_last, &self.function_next, freeFunction);
+        pool.sweep(self.alloc, Upvalue, UpvalueID, &self.upvalues, &self.upvalue_marks, &self.upvalue_dead, &self.upvalue_first, &self.upvalue_last, &self.upvalue_next, freeUpvalue);
     }
 
     pub inline fn bytes(self: *const FunctionPool) usize {
         var total: usize = 0;
-        for (self.functions.items) |maybe_f| {
-            if (maybe_f) |f| {
-                total += 48;
-                switch (f) {
-                    .closure => |closure| total += @sizeOf(UpvalueID) * closure.upvalues.len,
-                    .native, .c_function => {},
-                }
+        var fid = self.function_first;
+        while (fid != pool.end) {
+            const f = self.functions.items[fid].?;
+            total += 48;
+            switch (f) {
+                .closure => |closure| total += @sizeOf(UpvalueID) * closure.upvalues.len,
+                .native, .c_function => {},
             }
+            fid = self.function_next.items[fid];
         }
-        for (self.upvalues.items) |maybe_u| {
-            if (maybe_u != null)
-                total += 24;
+        var uid = self.upvalue_first;
+        while (uid != pool.end) {
+            total += 24;
+            uid = self.upvalue_next.items[uid];
         }
         return total;
     }
@@ -389,6 +363,18 @@ pub const FunctionPool = struct {
         return self.functions.items.len;
     }
 };
+
+fn freeFunction(f: *Function, alloc: std.mem.Allocator) ?Function {
+    switch (f.*) {
+        .closure => |closure| alloc.free(closure.upvalues),
+        .native, .c_function => {},
+    }
+    return null;
+}
+
+fn freeUpvalue(_: *Upvalue, _: std.mem.Allocator) ?Upvalue {
+    return null;
+}
 
 test "functions call with lexical locals" {
     try t.top_number(
@@ -457,14 +443,14 @@ test "functions reject wrong arity" {
 }
 
 test "function pool prototype ownership and upvalue slot reuse" {
-    var pool = try FunctionPool.init(std.testing.allocator);
-    defer pool.deinit();
+    var fn_pool = try FunctionPool.init(std.testing.allocator);
+    defer fn_pool.deinit();
 
     var name_buf = [_]u8{ 'f', 'n' };
     var specs = [_]UpvalueSpec{.{ .is_local = true, .index = 0, .mutable = false }};
     var consts = [_]LocalSlot{1};
 
-    const proto_id = try pool.createPrototype(.{
+    const proto_id = try fn_pool.createPrototype(.{
         .addr = 9,
         .arity = 1,
         .total_arity = 1,
@@ -478,13 +464,13 @@ test "function pool prototype ownership and upvalue slot reuse" {
     specs[0].index = 99;
     consts[0] = 77;
 
-    const stored = try pool.getPrototype(proto_id);
+    const stored = try fn_pool.getPrototype(proto_id);
     try std.testing.expectEqualStrings("fn", stored.name);
     try std.testing.expectEqual(@as(LocalSlot, 0), stored.upvalue_specs[0].index);
     try std.testing.expectEqual(@as(LocalSlot, 1), stored.const_locals[0]);
 
-    const up_id = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(1), .owner_fiber_id = null });
-    pool.sweep();
-    const up_reused = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(2), .owner_fiber_id = null });
+    const up_id = try fn_pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(1), .owner_fiber_id = null });
+    fn_pool.sweep();
+    const up_reused = try fn_pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(2), .owner_fiber_id = null });
     try std.testing.expectEqual(up_id, up_reused);
 }

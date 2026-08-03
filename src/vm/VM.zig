@@ -46,6 +46,17 @@ pub const ICacheEntry = struct {
     value: Data,
 };
 
+/// per-(struct type, atom) resolution cache: field offsets and methods are
+/// shared by every instance of a type, so the hashed name/atom lookups in
+/// resolveField only need to run once per access site
+pub const StructCacheEntry = struct {
+    type_id: usize = std.math.maxInt(usize),
+    atom: mem.AtomID = 0,
+    is_method: bool = false,
+    offset: usize = 0,
+    value: Data = undefined,
+};
+
 // main loop: run runnable fibers, wake sleepers
 // wait for io/timers if needed
 pub fn runReport(self: *VM) !EvalResult {
@@ -78,8 +89,11 @@ pub const Fiber = struct {
     debug_info_id: ?DebugInfoID,
     registers: []Data,
     registers_len: usize = 0,
-    frames_hot: std.ArrayList(FrameHot),
-    frames_cold: std.ArrayList(FrameCold),
+    frames: std.ArrayList(Frame),
+    /// cached base of the top frame; the dispatch loop reads this instead of
+    /// indexing frames[frames.len-1] on every call/ret. kept in sync at every
+    /// frame push/pop site
+    top_base: usize = 0,
     open_upvalues: std.ArrayList(OpenUpvalueRef),
 
     running: bool,
@@ -100,8 +114,7 @@ pub const Fiber = struct {
             .program = program,
             .debug_info_id = null,
             .registers = undefined,
-            .frames_hot = undefined,
-            .frames_cold = undefined,
+            .frames = undefined,
             .open_upvalues = undefined,
             .running = false,
             .state = .ready,
@@ -114,10 +127,8 @@ pub const Fiber = struct {
 
         self.registers = try alloc.alloc(Data, reg_count);
         errdefer alloc.free(self.registers);
-        self.frames_hot = try std.ArrayList(FrameHot).initCapacity(alloc, INITIAL_HOT_FRAMES);
-        errdefer self.frames_hot.deinit(alloc);
-        self.frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, INITIAL_HOT_FRAMES);
-        errdefer self.frames_cold.deinit(alloc);
+        self.frames = try std.ArrayList(Frame).initCapacity(alloc, INITIAL_HOT_FRAMES);
+        errdefer self.frames.deinit(alloc);
         self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 1);
         errdefer self.open_upvalues.deinit(alloc);
         self.waiters = try std.ArrayList(FiberID).initCapacity(alloc, 1);
@@ -128,8 +139,7 @@ pub const Fiber = struct {
 
     pub fn deinit(self: *Fiber, alloc: std.mem.Allocator) void {
         alloc.free(self.registers);
-        self.frames_hot.deinit(alloc);
-        self.frames_cold.deinit(alloc);
+        self.frames.deinit(alloc);
         self.open_upvalues.deinit(alloc);
         self.waiters.deinit(alloc);
     }
@@ -184,12 +194,16 @@ gc_bytes_allocated: usize = 0,
 // optional opcode counters for benchmarking/profiling
 // allocated on init
 gc_threshold: usize = 512 * 1024, // 512kb initial
-gc_pause_factor: usize = 2,
-// 64kb nursery
-gc_nursery_threshold: usize = 64 * 1024,
+gc_pause_factor: usize = 4,
+// upper bound on the collection trigger; keeps the heap from growing
+// without bound while avoiding pathological full collections on
+// allocation-heavy, small-live workloads (bench/storage.rv collected
+// every ~64kb, spending ~90% of its time in the GC)
+gc_nursery_threshold: usize = 8 * 1024 * 1024,
 
 /// for table lookups
 icache: [2][256]ICacheEntry = undefined,
+struct_cache: [512]StructCacheEntry = undefined,
 
 gc_mark_stack: std.ArrayList(MarkItem),
 gc_finalizers: std.AutoHashMap(mem.TableID, Data),
@@ -272,6 +286,11 @@ pub fn init(runtime: revo.Runtime) !VM {
         }
     }
 
+    // struct cache entries start with an impossible type_id to force misses
+    for (&vm.struct_cache) |*entry| {
+        entry.* = .{};
+    }
+
     try vm.package_path.appendSlice(rt.alloc, &.{ "./?", "./lib/?", "/usr/local/lib/revo/?" });
 
     try vm.sched.fibers.append(rt.alloc, .{
@@ -280,8 +299,7 @@ pub fn init(runtime: revo.Runtime) !VM {
         .program = &.{},
         .debug_info_id = null,
         .registers = try runtime.alloc.alloc(Data, INIT_REG_COUNT),
-        .frames_hot = try std.ArrayList(FrameHot).initCapacity(runtime.alloc, INITIAL_HOT_FRAMES),
-        .frames_cold = try std.ArrayList(FrameCold).initCapacity(runtime.alloc, INITIAL_HOT_FRAMES),
+        .frames = try std.ArrayList(Frame).initCapacity(runtime.alloc, INITIAL_HOT_FRAMES),
         .running = false,
         .open_upvalues = try std.ArrayList(Fiber.OpenUpvalueRef).initCapacity(runtime.alloc, 1),
         .state = .ready,
@@ -457,15 +475,6 @@ pub inline fn mainResult(self: *VM) Data {
     return fiber.result;
 }
 
-pub fn printStack(self: *VM) void {
-    std.debug.print("[", .{});
-    for (self.currentFiber().registers) |item| {
-        item.print(self);
-        std.debug.print(", ", .{});
-    }
-    std.debug.print("]\n", .{});
-}
-
 //
 // fiber
 //
@@ -568,6 +577,41 @@ pub inline fn icacheInsert(self: *VM, pc: ProgramCounter, table_id: mem.TableID,
     const set = (pc ^ table_id) & (self.icache[0].len - 1);
     self.icache[1][set] = self.icache[0][set];
     self.icache[0][set] = .{ .pc = pc, .table_id = table_id, .version = version, .key = key, .value = value };
+}
+
+// direct-mapped struct field/method cache; set index = type_id ^ atom
+pub inline fn structCacheLookup(self: *VM, type_id: usize, atom: mem.AtomID) ?StructCacheEntry {
+    const entry = self.struct_cache[(type_id ^ atom) & (self.struct_cache.len - 1)];
+    if (entry.type_id == type_id and entry.atom == atom) return entry;
+    return null;
+}
+
+pub inline fn structCacheInsert(self: *VM, type_id: usize, atom: mem.AtomID, is_method: bool, offset: usize, value: Data) void {
+    self.struct_cache[(type_id ^ atom) & (self.struct_cache.len - 1)] = .{
+        .type_id = type_id,
+        .atom = atom,
+        .is_method = is_method,
+        .offset = offset,
+        .value = value,
+    };
+}
+
+// inline fast path: resolve a cached struct field/method read on a struct instance.
+// identical to resolveField's struct_val cache-hit branch; misses fall through.
+pub inline fn structCacheGet(self: *VM, object: Data, key: Data) ?Data {
+    const instance_id = object.asStructVal() orelse return null;
+    const atom = key.asAtom() orelse return null;
+    const pool = &self.struct_instances;
+    if (instance_id >= pool.instances.items.len) return null;
+    const inst = pool.instances.items[instance_id] orelse return null;
+    const cached = self.structCacheLookup(inst.type_id, atom) orelse return null;
+    return if (cached.is_method) cached.value else inst.fields[cached.offset];
+}
+
+pub fn structCacheInvalidate(self: *VM, type_id: usize) void {
+    for (&self.struct_cache) |*entry| {
+        if (entry.type_id == type_id) entry.type_id = std.math.maxInt(usize);
+    }
 }
 
 pub fn internAtom(self: *VM, name: []const u8) !mem.AtomID {
@@ -773,21 +817,14 @@ pub fn fail(self: *VM, comptime err: EvalError, comptime fmt: []const u8, args: 
     return self.evalFailure(err);
 }
 
-pub fn currentFrame(self: *VM) !*FrameHot {
-    if (self.currentFiber().frames_hot.items.len == 0) return error.FrameUnderflow;
-    return &self.currentFiber().frames_hot.items[self.currentFiber().frames_hot.items.len - 1];
-}
-
-pub fn currentFrameCold(self: *VM) !*FrameCold {
-    const fiber = self.currentFiber();
-    if (fiber.frames_hot.items.len == 0) return error.FrameUnderflow;
-    const i = fiber.frames_hot.items.len - 1;
-    return &fiber.frames_cold.items[i];
+pub fn currentFrame(self: *VM) !*Frame {
+    if (self.currentFiber().frames.items.len == 0) return error.FrameUnderflow;
+    return &self.currentFiber().frames.items[self.currentFiber().frames.items.len - 1];
 }
 
 pub inline fn currentClosure(self: *VM) !?*root.functions.Closure {
-    const frame_cold = try self.currentFrameCold();
-    const closure_id = frame_cold.closure_id orelse return null;
+    const frame = try self.currentFrame();
+    const closure_id = frame.closure_id orelse return null;
     const func = try self.functionFast(closure_id);
     return switch (func.*) {
         .closure => |*closure| closure,
@@ -844,12 +881,6 @@ pub inline fn loadUpvalueData(self: *VM, upvalue_id: root.functions.UpvalueID) !
     return upvalue.closed;
 }
 
-pub inline fn loadUpvalueDataFromFiber(self: *VM, upvalue_id: root.functions.UpvalueID, fiber: *Fiber) !Data {
-    const upvalue = try self.functions.getUpvalue(upvalue_id);
-    if (upvalue.open_index) |slot_index| return fiber.registers[slot_index];
-    return upvalue.closed;
-}
-
 pub inline fn storeUpvalueData(self: *VM, upvalue_id: root.functions.UpvalueID, value: Data) !void {
     const upvalue = try self.functions.getUpvalue(upvalue_id);
     if (upvalue.open_index) |slot_index| {
@@ -900,7 +931,7 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
     defer self.host_call_depth -= 1;
 
     const fiber = self.currentFiber();
-    const initial_frame_depth = fiber.frames_hot.items.len;
+    const initial_frame_depth = fiber.frames.items.len;
     const initial_pc = fiber.pc;
     const initial_slot_len = fiber.registers_len;
 
@@ -909,32 +940,40 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
     fiber.registers[fiber.registers_len] = callee;
     fiber.registers_len += 1;
 
-    if (fiber.frames_hot.items.len == 0) {
+    if (fiber.frames.items.len == 0) {
         if (fiber.debug_info_id == null)
             fiber.debug_info_id = self.pending_debug_info_id;
 
-        try fiber.frames_hot.append(
+        try fiber.frames.append(
             self.runtime.alloc,
-            .{ .return_addr = @intCast(fiber.program.len), .base = 0, .program = fiber.program },
+            .{
+                .return_addr = @intCast(fiber.program.len),
+                .base = 0,
+                .program = fiber.program,
+                .call_site_pc = null,
+                .result_register = 0,
+                .register_count = 0,
+                .closure_id = null,
+            },
         );
-        try fiber.frames_cold.append(
-            self.runtime.alloc,
-            .{ .call_site_pc = null, .result_register = 0, .register_count = 0, .closure_id = null },
-        );
+        fiber.top_base = 0;
     }
 
-    const caller_frame_depth = fiber.frames_hot.items.len;
-    const base = (try self.currentFrame()).base;
+    const caller_frame_depth = fiber.frames.items.len;
+    const base = fiber.top_base;
     const callee_slot = fiber.registers_len - 1;
 
     errdefer {
         fiber.registers_len = initial_slot_len;
         fiber.pc = initial_pc;
         self.closeUpvalues(initial_slot_len) catch {};
-        while (fiber.frames_hot.items.len > initial_frame_depth) {
-            _ = fiber.frames_hot.pop();
-            _ = fiber.frames_cold.pop();
+        while (fiber.frames.items.len > initial_frame_depth) {
+            _ = fiber.frames.pop();
         }
+        fiber.top_base = if (fiber.frames.items.len == 0)
+            0
+        else
+            fiber.frames.items[fiber.frames.items.len - 1].base;
     }
 
     // note: callee already rooted at callee_slot above
@@ -961,7 +1000,7 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
 
     try self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg });
 
-    if (fiber.frames_hot.items.len > caller_frame_depth) {
+    if (fiber.frames.items.len > caller_frame_depth) {
         if (try self.execFiberUntilDepth(caller_frame_depth)) |_| return error.Panic;
     }
 
@@ -986,8 +1025,7 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     else
         0;
 
-    const hot_frames = self.currentFiber().frames_hot.items;
-    const cold_frames = self.currentFiber().frames_cold.items;
+    const frames = self.currentFiber().frames.items;
 
     var primary_span = if (info) |debug| self.spanAtPc(debug, current_pc) else null;
 
@@ -1002,19 +1040,19 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
                 std.mem.find(u8, msg, " wants ") != null);
 
         const top_is_non_module = blk: {
-            if (hot_frames.len == 0) break :blk false;
-            if (cold_frames[hot_frames.len - 1].closure_id) |id| {
+            if (frames.len == 0) break :blk false;
+            if (frames[frames.len - 1].closure_id) |id| {
                 break :blk !std.mem.eql(u8, self.frameName(id), "<module>");
             }
             break :blk false;
         };
 
         if (is_struct_panic and top_is_non_module and
-            cold_frames[hot_frames.len - 1].call_site_pc != null and info != null)
+            frames[frames.len - 1].call_site_pc != null and info != null)
         {
             primary_span = self.spanAtPc(
                 info orelse unreachable,
-                cold_frames[hot_frames.len - 1].call_site_pc orelse unreachable,
+                frames[frames.len - 1].call_site_pc orelse unreachable,
             );
         }
     }
@@ -1036,12 +1074,12 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     };
 
     var out_idx: usize = 0;
-    var i = hot_frames.len;
+    var i = frames.len;
     while (i > 0 and
         out_idx < EvalFailure.max_trace_frames)
     {
         i -= 1;
-        const frame = cold_frames[i];
+        const frame = frames[i];
         if (frame.closure_id == null) continue;
         failure.trace[out_idx] = .{
             .function_name = self.frameName(
@@ -1056,7 +1094,7 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
             else
                 null,
             .span = if (info) |debug|
-                if (i == hot_frames.len - 1)
+                if (i == frames.len - 1)
                     self.spanAtPc(debug, current_pc)
                 else if (frame.call_site_pc) |pc|
                     self.spanAtPc(debug, pc)
@@ -1064,7 +1102,7 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
                     null
             else
                 null,
-            .pc = if (i == hot_frames.len - 1)
+            .pc = if (i == frames.len - 1)
                 current_pc
             else
                 frame.call_site_pc,
@@ -1386,8 +1424,7 @@ pub fn callRegister(
     instr: Instruction,
 ) EvalError!void {
     const fiber = self.currentFiber();
-    const frame = try self.currentFrame();
-    const base = frame.base;
+    const base = fiber.top_base;
     const callee_slot = base + instr.a;
     const argc: usize = instr.b;
 
@@ -1427,17 +1464,16 @@ pub fn callRegister(
                     fiber.program[fiber.pc].op == .ret)
                 {
                     @branchHint(.unlikely);
-                    const tail_frame_hot = try self.currentFrame();
-                    const tail_frame_cold = try self.currentFrameCold();
-                    if (tail_frame_cold.closure_id != null and
-                        tail_frame_hot.base > 0)
+                    const tail_frame = try self.currentFrame();
+                    if (tail_frame.closure_id != null and
+                        tail_frame.base > 0)
                     {
                         const caller_fn_slot =
-                            tail_frame_hot.base - 1;
+                            tail_frame.base - 1;
                         const moved_len = argc + 1;
 
                         try self.closeUpvalues(
-                            tail_frame_hot.base,
+                            tail_frame.base,
                         );
 
                         if (callee_slot != caller_fn_slot) {
@@ -1448,12 +1484,13 @@ pub fn callRegister(
                             );
                         }
 
-                        tail_frame_hot.base = caller_fn_slot + 1;
-                        tail_frame_cold.call_site_pc = if (fiber.pc > 0) fiber.pc - 1 else 0;
-                        tail_frame_cold.closure_id = closure_id;
-                        tail_frame_cold.register_count = closure.register_count;
+                        tail_frame.base = caller_fn_slot + 1;
+                        tail_frame.call_site_pc = if (fiber.pc > 0) fiber.pc - 1 else 0;
+                        tail_frame.closure_id = closure_id;
+                        tail_frame.register_count = closure.register_count;
+                        fiber.top_base = tail_frame.base;
 
-                        const tail_needed = tail_frame_hot.base +
+                        const tail_needed = tail_frame.base +
                             closure.register_count;
                         if (tail_needed > fiber.registers_len) {
                             try ensureRegCapacity(fiber, self.runtime.alloc, tail_needed);
@@ -1461,7 +1498,7 @@ pub fn callRegister(
                         }
                         fillOptionalSlots(
                             fiber.registers,
-                            tail_frame_hot.base,
+                            tail_frame.base,
                             argc,
                             closure.total_arity,
                             closure.register_count,
@@ -1489,23 +1526,19 @@ pub fn callRegister(
                     closure.register_count,
                 );
 
-                try fiber.frames_hot.append(
+                try fiber.frames.append(
                     self.runtime.alloc,
                     .{
                         .return_addr = fiber.pc,
                         .base = new_base,
                         .program = fiber.program,
-                    },
-                );
-                try fiber.frames_cold.append(
-                    self.runtime.alloc,
-                    .{
                         .call_site_pc = if (fiber.pc > 0) fiber.pc - 1 else 0,
                         .result_register = instr.c,
                         .register_count = closure.register_count,
                         .closure_id = closure_id,
                     },
                 );
+                fiber.top_base = new_base;
                 if (self.functions.segments.items.len > closure.segment_id) {
                     fiber.program = self.functions.segments.items[closure.segment_id];
                 }
@@ -1734,12 +1767,24 @@ pub fn setStructField(
         try self.setRuntimeMessage("invalid struct type");
         return error.Panic;
     };
-    const idx = desc.field_index.get(field_atom) orelse {
-        try self.setRuntimeMessageFmt(
-            "unknown field `{s}` for struct `{s}`",
-            .{ self.atomName(field_atom), desc.name },
-        );
-        return error.Panic;
+    const idx = if (self.structCacheLookup(instance.type_id, field_atom)) |cached|
+        if (cached.is_method) {
+            try self.setRuntimeMessageFmt(
+                "field `{s}` on `{s}` is a method and can't be assigned",
+                .{ self.atomName(field_atom), desc.name },
+            );
+            return error.Panic;
+        } else cached.offset
+    else blk: {
+        const i = desc.field_index.get(field_atom) orelse {
+            try self.setRuntimeMessageFmt(
+                "unknown field `{s}` for struct `{s}`",
+                .{ self.atomName(field_atom), desc.name },
+            );
+            return error.Panic;
+        };
+        self.structCacheInsert(instance.type_id, field_atom, false, @intCast(i), undefined);
+        break :blk i;
     };
     if (desc.fields[idx].type_atom) |expected_atom| {
         if (!self.structFieldValueMatches(
@@ -1781,27 +1826,23 @@ pub fn returnRegister(
     instr: Instruction,
 ) EvalError!void {
     const fiber = self.currentFiber();
-    const read_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+    const read_base = fiber.top_base;
     const reg_slot = read_base + @as(usize, instr.a);
     const result = fiber.registers[reg_slot];
 
-    const frame_hot_idx = fiber.frames_hot.items.len - 1;
-    const frame_hot = fiber.frames_hot.items[frame_hot_idx];
-    fiber.frames_hot.items.len = frame_hot_idx;
-
-    const frame_cold_idx = fiber.frames_cold.items.len - 1;
-    const frame_cold = fiber.frames_cold.items[frame_cold_idx];
-    fiber.frames_cold.items.len = frame_cold_idx;
+    const frame_idx = fiber.frames.items.len - 1;
+    const frame = fiber.frames.items[frame_idx];
+    fiber.frames.items.len = frame_idx;
 
     if (fiber.open_upvalues.items.len > 0)
-        try self.closeUpvalues(frame_hot.base);
+        try self.closeUpvalues(frame.base);
 
-    fiber.pc = frame_hot.return_addr;
-    fiber.program = frame_hot.program;
+    fiber.pc = frame.return_addr;
+    fiber.program = frame.program;
 
     const returning_to_exit =
         self.sched.current_fiber == 0 and
-        fiber.frames_hot.items.len <= 1;
+        fiber.frames.items.len <= 1;
 
     if (returning_to_exit) {
         if (result.asTuple()) |result_tid| {
@@ -1833,7 +1874,7 @@ pub fn returnRegister(
         }
     }
 
-    if (fiber.frames_hot.items.len == 0 or
+    if (fiber.frames.items.len == 0 or
         fiber.pc >= fiber.program.len)
     {
         const finished_id = self.sched.current_fiber;
@@ -1845,12 +1886,12 @@ pub fn returnRegister(
         return;
     }
 
-    const parent_hot = &fiber.frames_hot.items[fiber.frames_hot.items.len - 1];
-    const parent_cold = &fiber.frames_cold.items[fiber.frames_hot.items.len - 1];
-    const result_slot = parent_hot.base +
-        frame_cold.result_register;
-    const parent_end = parent_hot.base +
-        parent_cold.register_count;
+    const parent = &fiber.frames.items[fiber.frames.items.len - 1];
+    fiber.top_base = parent.base;
+    const result_slot = parent.base +
+        frame.result_register;
+    const parent_end = parent.base +
+        parent.register_count;
     fiber.registers_len = @max(result_slot + 1, parent_end);
     fiber.registers[result_slot] = result;
 }
@@ -1909,8 +1950,8 @@ pub inline fn spawnRegister(
         f.parked_result_slot = null;
         f.err_atom = null;
         f.registers_len = 0;
-        f.frames_hot.items.len = 0;
-        f.frames_cold.items.len = 0;
+        f.frames.items.len = 0;
+        f.top_base = 0;
         f.open_upvalues.items.len = 0;
         f.waiters.items.len = 0;
         break :blk fid;
@@ -1947,17 +1988,16 @@ pub inline fn spawnRegister(
     );
 
     const child_closure_id = try self.detachClosureForFiber(closure_id);
-    try child.frames_hot.append(self.runtime.alloc, .{
+    try child.frames.append(self.runtime.alloc, .{
         .return_addr = @intCast(child.program.len),
         .base = 0,
         .program = child.program,
-    });
-    try child.frames_cold.append(self.runtime.alloc, .{
         .call_site_pc = null,
         .result_register = 0,
         .register_count = closure.register_count,
         .closure_id = child_closure_id,
     });
+    child.top_base = 0;
     child.pc = closure.addr;
 
     try self.sched.enqueueRunnable(child_id);
@@ -2003,8 +2043,7 @@ const root = @import("root.zig");
 pub const EvalErrorKind = root.debug.EvalErrorKind;
 pub const EvalFailure = root.debug.EvalFailure;
 pub const EvalResult = root.debug.EvalResult;
-const FrameHot = root.functions.FrameHot;
-const FrameCold = root.functions.FrameCold;
+const Frame = root.functions.Frame;
 const FunctionPool = root.functions.FunctionPool;
 pub const lookup = root.lookup;
 pub const memory = root.memory;

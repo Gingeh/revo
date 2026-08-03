@@ -1596,7 +1596,7 @@ test "comp block infers int from literal" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1621,7 +1621,7 @@ test "match narrowing enables specialized add_int from union payload" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1643,7 +1643,7 @@ test "return type propagation: const binding with annotated fn" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1665,7 +1665,7 @@ test "return type propagation: fn five() 5" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1687,7 +1687,7 @@ test "annotated function return type propagates to caller via pointer" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1820,7 +1820,7 @@ test "generics identity fn enables add_int" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }
@@ -1903,7 +1903,7 @@ test "generics repeated type param works" {
 
     var saw_add_int = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add_int = true;
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
 }

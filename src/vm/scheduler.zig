@@ -75,22 +75,6 @@ pub const ChannelState = struct {
         self.queue_count -= 1;
         return value;
     }
-
-    fn popSendWaiter(self: *ChannelState) ?ChannelWaiter {
-        if (self.send_head >= self.send_waiters.items.len) return null;
-        const waiter = self.send_waiters.items[self.send_head];
-        self.send_head += 1;
-        maybeCompactList(ChannelWaiter, &self.send_waiters, &self.send_head);
-        return waiter;
-    }
-
-    fn popRecvWaiter(self: *ChannelState) ?ChannelWaiter {
-        if (self.recv_head >= self.recv_waiters.items.len) return null;
-        const waiter = self.recv_waiters.items[self.recv_head];
-        self.recv_head += 1;
-        maybeCompactList(ChannelWaiter, &self.recv_waiters, &self.recv_head);
-        return waiter;
-    }
 };
 
 /// compact runq when head is past midpoint
@@ -101,6 +85,14 @@ fn maybeCompactList(comptime T: type, list: *std.ArrayList(T), head: *usize) voi
     std.mem.copyForwards(T, list.items[0..remaining], list.items[head.*..]);
     list.items.len = remaining;
     head.* = 0;
+}
+
+fn popWaiter(list: *std.ArrayList(ChannelWaiter), head: *usize) ?ChannelWaiter {
+    if (head.* >= list.items.len) return null;
+    const waiter = list.items[head.*];
+    head.* += 1;
+    maybeCompactList(ChannelWaiter, list, head);
+    return waiter;
 }
 
 /// a fiber waiting on a timer
@@ -337,8 +329,8 @@ pub fn finishFiber(self: *@This(), fid: FiberID, result: Data) !void {
     for (fiber.waiters.items) |waiter_id|
         try self.wakeFiber(waiter_id, fiber.result);
     fiber.waiters.items.len = 0;
-    fiber.frames_hot.items.len = 0;
-    fiber.frames_cold.items.len = 0;
+    fiber.frames.items.len = 0;
+    fiber.top_base = 0;
     fiber.open_upvalues.items.len = 0;
     if (fid != 0) try self.free_fibers.append(self.alloc, fid);
 }
@@ -395,7 +387,7 @@ pub fn channelSend(
     var channel = self.channels.getPtr(channel_id) orelse return error.InvalidChannel;
 
     // maybe wake receiver, but validate fiber is still valid and waiting
-    while (channel.popRecvWaiter()) |waiter| {
+    while (popWaiter(&channel.recv_waiters, &channel.recv_head)) |waiter| {
         // fiber id might be stale
         if (waiter.fiber_id >= self.fibers.items.len) continue;
         const recv_fiber = &self.fibers.items[waiter.fiber_id];
@@ -430,7 +422,7 @@ pub fn channelRecv(self: *@This(), channel_id: ChannelID) !?Data {
 
         // maybe wake sender, if fiber is still valid
         while (channel.cap > 0 and channel.queueLen() < channel.cap) {
-            const sender = channel.popSendWaiter() orelse break;
+            const sender = popWaiter(&channel.send_waiters, &channel.send_head) orelse break;
             if (sender.fiber_id >= self.fibers.items.len) continue;
             const sender_fiber = &self.fibers.items[sender.fiber_id];
             if (sender_fiber.state != .waiting) continue;
@@ -447,7 +439,7 @@ pub fn channelRecv(self: *@This(), channel_id: ChannelID) !?Data {
     }
 
     // maybe wake sender directly
-    while (channel.popSendWaiter()) |sender| {
+    while (popWaiter(&channel.send_waiters, &channel.send_head)) |sender| {
         if (sender.fiber_id >= self.fibers.items.len) continue;
         const sender_fiber = &self.fibers.items[sender.fiber_id];
         if (sender_fiber.state != .waiting) continue;

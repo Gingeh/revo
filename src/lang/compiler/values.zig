@@ -49,6 +49,7 @@ pub fn compileLocalBinding(
             name,
             null,
             value.expr.fn_expr.type_params,
+            null,
         );
     } else {
         try self.compile(value, true);
@@ -520,6 +521,7 @@ pub fn compileStruct(
                     b.target.expr.ident,
                     null,
                     b.value.expr.fn_expr.type_params,
+                    .{ .struct_type = name },
                 )
             else
                 try self.compile(b.value, true);
@@ -580,6 +582,7 @@ pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
                         fn_name,
                         null,
                         b.value.expr.fn_expr.type_params,
+                        null,
                     );
                 } else {
                     try self.compile(entry.value, true);

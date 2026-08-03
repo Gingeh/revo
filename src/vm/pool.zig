@@ -1,0 +1,104 @@
+//! shared machinery for the GC object pools (tables, tuples, functions, upvalues, struct instances)
+//!
+//! each pool is an append-only ArrayList whose slots never move, so ids stay stable
+//! freed slots are reused through a free list sweeping
+//! by scanning the whole array is O(high-water mark)
+//! workloads that churn garbage grow that watermark forever even though the
+//! live set stays small. so every pool threads its live slots through a
+//! singly-linked list and sweep walks only that list: O(live) per collection
+
+const std = @import("std");
+
+pub const end = std.math.maxInt(usize);
+
+/// append a brand new slot to the allocated list; call after reserving the
+/// slot in the pool array. new slots go on the tail so the sweep walks the
+/// list in creation order, same order the old full-array scan used
+pub fn link(first: *usize, last: *usize, next: *std.ArrayList(usize), alloc: std.mem.Allocator, id: usize) !void {
+    try next.append(alloc, end);
+    if (last.* == end) first.* = id else next.items[last.*] = id;
+    last.* = id;
+}
+
+/// reattach a reused slot to the allocated list
+pub inline fn relink(first: *usize, last: *usize, next: *std.ArrayList(usize), id: usize) void {
+    next.items[id] = end;
+    if (last.* == end) first.* = id else next.items[last.*] = id;
+    last.* = id;
+}
+
+/// append a brand new value to a pool, reusing a dead slot if one exists
+pub fn create(
+    alloc: std.mem.Allocator,
+    comptime T: type,
+    comptime ID: type,
+    items: *std.ArrayList(?T),
+    marks: *std.DynamicBitSet,
+    dead: *std.ArrayList(ID),
+    first: *usize,
+    last: *usize,
+    next: *std.ArrayList(usize),
+    value: T,
+) !ID {
+    if (dead.pop()) |id| {
+        items.items[id] = value;
+        relink(first, last, next, id);
+        return id;
+    }
+    const id: ID = @intCast(items.items.len);
+    if (id >= marks.capacity()) {
+        try marks.resize(id + 1, false);
+    }
+    try items.append(alloc, value);
+    errdefer _ = items.pop();
+    try link(first, last, next, alloc, id);
+    return id;
+}
+
+/// walk the allocated list, freeing unmarked slots into the free list and
+/// clearing the marks of survivors. the list always contains exactly the
+/// live slots, so this touches only what marking survived
+///
+/// the free fn returns an optional replacement: null drops the slot (thats
+/// just how it used to be before, slot becomes null), non-null keeps it, used by
+/// Table to retain its dense-array buffer across collections
+pub fn sweep(
+    alloc: std.mem.Allocator,
+    comptime T: type,
+    comptime ID: type,
+    items: *std.ArrayList(?T),
+    marks: *std.DynamicBitSet,
+    dead: *std.ArrayList(ID),
+    first: *usize,
+    last: *usize,
+    next: *std.ArrayList(usize),
+    comptime free: fn (*T, std.mem.Allocator) ?T,
+) void {
+    const max_new_dead = items.items.len;
+    const existing_dead = dead.items.len;
+    _ = dead.ensureTotalCapacity(alloc, existing_dead + max_new_dead) catch return;
+
+    var prev: usize = end;
+    var id = first.*;
+    while (id != end) {
+        const nxt = next.items[id];
+        const slot = &items.items[id];
+        if (!marks.isSet(id)) {
+            if (free(&slot.*.?, alloc)) |rep| {
+                slot.* = rep;
+            } else {
+                slot.* = null;
+            }
+            if (prev == end)
+                first.* = nxt
+            else
+                next.items[prev] = nxt;
+            dead.appendAssumeCapacity(@intCast(id));
+        } else {
+            marks.unset(id);
+            prev = id;
+        }
+        id = nxt;
+    }
+    last.* = prev;
+}

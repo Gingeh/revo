@@ -11,12 +11,12 @@ const LocalSlot = revo.LocalSlot;
 
 const ast = @import("../ast.zig");
 const Node = ast.Node;
+const ir = @import("../ir/root.zig");
 const state = @import("state.zig");
 const toRegister = state.toRegister;
+const TypeHint = state.FunctionState.TypeHint;
 const type_check = @import("type_check.zig");
 const types_mod = @import("types.zig");
-
-const TypeHint = state.FunctionState.TypeHint;
 
 pub const VarStorage = union(enum) {
     local: Operand,
@@ -117,7 +117,7 @@ pub fn compileRangeLoopBody(
         }
     }
 
-    // declare before loop_check so range_next can fill them each iteration
+    // declare before loop_check so range_loop can fill them each iteration
     if (params.len >= 1 and !ast.isDiscardName(params[0].name)) {
         value_slot = try state.declareLocal(self, params[0].name, false);
         if (params[0].type_name) |tn| {
@@ -153,19 +153,23 @@ pub fn compileRangeLoopBody(
         try state.setLocalTypeHint(self, params[1].name, .int);
     }
 
-    const loop_check: ProgramCounter = @intCast(self.irLen());
-    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = loop_check;
-
+    // L_body: the top of the loop body, where range_loop backbranches
     const value_reg = try toRegister(self.active_registers);
     const index_reg = if (needs_index) try toRegister(self.active_registers + 1) else 0;
 
-    try self.spans.append(self.alloc, self.active_span);
-    try self.recordStackOp(.range_next, 0, 0, value_reg, if (needs_index) @as(Operand, 1) else 0);
-    const n: usize = if (needs_index) 3 else 2;
+    // value (and index) live across the whole loop; the bottom range_loop
+    // rewrites them right before each iteration's bind
+    const n: usize = if (needs_index) 2 else 1;
     self.active_registers += n;
     if (self.active_registers > self.max_registers) self.max_registers = self.active_registers;
 
-    const end_jump = try self.jump(.jump_if_false);
+    // entry: skip the body, land on the bottom range check
+    const entry_jump = try self.jump(.jump);
+
+    const loop_check: ProgramCounter = @intCast(self.irLen());
+
+    // drain the LoopScope result load_nil that used to feed jump_if_false
+    _ = try self.pop();
 
     if (value_slot) |slot| {
         state.markLocalInitialized(self, slot);
@@ -187,12 +191,17 @@ pub fn compileRangeLoopBody(
 
     try normalizeLoopResult(self);
 
-    try self.emit(.jump, loop_check);
-    self.patchJump(end_jump);
+    // L_check: bottom-tested range check with fused backbranch
+    const check_idx: ProgramCounter = @intCast(self.irLen());
+    try self.spans.append(self.alloc, self.active_span);
+    const ops: []const ir.IrValue = if (needs_index) &.{.{ .reg = index_reg }} else &.{};
+    _ = try self.record(.range_loop, ops, false, value_reg, loop_check);
+    self.loop_stack.items[self.loop_stack.items.len - 1].continue_target = check_idx;
+    self.patchJumpToLabel(entry_jump, check_idx);
 
-    // reverse order: has_next, index (if used), value, range state (3 regs)
-    try self.regRelease();
+    // reverse order: index (if used), value, range state (3 regs)
     if (needs_index) try self.regRelease();
+    try self.regRelease();
     try self.regRelease();
     try self.regRelease();
     try self.regRelease();
@@ -829,7 +838,10 @@ pub fn compileContinue(self: *Compiler, expr: *const Node, value: ?*const Node, 
         return self.fail(.UnsupportedSyntax, expr, msg);
     };
 
-    try self.emit(.jump, @intCast(frame.continue_target));
+    // the loop's re-check point may sit after the body (fused range loops),
+    // so the target is patched when the loop scope closes
+    const jump_idx = try self.jump(.jump);
+    try frame.continue_jumps.append(self.alloc, jump_idx);
 }
 
 pub fn compileLabeledBlock(self: *Compiler, label: []const u8, body: *const Node) !void {

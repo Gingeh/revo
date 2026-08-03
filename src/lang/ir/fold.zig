@@ -1,17 +1,18 @@
+//! walk ir and fold constant expressions
+//! safe bc operands use .inst pointers (not register names),
+//! so data flow is correct whatever the control flow is
+//!
+//! folding frees the operands of the folded instruction, but the operand
+//! instructions themselves are only reclaimed by `dce.dceIr`; fold must
+//! therefore always be followed by dce before the ir is lowered
 const std = @import("std");
 
 const revo = @import("revo");
 const Compiler = revo.lang.compiler.Compiler;
 const Data = revo.Data;
+
 const ir = @import("root.zig");
 
-/// walk ir and fold constant expressions
-/// safe bc operands use .inst pointers (not register names),
-/// so data flow is correct whatever the control flow is
-///
-/// folding frees the operands of the folded instruction, but the operand
-/// instructions themselves are only reclaimed by `dce.dceIr`; fold must
-/// therefore always be followed by dce before the ir is lowered
 pub fn foldIr(self: *Compiler) !void {
     for (self.ir_builder.instructions.items) |inst| {
         _ = tryFoldInst(self, inst) catch continue;
@@ -54,7 +55,7 @@ fn extractConst(self: *Compiler, v: *const ir.IrInst) ?Data {
 
 fn rewriteToConst(self: *Compiler, inst: *ir.IrInst, val: Data) !void {
     self.alloc.free(inst.operands);
-    inst.operands = &.{};
+    inst.operands = try self.alloc.alloc(ir.IrValue, 0);
 
     if (val.asNum()) |n| {
         if (n >= 0 and n <= 65535 and @trunc(n) == n) {
@@ -106,8 +107,8 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
         };
         if (is_int_only or is_floor_div or is_pow) {
             if (is_int_only) {
-                const li = numToI64(ln) orelse return false;
-                const ri = numToI64(rn) orelse return false;
+                const li = revo.memory.numToI64(ln) orelse return false;
+                const ri = revo.memory.numToI64(rn) orelse return false;
                 const raw: f64 = switch (inst.opcode) {
                     .band, .band_int => @floatFromInt(li & ri),
                     .bor, .bor_int => @floatFromInt(li | ri),
@@ -129,8 +130,8 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             }
             if (is_floor_div) {
                 if (rn == 0) return false;
-                const li = numToI64(ln);
-                const ri = numToI64(rn);
+                const li = revo.memory.numToI64(ln);
+                const ri = revo.memory.numToI64(rn);
                 const raw: f64 = if (li != null and ri != null)
                     @floatFromInt(@divFloor(li.?, ri.?))
                 else
@@ -143,18 +144,10 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
                 // .pow_float always does a true float pow in the vm, so it
                 // never takes the integer fast path; .pow and .pow_int do
                 const is_float_pow = inst.opcode == .pow_float;
-                const li = if (is_float_pow) null else numToI64(ln);
-                const ri = if (is_float_pow) null else numToI64(rn);
+                const li = if (is_float_pow) null else revo.memory.numToI64(ln);
+                const ri = if (is_float_pow) null else revo.memory.numToI64(rn);
                 const raw: f64 = if (li != null and ri != null and ri.? >= 0) blk: {
-                    var acc: i64 = 1;
-                    var b: i64 = li.?;
-                    var e: i64 = ri.?;
-                    while (e > 0) {
-                        if (e & 1 == 1) acc = acc *% b;
-                        e >>= 1;
-                        if (e > 0) b = b *% b;
-                    }
-                    break :blk @floatFromInt(acc);
+                    break :blk @floatFromInt(revo.memory.ipow(li.?, ri.?));
                 } else std.math.pow(f64, ln, rn);
                 if (!std.math.isFinite(raw)) return false;
                 try rewriteToConst(self, inst, Data.new.num(raw));
@@ -207,15 +200,6 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
     }
 
     return false;
-}
-
-fn numToI64(n: f64) ?i64 {
-    if (!std.math.isFinite(n)) return null;
-    if (n < @as(f64, @floatFromInt(std.math.minInt(i64)))) return null;
-    if (n >= @as(f64, @floatFromInt(std.math.maxInt(i64)))) return null;
-    const t: i64 = @intFromFloat(n);
-    if (@as(f64, @floatFromInt(t)) != n) return null;
-    return t;
 }
 
 fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {

@@ -214,7 +214,7 @@ test "typed call results specialize later math" {
 
     var saw_add = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add or inst.op == .add_int) saw_add = true;
+        if (inst.op == .add or inst.op == .add_int or inst.op == .add_int_imm) saw_add = true;
     }
     try std.testing.expect(saw_add);
 }
@@ -239,9 +239,9 @@ test "recursive typed calls stay specialized" {
     var saw_sub = false;
     var saw_add = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .lt or inst.op == .lt_int) saw_lt = true;
-        if (inst.op == .sub or inst.op == .sub_int) saw_sub = true;
-        if (inst.op == .add or inst.op == .add_int) saw_add = true;
+        if (inst.op == .lt or inst.op == .lt_int or inst.op == .lt_int_imm) saw_lt = true;
+        if (inst.op == .sub or inst.op == .sub_int or inst.op == .sub_int_imm) saw_sub = true;
+        if (inst.op == .add or inst.op == .add_int or inst.op == .add_int_imm) saw_add = true;
     }
 
     try std.testing.expect(saw_lt);

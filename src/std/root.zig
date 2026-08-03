@@ -657,7 +657,7 @@ pub fn debug_(args: []const Data, vm: *VM) !NativeResult {
     try out.putRawAtom(try vm.internAtom("fiber_id"), Data.new.num(fiber.id), vm);
     try out.putRawAtom(try vm.internAtom("pc"), Data.new.num(fiber.pc), vm);
     try out.putRawAtom(try vm.internAtom("stack_depth"), Data.new.num(fiber.registers_len), vm);
-    try out.putRawAtom(try vm.internAtom("frame_depth"), Data.new.num(fiber.frames_hot.items.len), vm);
+    try out.putRawAtom(try vm.internAtom("frame_depth"), Data.new.num(fiber.frames.items.len), vm);
     try out.putRawAtom(try vm.internAtom("program_len"), Data.new.num(fiber.program.len), vm);
 
     if (vm.currentDebugInfo()) |info| {
@@ -796,17 +796,25 @@ pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.tuple(res));
 }
 
-/// > send(chan: tuple, value: any) -> atom
-/// sends value to channel
-pub fn chan_send(args: []const Data, vm: *VM) !NativeResult {
+/// validate `args[0]` as a `:chan, id` tuple and extract the channel id
+fn chanIdOf(args: []const Data, vm: *VM) NativeResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
-    const t = try vm.tuples.get(tuple_id);
+    const t = vm.tuples.get(tuple_id) catch return .errType(0, "chan tuple", "tuple");
     if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
     const chan_atom = revo.core_atoms.chan.atom_id();
     if (t.items[0].asAtom() != chan_atom)
         return .errType(0, "chan tuple", "tuple");
     const chan_id = t.items[1].asNum() orelse return .errType(0, "chan tuple", "tuple");
-    const cid: revo.vm.ChannelID = @intFromFloat(chan_id);
+    return .okData(Data.new.num(@as(revo.vm.ChannelID, @intFromFloat(chan_id))));
+}
+
+/// > send(chan: tuple, value: any) -> atom
+/// sends value to channel
+pub fn chan_send(args: []const Data, vm: *VM) !NativeResult {
+    const cid = switch (chanIdOf(args, vm)) {
+        .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNum().?)),
+        else => |r| return r,
+    };
     try vm.sched.channelSend(cid, args[1]);
     return okAtom(vm);
 }
@@ -814,14 +822,10 @@ pub fn chan_send(args: []const Data, vm: *VM) !NativeResult {
 /// > recv(chan: tuple) -> any
 /// receives value from channel, parks if empty
 pub fn chan_recv(args: []const Data, vm: *VM) !NativeResult {
-    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
-    const t = try vm.tuples.get(tuple_id);
-    if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
-    const chan_atom = revo.core_atoms.chan.atom_id();
-    if (t.items[0].asAtom() != chan_atom)
-        return .errType(0, "chan tuple", "tuple");
-    const chan_id = t.items[1].asNum() orelse return .errType(0, "chan tuple", "tuple");
-    const cid: revo.vm.ChannelID = @intFromFloat(chan_id);
+    const cid = switch (chanIdOf(args, vm)) {
+        .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNum().?)),
+        else => |r| return r,
+    };
     const recv_result = try vm.sched.channelRecv(cid);
     if (recv_result) |value| return .{ .ok = value };
     return .parked();

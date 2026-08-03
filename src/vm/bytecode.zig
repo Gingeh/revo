@@ -58,32 +58,34 @@ fn writeIntLE(buffer: *std.ArrayList(u8), allocator: Allocator, comptime IntType
     try buffer.appendSlice(allocator, &bytes);
 }
 
-fn serializeTuple(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, tid: memory.TupleID) !void {
+fn serializeData(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, item: memory.Data) anyerror!void {
+    try writeIntLE(buffer, allocator, u8, @intFromEnum(item.tag()));
+    switch (item.tag()) {
+        .number => try writeIntLE(buffer, allocator, u64, @bitCast(item.asNum().?)),
+        .string => {
+            const sid = item.asString().?;
+            const str = try vm.strings.get(sid);
+            try writeIntLE(buffer, allocator, u64, str.len);
+            try buffer.appendSlice(allocator, str);
+        },
+        .atom => {
+            const aid = item.asAtom().?;
+            const str = try vm.strings.get(aid);
+            try writeIntLE(buffer, allocator, u64, str.len);
+            try buffer.appendSlice(allocator, str);
+        },
+        .function => try writeIntLE(buffer, allocator, u64, item.asFunction().?),
+        .table => try writeIntLE(buffer, allocator, u64, item.asTable().?),
+        .tuple => try serializeTuple(buffer, allocator, vm, item.asTuple().?),
+        .struct_val, .struct_type, .foreign => unreachable,
+    }
+}
+
+fn serializeTuple(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, tid: memory.TupleID) anyerror!void {
     const tuple = try vm.tuples.get(tid);
 
     try writeIntLE(buffer, allocator, u32, @intCast(tuple.items.len));
-    for (tuple.items) |item| {
-        try writeIntLE(buffer, allocator, u8, @intFromEnum(item.tag()));
-        switch (item.tag()) {
-            .number => try writeIntLE(buffer, allocator, u64, @bitCast(item.asNum().?)),
-            .string => {
-                const sid = item.asString().?;
-                const str = try vm.strings.get(sid);
-                try writeIntLE(buffer, allocator, u64, str.len);
-                try buffer.appendSlice(allocator, str);
-            },
-            .atom => {
-                const aid = item.asAtom().?;
-                const str = try vm.strings.get(aid);
-                try writeIntLE(buffer, allocator, u64, str.len);
-                try buffer.appendSlice(allocator, str);
-            },
-            .function => try writeIntLE(buffer, allocator, u64, item.asFunction().?),
-            .table => try writeIntLE(buffer, allocator, u64, item.asTable().?),
-            .tuple => try serializeTuple(buffer, allocator, vm, item.asTuple().?),
-            .struct_val, .struct_type, .foreign => unreachable,
-        }
-    }
+    for (tuple.items) |item| try serializeData(buffer, allocator, vm, item);
 }
 
 //
@@ -125,28 +127,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
         try writeIntLE(&buffer, allocator, u32, span.column);
     }
 
-    for (vm.constants.items) |constant| {
-        try writeIntLE(&buffer, allocator, u8, @intFromEnum(constant.tag()));
-        switch (constant.tag()) {
-            .number => try writeIntLE(&buffer, allocator, u64, @bitCast(constant.asNum().?)),
-            .string => {
-                const sid = constant.asString().?;
-                const str = try vm.strings.get(sid);
-                try writeIntLE(&buffer, allocator, u64, str.len);
-                try buffer.appendSlice(allocator, str);
-            },
-            .atom => {
-                const aid = constant.asAtom().?;
-                const str = try vm.strings.get(aid);
-                try writeIntLE(&buffer, allocator, u64, str.len);
-                try buffer.appendSlice(allocator, str);
-            },
-            .function => try writeIntLE(&buffer, allocator, u64, constant.asFunction().?),
-            .struct_val, .struct_type, .foreign => unreachable,
-            .table => try writeIntLE(&buffer, allocator, u64, constant.asTable().?),
-            .tuple => try serializeTuple(&buffer, allocator, vm, constant.asTuple().?),
-        }
-    }
+    for (vm.constants.items) |constant| try serializeData(&buffer, allocator, vm, constant);
 
     for (vm.functions.prototypes.items) |proto| {
         try writeIntLE(&buffer, allocator, u32, @intCast(proto.addr));
@@ -178,45 +159,48 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
 // deserialization
 //
 
+/// read a single Data value from the byte stream
+fn readDataValue(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror!memory.Data {
+    const tag = (try reader.takeArray(1))[0];
+    return switch (tag) {
+        @intFromEnum(memory.Type.number) => blk: {
+            const bits = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            break :blk memory.Data.new.num(@as(f64, @bitCast(bits)));
+        },
+        @intFromEnum(memory.Type.string) => blk: {
+            const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            const str = try reader.take(len);
+            break :blk try vm.ownDataString(str);
+        },
+        @intFromEnum(memory.Type.atom) => blk: {
+            const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            const str = try reader.take(len);
+            const id = try vm.internAtom(str);
+            break :blk memory.Data.new.atom(id);
+        },
+        @intFromEnum(memory.Type.function) => blk: {
+            const fid = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            break :blk memory.Data.new.function(@intCast(fid));
+        },
+        @intFromEnum(memory.Type.table) => blk: {
+            const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            break :blk memory.Data.new.table(@intCast(tid));
+        },
+        @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, reader, allocator),
+        else => blk: {
+            _ = try reader.takeArray(8); // skip u64 payload
+            break :blk memory.Data.new.nil();
+        },
+    };
+}
+
 /// read a tuple value from the byte stream
-fn deserializeTuple(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) !memory.Data {
+fn deserializeTuple(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror!memory.Data {
     const items_len = std.mem.littleToNative(u32, std.mem.readInt(u32, try reader.takeArray(4), .little));
     const items = try allocator.alloc(memory.Data, items_len);
     errdefer allocator.free(items);
 
-    for (items) |*item| {
-        const tag = (try reader.takeArray(1))[0];
-        item.* = switch (tag) {
-            @intFromEnum(memory.Type.number) => blk: {
-                const bits = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.num(@as(f64, @bitCast(bits)));
-            },
-            @intFromEnum(memory.Type.string) => blk: {
-                const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                const str = try reader.take(len);
-                break :blk try vm.ownDataString(str);
-            },
-            @intFromEnum(memory.Type.atom) => blk: {
-                const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                const str = try reader.take(len);
-                const id = try vm.internAtom(str);
-                break :blk memory.Data.new.atom(id);
-            },
-            @intFromEnum(memory.Type.function) => blk: {
-                const fid = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.function(@intCast(fid));
-            },
-            @intFromEnum(memory.Type.table) => blk: {
-                const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.table(@intCast(tid));
-            },
-            @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, reader, allocator),
-            else => blk: {
-                _ = try reader.takeArray(8);
-                break :blk memory.Data.new.nil();
-            },
-        };
-    }
+    for (items) |*item| item.* = try readDataValue(vm, reader, allocator);
 
     const tid = try vm.tuples.create(items);
     allocator.free(items); // tuples.create copies
@@ -260,38 +244,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
 
     // consts
     for (0..constants_count) |_| {
-        const tag = (try reader.takeArray(1))[0];
-        const constant: memory.Data = switch (tag) {
-            @intFromEnum(memory.Type.number) => blk: {
-                const bits = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.num(@as(f64, @bitCast(bits)));
-            },
-            @intFromEnum(memory.Type.string) => blk: {
-                const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                const str = try reader.take(len);
-                break :blk try vm.ownDataString(str);
-            },
-            @intFromEnum(memory.Type.atom) => blk: {
-                const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                const str = try reader.take(len);
-                const id = try vm.internAtom(str);
-                break :blk memory.Data.new.atom(id);
-            },
-            @intFromEnum(memory.Type.function) => blk: {
-                const fid = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.function(@intCast(fid));
-            },
-            @intFromEnum(memory.Type.table) => blk: {
-                const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
-                break :blk memory.Data.new.table(@intCast(tid));
-            },
-            @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, &reader, allocator),
-            else => blk: {
-                _ = try reader.takeArray(8); // skip u64 payload
-                break :blk memory.Data.new.nil();
-            },
-        };
-        try vm.constants.append(allocator, constant);
+        try vm.constants.append(allocator, try readDataValue(vm, &reader, allocator));
     }
 
     // prototypes

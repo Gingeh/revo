@@ -21,10 +21,6 @@ pub fn maybeCollectGarbage(self: *VM) void {
     if (self.gc_in_finalizer) return;
 
     self.gc_bytes_allocated = 0;
-    self.tables.clearMarks();
-    self.tuples.clearMarks();
-    self.functions.clearMarks();
-    self.struct_instances.clearMarks();
     self.strings.clearMarks();
 
     markRoots(self);
@@ -56,7 +52,7 @@ pub fn maybeCollectGarbage(self: *VM) void {
         self.functions.bytes() +
         self.strings.bytes();
 
-    self.gc_threshold = @max(32 * 1024, live_bytes * self.gc_pause_factor);
+    self.gc_threshold = @max(512 * 1024, live_bytes * self.gc_pause_factor);
 }
 
 fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
@@ -87,16 +83,7 @@ fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
 pub fn processMarkStack(self: *VM) void {
     while (self.gc_mark_stack.pop()) |item| {
         switch (item) {
-            .data => |data| {
-                switch (data.tag()) {
-                    .string => self.strings.mark(data.asString().?),
-                    .table => self.tables.mark(data.asTable().?, self),
-                    .tuple => self.tuples.mark(data.asTuple().?, self),
-                    .function => self.functions.mark(data.asFunction().?, self),
-                    .struct_val => self.struct_instances.mark(data.asStructVal().?, self),
-                    else => {},
-                }
-            },
+            .data => |data| self.markData(data),
             .table => |id| {
                 if (id >= self.tables.tables.items.len) continue;
 
@@ -155,7 +142,7 @@ pub inline fn markRoots(self: *VM) void {
     for (self.sched.fibers.items) |fiber| {
         for (fiber.registers[0..fiber.registers_len]) |data|
             pushMark(self, data);
-        for (fiber.frames_cold.items) |frame| {
+        for (fiber.frames.items) |frame| {
             if (frame.closure_id) |id|
                 self.functions.mark(id, self);
         }

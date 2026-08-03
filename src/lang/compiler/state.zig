@@ -95,6 +95,7 @@ pub const LoopFrame = struct {
     continue_target: usize,
     result_reg: Register,
     break_jumps: std.ArrayList(usize),
+    continue_jumps: std.ArrayList(usize),
     function_index: usize,
 };
 
@@ -113,6 +114,7 @@ pub fn LoopScope(comptime T: type) type {
                 .continue_target = 0,
                 .result_reg = result_reg,
                 .break_jumps = try std.ArrayList(usize).initCapacity(compiler.alloc, 4),
+                .continue_jumps = try std.ArrayList(usize).initCapacity(compiler.alloc, 4),
                 .function_index = compiler.functions.items.len,
             });
             return .{ .compiler = compiler, .prev_in_loop = prev };
@@ -124,7 +126,11 @@ pub fn LoopScope(comptime T: type) type {
             while (frame.break_jumps.pop()) |idx| {
                 c.patchJumpToLabel(idx, exit_addr);
             }
+            while (frame.continue_jumps.pop()) |idx| {
+                c.patchJumpToLabel(idx, frame.continue_target);
+            }
             frame.break_jumps.deinit(c.alloc);
+            frame.continue_jumps.deinit(c.alloc);
             c.in_loop_depth = self.prev_in_loop;
         }
     };

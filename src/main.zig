@@ -98,7 +98,7 @@ fn handleSource(init: std.process.Init, gpa: Allocator, arena: Allocator, name: 
             const artifact = try compileSource(init, &vm, gpa, name, source, config.test_mode);
             defer gpa.free(artifact.instructions);
             defer gpa.free(artifact.spans);
-            revo.vm.debug.printDisassembly(artifact, source);
+            try revo.vm.debug.printDisassembly(&vm, artifact, source);
         },
         .lsp => unreachable,
     }
@@ -190,7 +190,7 @@ fn runMain(init: std.process.Init) !void {
                         return error.CompilationError;
                     };
                     defer deserialized.deinit();
-                    revo.vm.debug.printDisassembly(.{
+                    try revo.vm.debug.printDisassembly(&vm, .{
                         .instructions = deserialized.instructions,
                         .spans = deserialized.spans,
                     }, "");

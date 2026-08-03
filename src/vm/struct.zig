@@ -4,6 +4,7 @@ const revo = @import("revo");
 
 const memory = revo.memory;
 const Data = memory.Data;
+const pool = @import("pool.zig");
 
 pub const StructTypeID = usize;
 
@@ -103,6 +104,9 @@ pub const StructInstancePool = struct {
     instances: std.ArrayList(?StructInstance),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(StructInstanceID),
+    first: usize = pool.end,
+    last: usize = pool.end,
+    next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !StructInstancePool {
         var self = StructInstancePool{
@@ -110,11 +114,14 @@ pub const StructInstancePool = struct {
             .instances = undefined,
             .marks = undefined,
             .dead = .empty,
+            .next = undefined,
         };
         self.instances = try std.ArrayList(?StructInstance).initCapacity(alloc, 4);
         errdefer self.instances.deinit(alloc);
         self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
         errdefer self.marks.deinit();
+        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
+        errdefer self.next.deinit(alloc);
 
         return self;
     }
@@ -126,22 +133,14 @@ pub const StructInstancePool = struct {
         self.instances.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
+        self.next.deinit(self.alloc);
     }
 
     pub fn create(self: *StructInstancePool, type_id: StructTypeID, field_count: usize) !StructInstanceID {
         const fields = try self.alloc.alloc(Data, field_count);
         @memset(fields, revo.Data.new.core(.undef));
         errdefer self.alloc.free(fields);
-        if (self.dead.pop()) |id| {
-            self.instances.items[id] = StructInstance{ .type_id = type_id, .fields = fields };
-            return id;
-        }
-        const id: StructInstanceID = @intCast(self.instances.items.len);
-        try self.instances.append(self.alloc, StructInstance{ .type_id = type_id, .fields = fields });
-        if (id >= self.marks.capacity()) {
-            try self.marks.resize(self.instances.items.len, false);
-        }
-        return id;
+        return pool.create(self.alloc, StructInstance, StructInstanceID, &self.instances, &self.marks, &self.dead, &self.first, &self.last, &self.next, .{ .type_id = type_id, .fields = fields });
     }
 
     pub fn get(self: *StructInstancePool, id: StructInstanceID) !*StructInstance {
@@ -163,26 +162,17 @@ pub const StructInstancePool = struct {
     }
 
     pub fn sweep(self: *StructInstancePool) void {
-        const max_dead = self.instances.items.len;
-        self.dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-        self.dead.items.len = 0;
-        for (self.instances.items, 0..) |*maybe_s, idx| {
-            if (maybe_s.* == null) continue;
-            if (self.marks.isSet(idx)) continue;
-            maybe_s.*.?.deinit(self.alloc);
-            maybe_s.* = null;
-            self.dead.appendAssumeCapacity(@intCast(idx));
-        }
-        self.marks.unmanaged.unsetAll();
+        pool.sweep(self.alloc, StructInstance, StructInstanceID, &self.instances, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeStruct);
     }
 
     pub fn bytes(self: *const StructInstancePool) usize {
         var total: usize = 0;
-        for (self.instances.items) |maybe_s| {
-            if (maybe_s) |s| {
-                total += @sizeOf(StructInstance);
-                total += @sizeOf(Data) * s.fields.len;
-            }
+        var id = self.first;
+        while (id != pool.end) {
+            const s = self.instances.items[id].?;
+            total += @sizeOf(StructInstance);
+            total += @sizeOf(Data) * s.fields.len;
+            id = self.next.items[id];
         }
         return total;
     }
@@ -195,3 +185,8 @@ pub const StructInstancePool = struct {
         return self.instances.items.len;
     }
 };
+
+fn freeStruct(s: *StructInstance, alloc: std.mem.Allocator) ?StructInstance {
+    s.deinit(alloc);
+    return null;
+}

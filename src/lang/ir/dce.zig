@@ -28,7 +28,7 @@ const Block = struct { start: usize, end: usize };
 ///
 /// reads may be over-estimated (that keeps more code),
 /// so call/call_field read the whole argument range
-fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
+pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
     const r = inst.result_reg;
     switch (inst.opcode) {
         // zig fmt: off
@@ -38,16 +38,11 @@ fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         .load_const => return 0,
 
         .move => {
-            out[0] = switch (inst.operands[0]) {
-                .inst => |ptr| ptr.result_reg,
-                .reg => |reg| reg,
-            };
+            out[0] = ir.valueReg(inst.operands[0]);
             return 1;
         },
 
-        .range_next => {
-            // loop state sits in the three registers below the outputs; the
-            // ir builder always emits range_next with result_reg >= 3
+        .range_loop => {
             std.debug.assert(r >= 3);
             out[0] = r - 3;
             out[1] = r - 2;
@@ -76,9 +71,18 @@ fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         .halt, .ret, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err,
         .jump_if_err, .store_global, .store_global_const, .store_upval,
         .store_local, .bind_local, .negate, .not, .negate_int, .negate_float,
-        .table_get_atom, .tuple_get_const, .struct_get_offset, .join,
-        .unwrap_result => {
+        .tuple_get_const, .join, .add_int_imm, .sub_int_imm, .mul_int_imm,
+        .band_int_imm, .lt_int_imm, .unwrap_result => {
             out[0] = r;
+            return 1;
+        },
+
+        // the object register comes from the operand, not the result register:
+        // a peephole may point the read at an earlier live load of the object
+        .table_get_atom, .struct_get_offset => {
+            if (inst.operands.len >= 1) {
+                out[0] = ir.valueReg(inst.operands[0]);
+            } else out[0] = r;
             return 1;
         },
 
@@ -114,7 +118,7 @@ fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
 
 /// registers written by an instruction. must be exact: over-estimating
 /// would kill registers that are still live at runtime
-fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
+pub fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
     const r = inst.result_reg;
     switch (inst.opcode) {
         // zig fmt: off
@@ -130,14 +134,13 @@ fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
             return 3;
         },
 
-        .range_next => {
+        .range_loop => {
             out[0] = r;
-            out[1] = r + 1;
-            if (inst.op_arg != 0) {
-                out[2] = r + 2;
-                return 3;
+            if (inst.operands.len > 0) {
+                out[1] = r + 1;
+                return 2;
             }
-            return 2;
+            return 1;
         },
         // zig fmt: on
         else => {
@@ -145,6 +148,19 @@ fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
             return 1;
         },
     }
+}
+
+/// readRegs plus the instruction's `.reg` operands: the complete set of
+/// registers an instruction reads in its lowering encoding
+pub fn readRegsAll(inst: *const ir.IrInst, out: []Register) usize {
+    var cnt = readRegs(inst, out);
+    for (inst.operands) |op| {
+        if (op == .reg and cnt < out.len) {
+            out[cnt] = op.reg;
+            cnt += 1;
+        }
+    }
+    return cnt;
 }
 
 const std = @import("std");
@@ -169,11 +185,10 @@ fn isSideEffect(op: Opcode) bool {
         .store_upval, .table_set, .table_set_atom, .struct_set_method,
         .struct_set_offset, .call, .call_field, .spawn,
         .join, .yield, .ret, .halt,
-        .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err,
-        .jump_if_err, .range_init, .range_next, .unwrap_result
+        .range_init, .unwrap_result
         // zig fmt: on
         => true,
-        else => false,
+        else => ir.isBranch(op),
     };
 }
 
@@ -206,18 +221,13 @@ pub fn dceIr(self: *Compiler) !void {
     @memset(is_block_start, false);
     is_block_start[0] = true;
     for (insts) |inst| {
-        switch (inst.opcode) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
-                if (inst.op_arg < n) is_block_start[inst.op_arg] = true;
-            },
-            else => {},
+        if (ir.isBranch(inst.opcode)) {
+            if (inst.op_arg < n) is_block_start[inst.op_arg] = true;
         }
     }
     for (insts, 0..) |inst, i| {
-        if (i + 1 < n) switch (inst.opcode) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err, .ret, .halt => is_block_start[i + 1] = true,
-            else => {},
-        };
+        if (i + 1 < n and (ir.isBranch(inst.opcode) or inst.opcode == .ret or inst.opcode == .halt))
+            is_block_start[i + 1] = true;
     }
 
     var blocks = try std.ArrayList(Block).initCapacity(self.alloc, 0);
@@ -238,12 +248,7 @@ pub fn dceIr(self: *Compiler) !void {
 
     // registers can hold values written on multiple control-flow paths,
     // so register liveness is per-block (see readRegs/writeRegs)
-    var max_reg: usize = 0;
-    for (insts) |inst| {
-        const r = @as(usize, inst.result_reg);
-        if (r + 2 > max_reg) max_reg = r + 2;
-    }
-    const reg_count = max_reg + 1;
+    const reg_count = ir.maxRegister(insts) + 1;
 
     // there's no concise way to un-ugly this sorry
     var block_uses = try self.alloc.alloc(bool, nb * reg_count);
@@ -300,15 +305,12 @@ pub fn dceIr(self: *Compiler) !void {
                     }
                 }
             }
-            switch (inst.opcode) {
-                .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
-                    const target = inst.op_arg;
-                    if (target < n and !live[target]) {
-                        live[target] = true;
-                        changed = true;
-                    }
-                },
-                else => {},
+            if (ir.isBranch(inst.opcode)) {
+                const target = inst.op_arg;
+                if (target < n and !live[target]) {
+                    live[target] = true;
+                    changed = true;
+                }
             }
         }
 
@@ -324,13 +326,7 @@ pub fn dceIr(self: *Compiler) !void {
             for (b.start..b.end) |i| {
                 const inst = insts[i];
                 if (live[i]) {
-                    var rcnt = readRegs(inst, read_buf);
-                    for (inst.operands) |op| {
-                        if (op == .reg and rcnt < reg_count) {
-                            read_buf[rcnt] = op.reg;
-                            rcnt += 1;
-                        }
-                    }
+                    const rcnt = readRegsAll(inst, read_buf);
                     std.debug.assert(rcnt <= reg_count);
                     for (read_buf[0..rcnt]) |reg| {
                         if (!written_regs[reg]) block_uses[base + @as(usize, reg)] = true;
@@ -343,7 +339,7 @@ pub fn dceIr(self: *Compiler) !void {
         }
 
         // block liveness: live_out[b] = union of live_in[succ];
-        // live_in[b] = reads[b] | (live_out[b] & ~writes[b])
+        // live_in[b] = reads[b] | (live_out[b] & !writes[b])
         //
         // live_in is warm-started (not reset)
         // liveness only grows across outer iterations, so the previous state is a lower bound and the
@@ -355,26 +351,24 @@ pub fn dceIr(self: *Compiler) !void {
                 const base = bi * reg_count;
                 const last_inst = insts[b.end - 1];
                 @memset(next_out, false);
-                switch (last_inst.opcode) {
-                    .jump => {
-                        const tb = block_of[last_inst.op_arg];
-                        for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
-                    },
-                    .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
-                        const tb = block_of[last_inst.op_arg];
-                        for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
-                        if (b.end < n) {
-                            const fb = block_of[b.end];
-                            for (0..reg_count) |reg| next_out[reg] = next_out[reg] or live_in[fb * reg_count + reg];
-                        }
-                    },
-                    .ret, .halt => {},
-                    else => {
-                        if (b.end < n) {
-                            const fb = block_of[b.end];
-                            for (0..reg_count) |reg| next_out[reg] = live_in[fb * reg_count + reg];
-                        }
-                    },
+
+                if (last_inst.opcode == .jump) {
+                    const tb = block_of[last_inst.op_arg];
+                    for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
+                } else if (ir.isBranch(last_inst.opcode)) {
+                    const tb = block_of[last_inst.op_arg];
+                    for (0..reg_count) |reg| next_out[reg] = live_in[tb * reg_count + reg];
+                    if (b.end < n) {
+                        const fb = block_of[b.end];
+                        for (0..reg_count) |reg| next_out[reg] = next_out[reg] or live_in[fb * reg_count + reg];
+                    }
+                } else if (last_inst.opcode == .ret or last_inst.opcode == .halt) {
+                    // no successors
+                } else {
+                    if (b.end < n) {
+                        const fb = block_of[b.end];
+                        for (0..reg_count) |reg| next_out[reg] = live_in[fb * reg_count + reg];
+                    }
                 }
                 for (0..reg_count) |reg| live_out[base + reg] = next_out[reg];
                 for (0..reg_count) |reg| {
@@ -410,13 +404,7 @@ pub fn dceIr(self: *Compiler) !void {
                     }
                 }
                 if (live[j]) {
-                    var rcnt = readRegs(inst, read_buf);
-                    for (inst.operands) |op| {
-                        if (op == .reg and rcnt < reg_count) {
-                            read_buf[rcnt] = op.reg;
-                            rcnt += 1;
-                        }
-                    }
+                    const rcnt = readRegsAll(inst, read_buf);
                     std.debug.assert(rcnt <= reg_count);
                     for (read_buf[0..rcnt]) |reg| cur[reg] = true;
                 }
@@ -427,53 +415,11 @@ pub fn dceIr(self: *Compiler) !void {
     // -- [pass 3] ------------------------------------------------------------
     // compact
     //
-    // keep live instructions, destroy dead ones
-    // also build a remap from old index -> new index for every old
-    // position. for dead instructions remap points to the position
-    // that the next live instruction occupies, or the shrink-to
-    // length if none follow. this ensures that function prototype
-    // addr fields that happened to point at a load_const (now dead)
-    // still land at the correct new position
-    //
-    // spans are kept in 1:1 correspondence with instructions, so
-    // dead instruction spans are removed too
-    //
-    var new_index = try self.alloc.alloc(usize, n);
-    defer self.alloc.free(new_index);
-    var write: usize = 0;
-    for (insts, 0..) |inst, i| {
-        if (live[i]) {
-            new_index[i] = write;
-            self.ir_builder.instructions.items[write] = inst;
-            self.spans.items[write] = self.spans.items[i];
-            write += 1;
-        } else {
-            new_index[i] = write;
-            self.alloc.free(inst.operands);
-            self.alloc.destroy(inst);
-        }
-    }
-    self.ir_builder.instructions.shrinkAndFree(self.alloc, write);
-    self.spans.shrinkAndFree(self.alloc, write);
-
-    // -- [pass 4] ------------------------------------------------------------
-    // remap jump targets, stored as instruction indices in op_arg
-    for (self.ir_builder.instructions.items) |inst| {
-        switch (inst.opcode) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
-                inst.op_arg = new_index[inst.op_arg];
-            },
-            else => {},
-        }
-    }
-
-    // -- [pass 5] ------------------------------------------------------------
-    // remap function prototype addr fields which are
-    // instruction indices set before dce ran
-    for (self.pending_prototypes.items) |proto_id| {
-        const proto = &self.vm.functions.prototypes.items[proto_id];
-        proto.addr = @intCast(new_index[proto.addr]);
-    }
+    // keep live instructions, destroy dead ones; spans stay in 1:1
+    // correspondence with instructions, and jump targets / prototype addrs
+    // (instruction indices) are remapped. for dead positions the remap points
+    // at the next live slot so stale addresses still land on real code.
+    try ir.compactIr(self, n, live);
 }
 
 const testing = revo.lang.testing;
@@ -507,23 +453,19 @@ test "dce: arithmetic with unused result is eliminated" {
     }
 }
 
-test "dce: used arithmetic is kept" {
+test "dce regression tests" {
     try t.top_number(
         \\let x = 1 + 2
         \\x
     , 3);
-}
 
-test "dce: program with dead branches still works" {
     try t.top_number(
         \\if 1 == 1
         \\    42
         \\else
         \\    1 + 2
     , 42);
-}
 
-test "dce: function with dead expressions works" {
     try t.top_number(
         \\fn f() do
         \\    let _ = 1 + 2
@@ -532,9 +474,7 @@ test "dce: function with dead expressions works" {
         \\end
         \\f()
     , 42);
-}
 
-test "dce: nested unused expressions are eliminated" {
     try t.top_number(
         \\do
         \\    1
@@ -542,9 +482,88 @@ test "dce: nested unused expressions are eliminated" {
         \\    3
         \\end
     , 3);
+
+    try t.top_number("1 + 2 * 3", 7);
+    try t.top_string(
+        \\let s = "hello"
+        \\s
+    , "hello");
+    try t.top_number(
+        \\let x = 10
+        \\x + 5
+    , 15);
+
+    try t.top_number(
+        \\let x = 1 + 2
+        \\let _ = x
+        \\99
+    , 99);
+
+    // the then and else branches write the same shared branch register,
+    // so a linear last-writer scan only keeps one of them. both must
+    // survive or the if-expression returns a raw number instead of a bool
+    try t.top_number(
+        \\let hold_count = 9297
+        \\let queue_count = 23246
+        \\fn f() do
+        \\  if queue_count == 23246
+        \\    hold_count == 9297
+        \\  else
+        \\    :false
+        \\end
+        \\if f() 1 else 0
+    , 1);
+
+    // a while loop's break value flows back through a register; dce must
+    // not treat the loop result as dead just because it is written on both
+    // the loop-back and fall-through paths
+    try t.top_number(
+        \\fn f() do
+        \\  let i = 0
+        \\  while i < 3 do
+        \\    i = i + 1
+        \\  end
+        \\  i
+        \\end
+        \\f()
+    , 3);
+
+    // the same loop but the break value is consumed, so its move must live
+    try t.top_number(
+        \\let r = loop do
+        \\  break 42
+        \\end
+        \\r
+    , 42);
+
+    // a function whose dead leading arithmetic is eliminated, with a
+    // conditional jump inside that must still reach the right branches
+    try t.top_number(
+        \\fn f(x) do
+        \\  7 * 8
+        \\  9 + 10
+        \\  if x == 1
+        \\    10
+        \\  else
+        \\    20
+        \\  end
+        \\if f(1) 100 else 200
+    , 100);
+
+    // the function's first statement is a discarded expression, so the
+    // prototype addr points at a now-dead instruction, it has2 be remapped
+    // or the call lands on the wrong bytecode
+    try t.top_number(
+        \\fn f() do
+        \\  1 + 2
+        \\  42
+        \\end
+        \\f()
+    , 42);
 }
 
 test "dce: side-effecting calls are never eliminated" {
+    // yeah i know. too hard to figure out whether it really side-effects or not
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -562,59 +581,6 @@ test "dce: side-effecting calls are never eliminated" {
         if (inst.op == .call) has_call = true;
     }
     try std.testing.expect(has_call);
-}
-
-test "dce: normal program works unchanged" {
-    try t.top_number("1 + 2 * 3", 7);
-    try t.top_string(
-        \\let s = "hello"
-        \\s
-    , "hello");
-    try t.top_number(
-        \\let x = 10
-        \\x + 5
-    , 15);
-}
-
-test "dce: store to discarded local is eliminated" {
-    try t.top_number(
-        \\let x = 1 + 2
-        \\let _ = x
-        \\99
-    , 99);
-}
-
-test "dce: if-else branch values both survive the merge" {
-    // the then and else branches write the same shared branch register,
-    // so a linear last-writer scan only keeps one of them. both must
-    // survive or the if-expression returns a raw number instead of a bool
-    try t.top_number(
-        \\let hold_count = 9297
-        \\let queue_count = 23246
-        \\fn f() do
-        \\  if queue_count == 23246
-        \\    hold_count == 9297
-        \\  else
-        \\    :false
-        \\end
-        \\if f() 1 else 0
-    , 1);
-}
-
-test "dce: loop-back result register survives" {
-    // a while loop's break value flows back through a register; dce must
-    // not treat the loop result as dead just because it is written on both
-    // the loop-back and fall-through paths
-    try t.top_number(
-        \\fn f() do
-        \\  let i = 0
-        \\  while i < 3 do
-        \\    i = i + 1
-        \\  end
-        \\  i
-        \\end
-        \\f()
-    , 3);
 }
 
 test "dce: dead move after break is eliminated" {
@@ -640,16 +606,6 @@ test "dce: dead move after break is eliminated" {
     }
 }
 
-test "dce: needed loop-break move survives" {
-    // the same loop but the break value is consumed, so its move must live
-    try t.top_number(
-        \\let r = loop do
-        \\  break 42
-        \\end
-        \\r
-    , 42);
-}
-
 test "dce: dead statements after a break are eliminated" {
     // `1 + 2` is pure arithmetic whose result nothing reads
     var vm = try VM.init(testRuntime());
@@ -668,22 +624,6 @@ test "dce: dead statements after a break are eliminated" {
     for (built.ok.instructions) |inst| {
         if (inst.op == .add) return error.TestUnexpectedResult;
     }
-}
-
-test "dce: jump targets land correctly after dead code" {
-    // a function whose dead leading arithmetic is eliminated, with a
-    // conditional jump inside that must still reach the right branches
-    try t.top_number(
-        \\fn f(x) do
-        \\  7 * 8
-        \\  9 + 10
-        \\  if x == 1
-        \\    10
-        \\  else
-        \\    20
-        \\  end
-        \\if f(1) 100 else 200
-    , 100);
 }
 
 test "dce: folded constants and dead operands are both removed" {
@@ -706,17 +646,4 @@ test "dce: folded constants and dead operands are both removed" {
             else => {},
         }
     }
-}
-
-test "dce: function entry pointing at dead code is remapped" {
-    // the function's first statement is a discarded expression, so the
-    // prototype addr points at a now-dead instruction; it must be remapped
-    // or the call lands on the wrong bytecode
-    try t.top_number(
-        \\fn f() do
-        \\  1 + 2
-        \\  42
-        \\end
-        \\f()
-    , 42);
 }

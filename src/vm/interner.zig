@@ -108,9 +108,9 @@ pub fn mark(self: *Interner, id: memory.StringID) void {
 }
 
 pub fn sweep(self: *Interner) void {
-    const max_dead = self.slots.items.len;
-    self.dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-    self.dead.items.len = 0;
+    const existing_dead = self.dead.items.len;
+    const max_new_dead = self.slots.items.len;
+    self.dead.ensureTotalCapacity(self.alloc, existing_dead + max_new_dead) catch return;
     for (self.slots.items, 0..) |*maybe_s, idx| {
         const s = maybe_s.* orelse continue;
         if (self.marks.isSet(idx)) continue;

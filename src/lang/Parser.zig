@@ -941,7 +941,7 @@ fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end
     return self.buildRangeExpr(start, expr, step);
 }
 
-/// +inf for positive step, -inf for negative step (so range_next never terminates)
+/// +inf for positive step, -inf for negative step (so range_loop never terminates)
 fn sentinelForStep(step: *const Node) f64 {
     const val = switch (step.expr) {
         .number => step.expr.number.value,

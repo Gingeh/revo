@@ -48,9 +48,46 @@ pub fn compare(vm: *VM, lh: Data, rh: Data) std.math.Order {
     return .gt;
 }
 
-pub fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
+pub inline fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
     const lhs = VM.regRead(slots, base, instr.b);
     const rhs = VM.regRead(slots, base, instr.c);
+
+    // fast path: both values are numbers
+    //
+    // for eq/neq: either being unboxed means a number is involved; a boxed
+    // non-number bitcasts to a NaN, and NaN != NaN below does the correct
+    // false/true result (tags differ). for ordered ops require both unboxed,
+    // which guarantees finite numbers (exponent all-ones = inf/nan overlaps
+    // BOX_MASK), so no NaN branch is needed
+    if (comptime op == .eq or op == .neq) {
+        if ((lhs.bits & rhs.bits & BOX_MASK) != BOX_MASK) {
+            const lf: f64 = @bitCast(lhs.bits);
+            const rf: f64 = @bitCast(rhs.bits);
+            if (lf != lf or rf != rf) {
+                VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .neq));
+                return;
+            }
+            const is_eq = lf == rf;
+            VM.regWrite(slots, base, instr.a, Data.new.boolean(if (op == .eq) is_eq else !is_eq));
+            return;
+        }
+    } else {
+        if ((lhs.bits & BOX_MASK) != BOX_MASK and
+            (rhs.bits & BOX_MASK) != BOX_MASK)
+        {
+            const lf: f64 = @bitCast(lhs.bits);
+            const rf: f64 = @bitCast(rhs.bits);
+            const result = switch (op) {
+                .lt => lf < rf,
+                .gt => lf > rf,
+                .lte => lf <= rf,
+                .gte => lf >= rf,
+                else => unreachable,
+            };
+            VM.regWrite(slots, base, instr.a, Data.new.boolean(result));
+            return;
+        }
+    }
 
     // per IEEE 754 nan is unordered so all comparisons with NaN are false and neq is true
     if (lhs.asNum()) |ln| {

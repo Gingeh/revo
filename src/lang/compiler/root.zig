@@ -17,6 +17,8 @@ const expander = @import("../expander.zig");
 const flow = @import("flow.zig");
 const fold = @import("../ir/fold.zig");
 const dce = @import("../ir/dce.zig");
+const peephole = @import("../ir/peephole.zig");
+const promote = @import("../ir/promote.zig");
 pub const ir = @import("../ir/root.zig");
 const state_mod = @import("state.zig");
 
@@ -128,6 +130,8 @@ pub const Compiler = struct {
     type_annotations: ?*const std.AutoHashMap(*const Node, types.TypeInfo) = null,
     pending_prototypes: std.ArrayList(revo.PrototypeID),
     declared_globals: std.StringHashMap(void),
+    current_proto: revo.PrototypeID = 0,
+    fn_depth: usize = 0,
 
     pub fn init(
         vm: *VM,
@@ -162,7 +166,10 @@ pub const Compiler = struct {
         self.slot_allocators.deinit(self.alloc);
         self.failure_reports.deinit(self.alloc);
         self.spans.deinit(self.alloc);
-        for (self.loop_stack.items) |*frame| frame.break_jumps.deinit(self.alloc);
+        for (self.loop_stack.items) |*frame| {
+            frame.break_jumps.deinit(self.alloc);
+            frame.continue_jumps.deinit(self.alloc);
+        }
         self.loop_stack.deinit(self.alloc);
         self.test_suite_names.deinit(self.alloc);
         var layout_it = self.struct_layouts.iterator();
@@ -191,6 +198,8 @@ pub const Compiler = struct {
     pub fn finishArtifact(self: *Compiler) !Artifact {
         try fold.foldIr(self);
         try dce.dceIr(self);
+        try peephole.peepholeIr(self);
+        try promote.promoteLoopCarried(self);
         const lowered = try self.lowerToVerifyBytecode();
         const instr_copy = try self.runtime_alloc.dupe(Instruction, lowered);
         defer self.alloc.free(lowered);
@@ -220,6 +229,7 @@ pub const Compiler = struct {
         try self.ir_builder.instructions.append(self.alloc, inst);
         inst.result_reg = result_reg;
         inst.op_arg = op_arg;
+        inst.fn_depth = @intCast(self.fn_depth);
         if (push_res) try self.value_stack.append(self.alloc, inst);
         return inst;
     }
@@ -357,18 +367,15 @@ pub const Compiler = struct {
                 const opnd = try self.pop();
                 _ = try self.record(op, &.{.{ .inst = opnd }}, true, result_reg, 0);
             },
+            .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => {
+                std.debug.assert(d > 0);
+                result_reg = try toRegister(d - 1);
+                try self.recordStackOp(op, 1, 1, result_reg, op_arg);
+            },
             .load_global, .load_stdlib_global, .load_local, .load_upval, .closure, .table_new, .struct_new, .load_nil, .load_small_int, .load_const => {
                 result_reg = try toRegister(d);
                 d += 1;
-                if (op == .load_const) {
-                    try self.recordLoad(.load_const, result_reg, op_arg);
-                } else if (op == .load_nil) {
-                    try self.recordLoad(.load_nil, result_reg, 0);
-                } else if (op == .load_small_int) {
-                    try self.recordLoad(.load_small_int, result_reg, op_arg);
-                } else {
-                    try self.recordStackOp(op, 0, 1, result_reg, op_arg);
-                }
+                try self.recordStackOp(op, 0, 1, result_reg, op_arg);
             },
             .halt, .ret => {
                 result_reg = if (d == 0) 0 else try toRegister(d - 1);
@@ -476,11 +483,10 @@ pub const Compiler = struct {
                 d -= 3;
                 try self.recordStackOp(op, 3, 0, result_reg, op_arg);
             },
-            .range_next => {
+            .range_loop => {
                 std.debug.assert(d >= 3);
-                result_reg = try toRegister(d);
-                d += 3;
-                try self.recordStackOp(op, 1, 3, result_reg, op_arg);
+                result_reg = try toRegister(d - 3);
+                try self.recordStackOp(op, 0, 0, result_reg, op_arg);
             },
             .unwrap_result => {
                 std.debug.assert(d > 0);
@@ -504,7 +510,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileRoot(self: *Compiler, expr: *const Node) InternalLowerError!void {
-        try self.compileFn(&.{}, null, expr, "__main", null, &.{});
+        try self.compileFn(&.{}, null, expr, "__main", null, &.{}, null);
         if (self.failure_reports.items.len != 0) return error.LoweringFailed;
         try self.emit(.call, 0);
         try self.emit(.halt, 0);
@@ -625,9 +631,6 @@ pub const Compiler = struct {
                     "union type expression used as a value",
                 );
 
-                try self.compile(b.left, true);
-                try self.compile(b.right, true);
-
                 const left_type = type_check.inferExprType(self, b.left);
                 const right_type = type_check.inferExprType(self, b.right);
 
@@ -663,6 +666,22 @@ pub const Compiler = struct {
                     inline else => |tag| @field(Opcode, @tagName(tag)),
                 };
 
+                // a constant int RHS folds into the opcode as an immediate,
+                // skipping its materialization (and a dispatch at runtime).
+                // when both operands are literals, keep the two-register form
+                // so the constant fold pass still collapses them at compile time
+                if (both_numeric and !any_float and immInt(b.left) == null) {
+                    if (immOpFor(b.op)) |op_imm| {
+                        if (immInt(b.right)) |k| {
+                            try self.compile(b.left, true);
+                            try self.emit(op_imm, k);
+                            return;
+                        }
+                    }
+                }
+
+                try self.compile(b.left, true);
+                try self.compile(b.right, true);
                 try self.emit(specialized_op, 0);
             },
             .and_expr => |v| try flow.compileAnd(self, v.left, v.right),
@@ -791,7 +810,7 @@ pub const Compiler = struct {
             .break_expr => |b| try flow.compileBreak(self, expr, b.value, b.label),
             .continue_expr => |c| try flow.compileContinue(self, expr, c.value, c.label),
             .labeled_block => |lb| try flow.compileLabeledBlock(self, lb.label, lb.body),
-            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
+            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params, null),
             .match_expr => |v| try flow.compileMatch(self, v.subject, v.arms),
             .tuple_pattern => return self.fail(
                 .UnsupportedSyntax,
@@ -1363,6 +1382,7 @@ pub const Compiler = struct {
                     name,
                     null,
                     binding.value.expr.fn_expr.type_params,
+                    null,
                 );
             } else try self.compile(binding.value, true);
 
@@ -1417,9 +1437,11 @@ pub const Compiler = struct {
         name: []const u8,
         loop_sym: ?revo.AtomID,
         type_params: []const []const u8,
+        self_type: ?types.TypeInfo,
     ) InternalLowerError!void {
         try self.validateName(name, body.span);
 
+        self.fn_depth += 1;
         const jump_over = try self.jump(.jump);
         const body_addr: ProgramCounter = @intCast(self.irLen());
         const caller_registers = self.active_registers;
@@ -1429,6 +1451,7 @@ pub const Compiler = struct {
             self.active_registers = caller_registers;
             self.max_registers = caller_max_registers;
             self.value_stack.shrinkRetainingCapacity(caller_value_stack_len);
+            self.fn_depth -= 1;
         }
 
         const own_sig = !(ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
@@ -1466,6 +1489,14 @@ pub const Compiler = struct {
                 try fn_state.type_hints.append(self.alloc, .{
                     .name = param.name,
                     .type_info = try type_check.evalTypeExpr(self, type_name),
+                });
+            } else if (self_type != null and std.mem.eql(u8, param.name, "self")) {
+                // methods know their receiver's struct type even when `self`
+                // is written untyped, so `self.x` lowers to struct_get_offset
+                // instead of a hashed table lookup
+                try fn_state.type_hints.append(self.alloc, .{
+                    .name = param.name,
+                    .type_info = self_type.?,
                 });
             }
         }
@@ -1505,6 +1536,7 @@ pub const Compiler = struct {
         if (loop_sym) |sym| try flow.emitLoopRecurse(self, params.len, sym) else try self.emit(.ret, 1);
 
         const fn_register_count = self.max_registers;
+        self.fn_depth -= 1;
         self.active_registers = caller_registers;
         self.max_registers = caller_max_registers;
         //
@@ -1537,6 +1569,7 @@ pub const Compiler = struct {
             .const_local_bits = &.{},
         });
         try self.pending_prototypes.append(self.alloc, proto_id);
+        self.current_proto = proto_id;
         try self.emit(.closure, proto_id);
 
         if (!own_sig) {
@@ -1622,3 +1655,26 @@ pub const Compiler = struct {
         return error.LoweringFailed;
     }
 };
+
+/// if `node` is an int literal in 0..=u32::MAX, return its value, else null.
+/// the fold range matches what load_small_int/load_const cover, so folding
+/// into an immediate operand never changes the value the op sees
+fn immInt(node: *Node) ?u32 {
+    if (node.expr != .number or node.expr.number.is_float) return null;
+    const n = node.expr.number.value;
+    if (n < 0 or n > std.math.maxInt(u32) or @trunc(n) != n) return null;
+    return @intFromFloat(n);
+}
+
+/// the immediate-operand opcode for a binop that folds a constant int RHS.
+/// returns null for float/`div`/`pow`/`concat` (no imm form, or float math)
+fn immOpFor(op: ast.BinOp) ?Opcode {
+    return switch (op) {
+        .add => .add_int_imm,
+        .sub => .sub_int_imm,
+        .mul => .mul_int_imm,
+        .band => .band_int_imm,
+        .lt => .lt_int_imm,
+        else => null,
+    };
+}

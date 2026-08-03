@@ -38,7 +38,6 @@ test {
     _ = @import("interner.zig");
     _ = @import("memory.zig");
     _ = @import("module.zig");
-    _ = @import("module.zig");
     _ = @import("opcode.zig");
     _ = @import("table.zig");
     _ = @import("tests.zig");

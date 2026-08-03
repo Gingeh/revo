@@ -5,6 +5,7 @@ const revo = @import("revo");
 const memory = revo.memory;
 const Data = revo.Data;
 const testing = revo.lang.testing;
+const pool = @import("pool.zig");
 
 pub const Tuple = struct {
     alloc: std.mem.Allocator,
@@ -25,6 +26,9 @@ pub const TuplePool = struct {
     tuples: std.ArrayList(?Tuple),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(memory.TupleID),
+    first: usize = pool.end,
+    last: usize = pool.end,
+    next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !TuplePool {
         var self = TuplePool{
@@ -32,11 +36,14 @@ pub const TuplePool = struct {
             .tuples = undefined,
             .marks = undefined,
             .dead = .empty,
+            .next = undefined,
         };
         self.tuples = try std.ArrayList(?Tuple).initCapacity(alloc, 4);
         errdefer self.tuples.deinit(alloc);
         self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
         errdefer self.marks.deinit();
+        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
+        errdefer self.next.deinit(alloc);
 
         return self;
     }
@@ -48,21 +55,13 @@ pub const TuplePool = struct {
         self.tuples.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
+        self.next.deinit(self.alloc);
     }
 
     pub fn create(self: *TuplePool, items: []const Data) !memory.TupleID {
         const owned = try self.alloc.dupe(Data, items);
         errdefer self.alloc.free(owned);
-        if (self.dead.pop()) |id| {
-            self.tuples.items[id] = .{ .alloc = self.alloc, .items = owned };
-            return id;
-        }
-        const id: memory.TupleID = @intCast(self.tuples.items.len);
-        try self.tuples.append(self.alloc, .{ .alloc = self.alloc, .items = owned });
-        if (id >= self.marks.capacity()) {
-            try self.marks.resize(self.tuples.items.len, false);
-        }
-        return id;
+        return pool.create(self.alloc, Tuple, memory.TupleID, &self.tuples, &self.marks, &self.dead, &self.first, &self.last, &self.next, .{ .alloc = self.alloc, .items = owned });
     }
 
     pub fn get(self: *TuplePool, id: memory.TupleID) !*Tuple {
@@ -80,26 +79,17 @@ pub const TuplePool = struct {
     }
 
     pub fn sweep(self: *TuplePool) void {
-        const max_dead = self.tuples.items.len;
-        self.dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-        self.dead.items.len = 0;
-        for (self.tuples.items, 0..) |*maybe_t, idx| {
-            if (maybe_t.* == null) continue;
-            if (self.marks.isSet(idx)) continue;
-            maybe_t.*.?.deinit();
-            maybe_t.* = null;
-            self.dead.appendAssumeCapacity(@intCast(idx));
-        }
-        self.marks.unmanaged.unsetAll();
+        pool.sweep(self.alloc, Tuple, memory.TupleID, &self.tuples, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeTuple);
     }
 
     pub fn bytes(self: *const TuplePool) usize {
         var total: usize = 0;
-        for (self.tuples.items) |maybe_t| {
-            if (maybe_t) |t| {
-                total += 32;
-                total += @sizeOf(Data) * t.items.len;
-            }
+        var id = self.first;
+        while (id != pool.end) {
+            const t = self.tuples.items[id].?;
+            total += 32;
+            total += @sizeOf(Data) * t.items.len;
+            id = self.next.items[id];
         }
         return total;
     }
@@ -112,6 +102,11 @@ pub const TuplePool = struct {
         return self.tuples.items.len;
     }
 };
+
+fn freeTuple(t: *Tuple, _: std.mem.Allocator) ?Tuple {
+    t.deinit();
+    return null;
+}
 
 test "parses tuple literals and keeps paren grouping distinct" {
     try testing.expectPrinted("(1, 2, 3)", "(tuple 1 2 3)");

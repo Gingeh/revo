@@ -43,6 +43,11 @@ pub const Opcode = enum(u8) {
     shl_int, // "R[a] <- (int)R[b] << (int)R[c] (wraps)"
     shr_int, // "R[a] <- (int)R[b] >> (int)R[c]"
     div_int, // "R[a] <- (int)R[b] // (int)R[c] (floor)"
+    // typed arith with an immediate operand (bx = constant)
+    add_int_imm, // "R[a] <- (int)R[b] + bx"
+    sub_int_imm, // "R[a] <- (int)R[b] - bx"
+    mul_int_imm, // "R[a] <- (int)R[b] * bx"
+    band_int_imm, // "R[a] <- (int)R[b] & bx"
     div_float, // "R[a] <- (float)R[b] / (float)R[c]"
     div_floor_float, // "R[a] <- floor((float)R[b] / (float)R[c])"
     pow, // "R[a] <- R[b] ^ R[c] (int if both integral, else float)"
@@ -62,6 +67,8 @@ pub const Opcode = enum(u8) {
     gt_int, // "R[a] <- (int)R[b] > (int)R[c]"
     lte_int, // "R[a] <- (int)R[b] <= (int)R[c]"
     gte_int, // "R[a] <- (int)R[b] >= (int)R[c]"
+    // typed compare with an immediate operand (bx = constant)
+    lt_int_imm, // "R[a] <- (int)R[b] < bx"
     @"and", // "R[a] <- bool(R[b] and R[c])"
     @"or", // "R[a] <- bool(R[b] or R[c])"
     not, // "R[a] <- not R[b]"
@@ -105,12 +112,12 @@ pub const Opcode = enum(u8) {
     /// - uses 3 consecutive registers for loop state
     range_init,
 
-    /// advance range iterator and emit value/index
+    /// fused range advance + check + back-branch (bottom-tested)
     ///
     /// R[a]   out: current iteration value (the x in for x in ...)
     /// R[b]   in : current (loop state register)
     /// R[c]   out: current 0-based index (or 0 if not needed)
-    /// bx     in : register index to write `has_next` boolean
+    /// bx     in : back-jump target (instruction index)
     ///
     /// expects loop state in consecutive registers starting at R[b]:
     /// R[b]   = current
@@ -119,11 +126,10 @@ pub const Opcode = enum(u8) {
     ///
     /// behavior:
     /// - checks if current has passed limit (leftinclusive rightexclusive)
-    /// - writes has_next to R[bx]
-    /// - writes current to R[a] (value for loop body)
-    /// - writes index to R[c] (if c != 0)
-    /// - advances current += step, index += 1 if has_next
-    range_next,
+    /// - if has_next: writes current to R[a], writes index to R[c],
+    ///   advances current += step, index += 1, and jumps to bx
+    /// - else: falls through (loop done)
+    range_loop,
 
     /// R[a] is (:ok, x)? extract x into R[a]; or (:err, e)? ret; otherwise pass through
     /// bx = 0: propagate errors

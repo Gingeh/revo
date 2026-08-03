@@ -24,6 +24,7 @@ const memory = revo.memory;
 const Data = memory.Data;
 const testing = revo.lang.testing;
 const compare = @import("compare.zig").compare;
+const pool = @import("pool.zig");
 
 pub const NULL_ID = std.math.maxInt(u32);
 
@@ -32,6 +33,9 @@ pub const TablePool = struct {
     tables: std.ArrayList(?Table),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(memory.TableID),
+    first: usize = pool.end,
+    last: usize = pool.end,
+    next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !TablePool {
         var self = TablePool{
@@ -39,11 +43,14 @@ pub const TablePool = struct {
             .tables = undefined,
             .marks = undefined,
             .dead = .empty,
+            .next = undefined,
         };
         self.tables = try std.ArrayList(?Table).initCapacity(alloc, 4);
         errdefer self.tables.deinit(alloc);
         self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
         errdefer self.marks.deinit();
+        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
+        errdefer self.next.deinit(alloc);
 
         return self;
     }
@@ -55,18 +62,28 @@ pub const TablePool = struct {
         self.tables.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
+        self.next.deinit(self.alloc);
     }
 
     pub fn create(self: *TablePool) !memory.TableID {
         if (self.dead.pop()) |id| {
-            self.tables.items[id] = Table.init(self.alloc);
+            const t = &self.tables.items[id].?;
+            t.array.clearRetainingCapacity();
+            t.hash.deinit(self.alloc);
+            t.metatable = null;
+            t.ic_version = 0;
+            t.alloc = self.alloc;
+            self.marks.unset(id);
+            pool.relink(&self.first, &self.last, &self.next, id);
             return id;
         }
         const id: memory.TableID = @intCast(self.tables.items.len);
-        try self.tables.append(self.alloc, Table.init(self.alloc));
         if (id >= self.marks.capacity()) {
-            try self.marks.resize(self.tables.items.len, false);
+            try self.marks.resize(id + 1, false);
         }
+        try self.tables.append(self.alloc, Table.init(self.alloc));
+        errdefer _ = self.tables.pop();
+        try pool.link(&self.first, &self.last, &self.next, self.alloc, id);
         return id;
     }
 
@@ -89,23 +106,15 @@ pub const TablePool = struct {
     }
 
     pub fn sweep(self: *TablePool) void {
-        const max_dead = self.tables.items.len;
-        self.dead.ensureTotalCapacity(self.alloc, max_dead) catch return;
-        self.dead.items.len = 0;
-        for (self.tables.items, 0..) |*maybe_t, idx| {
-            if (maybe_t.* == null) continue;
-            if (self.marks.isSet(idx)) continue;
-            maybe_t.*.?.deinit();
-            maybe_t.* = null;
-            self.dead.appendAssumeCapacity(@intCast(idx));
-        }
-        self.marks.unmanaged.unsetAll();
+        pool.sweep(self.alloc, Table, memory.TableID, &self.tables, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeTable);
     }
 
     pub fn bytes(self: *const TablePool) usize {
         var total: usize = 0;
-        for (self.tables.items) |maybe_t| {
-            if (maybe_t) |t| total += t.bytes();
+        var id = self.first;
+        while (id != pool.end) {
+            total += self.tables.items[id].?.bytes();
+            id = self.next.items[id];
         }
         return total;
     }
@@ -118,6 +127,29 @@ pub const TablePool = struct {
         return self.tables.items.len;
     }
 };
+
+// keep the dense array buffer across GC sweeps for reused tables (bounded by
+// MAX_RETAINED_ARRAY so pathological workloads can't pin unbounded memory);
+// the hash buckets are always freed. integer-keyed workloads that refill the
+// same small tables repeatedly skip the per-fill
+// growth reallocation and its memcpy
+//
+// todo ab bench towers storage nogc
+const MAX_RETAINED_ARRAY = 16;
+
+fn freeTable(t: *Table, alloc: std.mem.Allocator) ?Table {
+    if (t.array.capacity > MAX_RETAINED_ARRAY) {
+        t.array.deinit(t.alloc);
+        t.array = .empty;
+    } else {
+        t.array.clearRetainingCapacity();
+    }
+    t.hash.deinit(alloc);
+    t.metatable = null;
+    t.ic_version = 0;
+    t.alloc = alloc;
+    return t.*;
+}
 
 pub const Table = struct {
     fn hashKey(key: Data) u64 {
@@ -345,8 +377,10 @@ pub const Table = struct {
     }
 
     fn integerArrayIndex(key: Data) ?usize {
+        // asNum never yields inf/nan (their bit patterns collide with the
+        // box mask), so only the sign and wholeness checks are needed
         const n = key.asNum() orelse return null;
-        return if (n < 0 or !std.math.isFinite(n) or @floor(n) != n) null else @as(usize, @intFromFloat(n));
+        return if (n < 0 or @floor(n) != n) null else @as(usize, @intFromFloat(n));
     }
 
     pub fn put(self: *Table, table_id: memory.TableID, vm: *revo.VM, key: Data, val: Data) !void {

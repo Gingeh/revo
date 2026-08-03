@@ -167,26 +167,44 @@ pub const Data = struct {
     pub fn asString(self: Data) ?StringID {
         return if (self.isString()) @intCast(self.bits & PAYLOAD_MASK) else null;
     }
-    pub fn asAtom(self: Data) ?AtomID {
-        return if (self.isAtom()) @intCast(self.bits & PAYLOAD_MASK) else null;
+
+    // direct bit checks (matching asStr) so the hot accessors don't pay for
+    // tag()'s canonical-nan and range guards; equivalent by construction:
+    // `tag() == X` holds exactly when boxed and the tag nibble (lol nibble) is X
+    pub inline fn asAtom(self: Data) ?AtomID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.atom))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
-    pub fn asFunction(self: Data) ?FunctionID {
-        return if (self.isFunction()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    pub inline fn asFunction(self: Data) ?FunctionID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.function))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
-    pub fn asTable(self: Data) ?TableID {
-        return if (self.isTable()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    pub inline fn asTable(self: Data) ?TableID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.table))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
-    pub fn asTuple(self: Data) ?TupleID {
-        return if (self.isTuple()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    pub inline fn asTuple(self: Data) ?TupleID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.tuple))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
-    pub fn asStructVal(self: Data) ?StructInstanceID {
-        return if (self.isStructVal()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    pub inline fn asStructVal(self: Data) ?StructInstanceID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_val))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
-    pub fn asStructType(self: Data) ?StructTypeID {
-        return if (self.isStructType()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    pub inline fn asStructType(self: Data) ?StructTypeID {
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_type))
+            return @intCast(self.bits & PAYLOAD_MASK);
+        return null;
     }
     pub fn asForeign(self: Data) ?*anyopaque {
-        return if (self.isForeign()) @ptrFromInt(@as(usize, @intCast(self.bits & PAYLOAD_MASK))) else null;
+        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.foreign))
+            return @ptrFromInt(@as(usize, @intCast(self.bits & PAYLOAD_MASK)));
+        return null;
     }
 
     pub inline fn rawBits(self: Data) u64 {
@@ -207,8 +225,33 @@ pub const Data = struct {
     }
 };
 
+/// integral f64 -> i64, else null (used by bitwise ops and `//`)
+pub fn numToI64(n: f64) ?i64 {
+    if (!std.math.isFinite(n)) return null;
+    if (n < @as(f64, @floatFromInt(std.math.minInt(i64)))) return null;
+    if (n >= @as(f64, @floatFromInt(std.math.maxInt(i64)))) return null;
+    const t: i64 = @intFromFloat(n);
+    if (@as(f64, @floatFromInt(t)) != n) return null;
+    return t;
+}
+
+/// b ** e for non-negative int exponents, wrapping on overflow
+pub fn ipow(base: i64, exponent: i64) i64 {
+    var acc: i64 = 1;
+    var b: i64 = base;
+    var e: i64 = exponent;
+    while (e > 0) {
+        if (e & 1 == 1) acc = acc *% b;
+        e >>= 1;
+        if (e > 0) b = b *% b;
+    }
+    return acc;
+}
+
 pub inline fn isFalse(val: Data) bool {
-    if (val.asNum()) |n| return n == 0;
-    if (val.asAtom()) |id| return id <= core_atoms.lastFalse;
-    return false;
+    return ( //
+        (val.bits >= Data.new.atom(0).bits //
+        and val.bits <= Data.new.atom(core_atoms.lastFalse).bits) //
+        or val.bits == Data.new.num(0).bits //
+    );
 }

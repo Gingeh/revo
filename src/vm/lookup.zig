@@ -66,11 +66,19 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
             const desc = self.struct_types.getType(instance.type_id) orelse return null;
 
             if (key.asAtom()) |atom| {
+                if (self.structCacheLookup(instance.type_id, atom)) |cached| {
+                    if (cached.is_method) {
+                        return .{ .value = cached.value, .from_meta = true };
+                    }
+                    return .{ .value = instance.fields[cached.offset], .from_meta = false };
+                }
                 // check methods first
                 if (desc.methods.get(self.atomName(atom))) |method| {
+                    self.structCacheInsert(instance.type_id, atom, true, 0, method);
                     return .{ .value = method, .from_meta = true };
                 }
                 if (desc.field_index.get(atom)) |i| {
+                    self.structCacheInsert(instance.type_id, atom, false, @intCast(i), undefined);
                     return .{ .value = instance.fields[i], .from_meta = false };
                 }
             }
