@@ -139,14 +139,14 @@ test "builtin table methods prebind through stdlib tables" {
 //
 
 test "table literal field shadows stdlib method" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = { len = fn(self) 42 }
         \\ t:len()
     , 42);
 }
 
 test "dynamic field assignment shadows stdlib method" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {}
         \\ t.len = fn(self) 42
         \\ t:len()
@@ -154,7 +154,7 @@ test "dynamic field assignment shadows stdlib method" {
 }
 
 test "atom-key index assignment shadows stdlib method" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {}
         \\ t[:len] = fn(self) 42
         \\ t:len()
@@ -162,14 +162,14 @@ test "atom-key index assignment shadows stdlib method" {
 }
 
 test "plain table uses stdlib method" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {1, 2, 3}
         \\ t:len()
     , 3);
 }
 
 test "string-key index does not shadow stdlib method" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {1, 2, 3}
         \\ t["len"] = fn(self) 42
         \\ t:len()
@@ -177,7 +177,7 @@ test "string-key index does not shadow stdlib method" {
 }
 
 test "computed key does not invalidate table field tracking" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = { len = fn(self) 42 }
         \\ const key = "foo"
         \\ t[key] = 7
@@ -260,77 +260,77 @@ test {
 //
 
 test "arithmetic" {
-    try t.top_number("1 + 2 * 3", 7);
-    try t.top_number("-1", -1);
-    try t.top_number("1.5 + 2.25", 3.75);
-    try t.top_number("5.5 - 0.5", 5.0);
-    try t.top_number("3.0 * 0.5", 1.5);
-    try t.top_number("5.0 / 2.0", 2.5);
+    try t.topNumber("1 + 2 * 3", 7);
+    try t.topNumber("-1", -1);
+    try t.topNumber("1.5 + 2.25", 3.75);
+    try t.topNumber("5.5 - 0.5", 5.0);
+    try t.topNumber("3.0 * 0.5", 1.5);
+    try t.topNumber("5.0 / 2.0", 2.5);
 }
 
 test "bitwise and floor division" {
-    try t.top_number("5 // 2", 2);
-    try t.top_number("-5 // 2", -3);
-    try t.top_number("-17 // 5", -4);
-    try t.top_number("17 // 5", 3);
-    try t.top_number("5 // -2", -3);
+    try t.topNumber("5 // 2", 2);
+    try t.topNumber("-5 // 2", -3);
+    try t.topNumber("-17 // 5", -4);
+    try t.topNumber("17 // 5", 3);
+    try t.topNumber("5 // -2", -3);
 
     // python semantics: `//` floors on floats too, result stays float
-    try t.top_number("5.5 // 2", 2);
-    try t.top_number("-5.5 // 2", -3);
-    try t.top_number("5.0 // 2.5", 2);
-    try t.top_number("-17.5 // 5", -4);
-    try t.top_number("7 // 2.0", 3);
-    try t.top_number("-7.25 // 2", -4);
+    try t.topNumber("5.5 // 2", 2);
+    try t.topNumber("-5.5 // 2", -3);
+    try t.topNumber("5.0 // 2.5", 2);
+    try t.topNumber("-17.5 // 5", -4);
+    try t.topNumber("7 // 2.0", 3);
+    try t.topNumber("-7.25 // 2", -4);
 
-    try t.top_number("2 band 3", 2);
-    try t.top_number("2 bor 3", 3);
-    try t.top_number("2 bxor 3", 1);
-    try t.top_number("0 bxor 255", 255);
-    try t.top_number("12 band 10", 8);
+    try t.topNumber("2 band 3", 2);
+    try t.topNumber("2 bor 3", 3);
+    try t.topNumber("2 bxor 3", 1);
+    try t.topNumber("0 bxor 255", 255);
+    try t.topNumber("12 band 10", 8);
 
-    try t.top_number("1 shl 4", 16);
-    try t.top_number("1 shl 63", -9223372036854775808);
-    try t.top_number("-16 shr 2", -4);
-    try t.top_number("16 shr 2", 4);
-    try t.top_number("255 shr 4", 15);
+    try t.topNumber("1 shl 4", 16);
+    try t.topNumber("1 shl 63", -9223372036854775808);
+    try t.topNumber("-16 shr 2", -4);
+    try t.topNumber("16 shr 2", 4);
+    try t.topNumber("255 shr 4", 15);
 
     // precedence: bitwise binds tighter than addition, looser than multiplication
-    try t.top_number("1 + 2 band 3", 3);
-    try t.top_number("1 + 2 shl 2", 9);
-    try t.top_number("1 shl 2 * 2", 16);
+    try t.topNumber("1 + 2 band 3", 3);
+    try t.topNumber("1 + 2 shl 2", 9);
+    try t.topNumber("1 shl 2 * 2", 16);
 
     // constant folding path must agree
-    try t.top_number("let a = 6 let b = 3 a band b", 2);
-    try t.top_number("let a = 6 let b = 3 a shl b", 48);
-    try t.top_number("let a = 9 let b = 2 a // b", 4);
-    try t.top_number("let a = 9.5 let b = 2 a // b", 4);
+    try t.topNumber("let a = 6 let b = 3 a band b", 2);
+    try t.topNumber("let a = 6 let b = 3 a shl b", 48);
+    try t.topNumber("let a = 9 let b = 2 a // b", 4);
+    try t.topNumber("let a = 9.5 let b = 2 a // b", 4);
 }
 
 test "exponent" {
-    try t.top_number("2 ^ 3", 8);
-    try t.top_number("2 ^ 0", 1);
-    try t.top_number("0 ^ 0", 1);
-    try t.top_number("2 ^ 10", 1024);
-    try t.top_number("-2 ^ 3", -8);
-    try t.top_number("(-2) ^ 2", 4);
+    try t.topNumber("2 ^ 3", 8);
+    try t.topNumber("2 ^ 0", 1);
+    try t.topNumber("0 ^ 0", 1);
+    try t.topNumber("2 ^ 10", 1024);
+    try t.topNumber("-2 ^ 3", -8);
+    try t.topNumber("(-2) ^ 2", 4);
 
     // right-associative, binds tighter than multiplication and unary minus
-    try t.top_number("2 ^ 3 ^ 2", 512);
-    try t.top_number("2 ^ 3 * 4", 32);
-    try t.top_number("-2 ^ 2", -4);
+    try t.topNumber("2 ^ 3 ^ 2", 512);
+    try t.topNumber("2 ^ 3 * 4", 32);
+    try t.topNumber("-2 ^ 2", -4);
 
     // negative exponent gives a float, like python
-    try t.top_number("2 ^ -1", 0.5);
-    try t.top_number("2.0 ^ 3", 8);
-    try t.top_number("2 ^ 0.5", 1.4142135623730951);
-    try t.top_number("2 ^ 63", -9223372036854775808);
+    try t.topNumber("2 ^ -1", 0.5);
+    try t.topNumber("2.0 ^ 3", 8);
+    try t.topNumber("2 ^ 0.5", 1.4142135623730951);
+    try t.topNumber("2 ^ 63", -9223372036854775808);
 
     // constant folding path must agree
-    try t.top_number("let a = 3 let b = 2 a ^ b", 9);
+    try t.topNumber("let a = 3 let b = 2 a ^ b", 9);
 
     // compound assign
-    try t.top_number("let x = 2 x ^= 3 x", 8);
+    try t.topNumber("let x = 2 x ^= 3 x", 8);
 }
 
 test "exponent errors" {
@@ -364,63 +364,63 @@ test "bitwise and floor division errors" {
 
 test "concat operator" {
     // string concat
-    try t.top_string("'hello' ~ ' world'", "hello world");
-    try t.top_string("'a' ~ 'b' ~ 'c'", "abc");
-    try t.top_string("'' ~ 'x'", "x");
-    try t.top_string("'x' ~ ''", "x");
+    try t.topString("'hello' ~ ' world'", "hello world");
+    try t.topString("'a' ~ 'b' ~ 'c'", "abc");
+    try t.topString("'' ~ 'x'", "x");
+    try t.topString("'x' ~ ''", "x");
 
     // number concat (numbers convert to string)
-    try t.top_string("1 ~ 2", "12");
-    try t.top_string("1 ~ ' x'", "1 x");
-    try t.top_string("'x ' ~ 2", "x 2");
-    try t.top_string("1.5 ~ 2", "1.52");
+    try t.topString("1 ~ 2", "12");
+    try t.topString("1 ~ ' x'", "1 x");
+    try t.topString("'x ' ~ 2", "x 2");
+    try t.topString("1.5 ~ 2", "1.52");
 
     // tuple concat
-    try t.top_true("(1, 2) ~ (3, 4) == (1, 2, 3, 4)");
-    try t.top_true("(1,) ~ (2,) ~ (3,) == (1, 2, 3)");
-    try t.top_true("(1, 2) ~ (3, 4) ~ (5,) == (1, 2, 3, 4, 5)");
+    try t.topTrue("(1, 2) ~ (3, 4) == (1, 2, 3, 4)");
+    try t.topTrue("(1,) ~ (2,) ~ (3,) == (1, 2, 3)");
+    try t.topTrue("(1, 2) ~ (3, 4) ~ (5,) == (1, 2, 3, 4, 5)");
 
     // table with __tostring metamethod
-    try t.top_string(
+    try t.topString(
         \\const mt = {__tostring = fn(self) "custom"}
         \\const t = set_metatable({}, mt)
         \\t ~ ""
     , "custom");
-    try t.top_string(
+    try t.topString(
         \\const mt = {__tostring = fn(self) "hello"}
         \\const t = set_metatable({}, mt)
         \\"x" ~ t
     , "xhello");
-    try t.top_string(
+    try t.topString(
         \\const mt = {__tostring = fn(self) "hello"}
         \\const t = set_metatable({}, mt)
         \\t ~ " world"
     , "hello world");
-    try t.top_string(
+    try t.topString(
         \\const mt = {__tostring = fn(self) "a"}
         \\const t = set_metatable({}, mt)
         \\t ~ t
     , "aa");
 
     // concat + comparison
-    try t.top_atom("'ab' ~ 'c' == 'abc'", "true");
-    try t.top_atom("'ab' ~ 'c' != 'abc'", "false");
+    try t.topAtom("'ab' ~ 'c' == 'abc'", "true");
+    try t.topAtom("'ab' ~ 'c' != 'abc'", "false");
 
     // compound assign
-    try t.top_string(
+    try t.topString(
         \\let s = "a"
         \\s ~= "b"
         \\s
     , "ab");
-    try t.top_true(
+    try t.topTrue(
         \\let t = (1,)
         \\t ~= (2,)
         \\t == (1, 2)
     );
 
     // mixed types fall through to display
-    try t.top_string("(:a, 1) ~ 2", "(:a, 1)2");
-    try t.top_string(":hello ~ ' world'", ":hello world");
+    try t.topString("(:a, 1) ~ 2", "(:a, 1)2");
+    try t.topString(":hello ~ ' world'", ":hello world");
 }
 
 //
@@ -428,7 +428,7 @@ test "concat operator" {
 //
 
 test "@doc annotates functions without changing runtime behavior" {
-    try t.top_number(
+    try t.topNumber(
         \\ @doc "adds numbers"
         \\ fn add(a, b) a + b
         \\ add(20, 22)
@@ -436,27 +436,27 @@ test "@doc annotates functions without changing runtime behavior" {
 }
 
 test "return statement" {
-    try t.top_number(
+    try t.topNumber(
         \\ do return 7 8 end
     , 7);
-    try t.top_atom(
+    try t.topAtom(
         \\ fn f() do return :ok end
         \\ f()
     , "ok");
-    try t.top_number(
+    try t.topNumber(
         \\ fn f() do return 42 end
         \\ f()
     , 42);
 }
 
 test "fiber syntax spawn join yield" {
-    try t.top_number(
+    try t.topNumber(
         \\ const add = fn(a, b) a + b
         \\ const h = spawn add(39, 3)
         \\ join h
     , 42);
 
-    try t.top_type(
+    try t.topType(
         \\ do
         \\   yield
         \\ end
@@ -464,7 +464,7 @@ test "fiber syntax spawn join yield" {
 }
 
 test "channels coordinate spawned workers" {
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(0)
         \\ const worker = fn(v) do
         \\   send(ch, v)
@@ -481,7 +481,7 @@ test "channels coordinate spawned workers" {
 }
 
 test "sleep with multiple spawned joins returns numeric sums" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(v) do
         \\   sleep(10)
         \\   v
@@ -494,7 +494,7 @@ test "sleep with multiple spawned joins returns numeric sums" {
 }
 
 test "sleep join values are preserved per handle" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(v) do
         \\   sleep(10)
         \\   v
@@ -510,11 +510,11 @@ test "sleep join values are preserved per handle" {
 }
 
 test "compiles unary operators and atom equality" {
-    try t.top_atom("not :false", "true");
-    try t.top_atom("not :true", "false");
-    try t.top_atom("1 + 1 == 2", "true");
-    try t.top_number("len(\"abcd\")", 4);
-    try t.top_number("-5 + 7", 2);
+    try t.topAtom("not :false", "true");
+    try t.topAtom("not :true", "false");
+    try t.topAtom("1 + 1 == 2", "true");
+    try t.topNumber("len(\"abcd\")", 4);
+    try t.topNumber("-5 + 7", 2);
 }
 
 test "hash starts comments only" {
@@ -537,7 +537,7 @@ test "hash starts comments only" {
 }
 
 test "compiles bindings assignment and block result" {
-    try t.top_number(
+    try t.topNumber(
         \\do
         \\    let a = 1
         \\    let b = 2
@@ -547,35 +547,35 @@ test "compiles bindings assignment and block result" {
 }
 
 test "bind, declaration and assignment are expressions and return rhs" {
-    try t.top_number(
+    try t.topNumber(
         \\ const a = const b = 5
     , 5);
-    try t.top_number(
+    try t.topNumber(
         \\ let a = let b = 5
     , 5);
-    try t.top_number(
+    try t.topNumber(
         \\ const a = let b = 5
     , 5);
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 5
         \\ let b = (a = 42)
     , 42);
 }
 
 test "atoms do not collide with other values" {
-    try t.top_type(
+    try t.topType(
         \\:do
     , .atom);
 }
 
 test "the program is in a top-level block" {
-    try t.top_number(
+    try t.topNumber(
         \\ do const t = -41 (0 - t) + 1 end
     , 42);
 }
 
 test "blocks keep only last expression value" {
-    try t.top_number(
+    try t.topNumber(
         \\ do
         \\   1
         \\   2
@@ -585,7 +585,7 @@ test "blocks keep only last expression value" {
 }
 
 test "if uses atom false verity" {
-    try t.top_number(
+    try t.topNumber(
         \\do
         \\    const t = {answer = 41}
         \\    if :false t.answer else t.answer + 1
@@ -594,26 +594,26 @@ test "if uses atom false verity" {
 }
 
 test "top verity uses atom booleans" {
-    try t.top_true(":true");
-    try t.top_false(":false");
-    try t.top_true(":ok");
+    try t.topTrue(":true");
+    try t.topFalse(":false");
+    try t.topTrue(":ok");
 }
 
 test "top verity follows false values" {
-    try t.top_true("1");
-    try t.top_false("0");
-    try t.top_false(":nil");
-    try t.top_true("\"\"");
+    try t.topTrue("1");
+    try t.topFalse("0");
+    try t.topFalse(":nil");
+    try t.topTrue("\"\"");
 }
 
 test "and/or preserve value semantics" {
-    try t.top_true("1 and 2");
-    try t.top_true("0 or 9");
-    try t.top_true("(:t or :true or not :nil or 1 or 1.0 or 67) == :t");
+    try t.topTrue("1 and 2");
+    try t.topTrue("0 or 9");
+    try t.topTrue("(:t or :true or not :nil or 1 or 1.0 or 67) == :t");
 }
 
 test "chained or conditions in if parse and run" {
-    try t.top_number(
+    try t.topNumber(
         \\ const nextword = "."
         \\ if nextword == "." or nextword == "," or nextword == "!" or nextword == "?" do
         \\     1
@@ -624,34 +624,34 @@ test "chained or conditions in if parse and run" {
 }
 
 test "assignment & op combinations" {
-    try t.top_number("let t = 41 t += 1 t", 42);
-    try t.top_number("let t = 43 t -= 1 t", 42);
-    try t.top_number("let t = 84 t /= 2 t", 42);
-    try t.top_number("let t = 21 t *= 2 t", 42);
+    try t.topNumber("let t = 41 t += 1 t", 42);
+    try t.topNumber("let t = 43 t -= 1 t", 42);
+    try t.topNumber("let t = 84 t /= 2 t", 42);
+    try t.topNumber("let t = 21 t *= 2 t", 42);
 }
 
 test "comparisons" {
-    try t.top_false("1 == 2");
-    try t.top_true("assert(1 < 2)");
-    try t.top_true("assert(\"a\" < \"b\")");
+    try t.topFalse("1 == 2");
+    try t.topTrue("assert(1 < 2)");
+    try t.topTrue("assert(\"a\" < \"b\")");
 }
 
 test "hash literals are real atoms" {
-    try t.top_atom(":good", "good");
+    try t.topAtom(":good", "good");
 }
 
 test "field assignment works" {
-    try t.top_true(
+    try t.topTrue(
         \\ const sys = {answer = 41}
         \\ sys.answer = 1
         \\ sys.answer
     );
-    try t.top_true(
+    try t.topTrue(
         \\ const sys = {a = {b = 1}}
         \\ sys.a.b = 2
         \\ sys.a.b == 2
     );
-    try t.top_number(
+    try t.topNumber(
         \\ const sys = {a = 1}
         \\ sys.a = sys.a + 1
         \\ sys.a
@@ -659,12 +659,12 @@ test "field assignment works" {
 }
 
 test "string conversion metamethods __tostring" {
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__tostring = fn(self) "custom"}
         \\ const t = set_metatable({a = 1}, mt)
         \\ string(t)
     , "custom");
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__tostring = fn(self) "42"}
         \\ const t = set_metatable({}, mt)
         \\ string(t)
@@ -672,13 +672,13 @@ test "string conversion metamethods __tostring" {
 }
 
 test "display formatting uses __display and falls back to __tostring" {
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__display = fn(self) "visible", __tostring = fn(self) "hidden"}
         \\ const t = set_metatable({}, mt)
         \\ fmt("%v", t)
     , "visible");
 
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__tostring = fn(self) "fallback"}
         \\ const t = set_metatable({}, mt)
         \\ fmt("%v", t)
@@ -686,23 +686,23 @@ test "display formatting uses __display and falls back to __tostring" {
 }
 
 test "string interpolation uses formatting modes" {
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
         \\ const value = set_metatable({}, mt)
         \\ "value = {value}"
     , "value = visible");
-    try t.top_string(
+    try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
         \\ const value = set_metatable({}, mt)
         \\ "value = {value:?}"
     , "value = \"debug\"");
-    try t.top_string(
+    try t.topString(
         \\ "100% complete: {42:p}"
     , "100% complete: \x1b[33m42\x1b[0m");
 }
 
 test "metamethod __index for field access" {
-    try t.top_number(
+    try t.topNumber(
         \\ const mt = {__index = fn(self, key) 42}
         \\ const t = set_metatable({}, mt)
         \\ t.missing_field
@@ -710,7 +710,7 @@ test "metamethod __index for field access" {
 }
 
 test "plain metatable fields resolve before __index" {
-    try t.top_number(
+    try t.topNumber(
         \\ const mt = {value = 7, __index = fn(self, key) 99}
         \\ const t = set_metatable({}, mt)
         \\ t.value
@@ -734,7 +734,7 @@ test "errs returned at toplevel report proper span" {
 }
 
 test "if-let works" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = {count = 100}
         \\ 
         \\ if not (let cnt = t.count)
@@ -753,7 +753,7 @@ test "if-let works" {
 }
 
 test "metamethod __newindex for field assignment" {
-    try t.top_number(
+    try t.topNumber(
         \\ const mt = {__newindex = fn(self, key, value) table.rawset(self, key, 99)}
         \\ const t = set_metatable({}, mt)
         \\ t.x = 5
@@ -762,19 +762,19 @@ test "metamethod __newindex for field assignment" {
 }
 
 test "method calls require obj:method(args)" {
-    try t.top_number(
+    try t.topNumber(
         \\ const mt = {get_x = fn(self) self.x}
         \\ const t = set_metatable({x = 12}, mt)
         \\ t:get_x()
     , 12);
-    try t.top_number(
+    try t.topNumber(
         \\ const Email = {parse = fn(x) x}
         \\ Email.parse(42)
     , 42);
 }
 
 test "method call after train keeps receiver alive" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct Box {
         \\     state = {},
         \\     fn train(self) self,
@@ -814,7 +814,7 @@ test "metatable-backed constructor and instance methods compile" {
 }
 
 test "plain field access returns the raw resolved value" {
-    try t.top_type(
+    try t.topType(
         \\ const mt = {id = fn(self) self}
         \\ const t = set_metatable({}, mt)
         \\ t.id
@@ -822,7 +822,7 @@ test "plain field access returns the raw resolved value" {
 }
 
 test "non-table values can use plain metatable fields as methods" {
-    try t.top_string(
+    try t.topString(
         \\ const mt = {reverse = fn(self) "fdsa"}
         \\ set_metatable("", mt)
         \\ "asdf":reverse()
@@ -834,27 +834,27 @@ test "non-table values can use plain metatable fields as methods" {
 //
 
 test "result predicates work" {
-    try t.top_string("string((:ok, 42))", "(:ok, 42)");
-    try t.top_string("string((:err, :Bad))", "(:err, :Bad)");
+    try t.topString("string((:ok, 42))", "(:ok, 42)");
+    try t.topString("string((:err, :Bad))", "(:err, :Bad)");
 }
 
 test "error helpers build and classify tagged errors" {
-    try t.top_string("string((:err, :FileNotFound))", "(:err, :FileNotFound)");
-    try t.top_true("err?!((:err, :Bad))");
-    try t.top_true("err?!((:err, :FileNotFound))");
-    try t.top_false("err?!((:ok, :Bad))");
+    try t.topString("string((:err, :FileNotFound))", "(:err, :FileNotFound)");
+    try t.topTrue("err?!((:err, :Bad))");
+    try t.topTrue("err?!((:err, :FileNotFound))");
+    try t.topFalse("err?!((:ok, :Bad))");
 }
 
 test "result predicates replace native functions" {
-    try t.top_true("ok?!((:ok, 42))");
-    try t.top_true("ok?!((:ok, :nil))");
-    try t.top_false("ok?!((:err, :Bad))");
-    try t.top_true("err?!((:err, :Bad))");
-    try t.top_false("err?!((:ok, 42))");
+    try t.topTrue("ok?!((:ok, 42))");
+    try t.topTrue("ok?!((:ok, :nil))");
+    try t.topFalse("ok?!((:err, :Bad))");
+    try t.topTrue("err?!((:err, :Bad))");
+    try t.topFalse("err?!((:ok, 42))");
 }
 
 test "result and error conventions work with match" {
-    try t.top_true(":true");
+    try t.topTrue(":true");
 }
 
 test "unwrap panics on err result" {
@@ -881,25 +881,25 @@ test "unwrap panics on bullshit" {
 //
 
 test "zero-arg macro expands on identifier use" {
-    try t.top_number(
+    try t.topNumber(
         \\macro answer! `` `42`
         \\answer!
     , 42);
 }
 
 test "unary macro expands in call position" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro id! `%e:expr` `%e`
         \\ id!(42)
     , 42);
 }
 test "macro system capabilities and limitations" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro id! `%x:expr` `%x`
         \\ id!(42)
     , 42);
 
-    try t.top_number(
+    try t.topNumber(
         \\ macro count_args! `(%fmt:str %ARGS(, %arg:expr)*)` `3`
         \\ count_args!("format", 1, 2, 3)
     , 3);
@@ -907,14 +907,14 @@ test "macro system capabilities and limitations" {
 
 // basic simple captures
 test "unary macro - single expression capture" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro id! `%x:expr` `%x`
         \\ id!(42)
     , 42);
 }
 
 test "binary structure macro - multiple captures with literals" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro combine! `(%left:expr %right:expr)` `%left + %right`
         \\ combine!(20, 22)
     , 42);
@@ -922,7 +922,7 @@ test "binary structure macro - multiple captures with literals" {
 
 // type-consrtained captures
 test "identifier capture - creates bindings" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro const! `%name:ident = %val:expr` `const %name = %val`
         \\ const!(answer = 42)
         \\ answer
@@ -930,14 +930,14 @@ test "identifier capture - creates bindings" {
 }
 
 test "string literal capture - constrains to string" {
-    try t.top_type(
+    try t.topType(
         \\ macro get_format! `(%fmt:str %rest:expr)` `%fmt`
         \\ get_format!("hello", 123)
     , .string);
 }
 
 test "number literal capture - constrains to number" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro repeat_val! `(%n:number %body:expr)` `%n`
         \\ repeat_val!(42, (1 + 2))
     , 42);
@@ -945,28 +945,28 @@ test "number literal capture - constrains to number" {
 
 // repetition groups
 test "zero-or-more repetition - captures multiple items" {
-    try t.top_nil(
+    try t.topNil(
         \\ macro do_all! `(%ITEMS(%item:expr)*)` `do %ITEMS(%item) :nil end`
         \\ do_all!(1, 2, 3)
     );
 }
 
 test "one-or-more repetition - at least one required" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro sum_all! `(%first:expr %REST(%item:expr)*)` `%first %REST(+ %item)`
         \\ sum_all!(10, 15, 17)
     , 42);
 }
 
 test "optional group - zero or one occurrence" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro maybe_print! `(%val:expr %MSG(%msg:str)?)` `%val`
         \\ maybe_print!(42, "hello")
     , 42);
 }
 
 test "comma-separated repetition - literal separators" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro tuple_fst! `(%first:expr %REST(%item:expr)*)` `%first`
         \\ tuple_fst!(10, 15, 17)
     , 10);
@@ -974,7 +974,7 @@ test "comma-separated repetition - literal separators" {
 
 // complex combinations
 test "if-elif-else chain multiple groups with quantifiers" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro choose!
         \\     `(%head:number %ITEMS(%item:number)* %MSG(%msg:str)?)`
         \\     `do %head %ITEMS(+ %item) end`
@@ -984,7 +984,7 @@ test "if-elif-else chain multiple groups with quantifiers" {
 }
 
 test "complex fn def captures, repetition, optional" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro sum_from! `(%start:number %ITEMS(%item:expr)+)`
         \\     `do %start %ITEMS(+ %item) end`
         \\
@@ -994,14 +994,14 @@ test "complex fn def captures, repetition, optional" {
 
 // kw-based control flow
 test "negative conditional" {
-    try t.top_type(
+    try t.topType(
         \\ macro unless! `(%cond:expr %body:expr)` `if %cond :nil else %body`
         \\ unless!(5 < 0, :positive)
     , .atom);
 }
 
 test "custom keyword structure - keywords at multiple positions" {
-    try t.top_number(
+    try t.topNumber(
         \\ macro repeat_until! `(%body:expr %cond:expr)` `%body`
         \\ repeat_until!(10 + 32, 5 == 0)
     , 42);
@@ -1012,49 +1012,49 @@ test "custom keyword structure - keywords at multiple positions" {
 //
 
 test "quasiquote atom" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `:hello`
         \\r == (:hash, "hello")
     );
 }
 
 test "quasiquote number" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `42`
         \\r == (:number, 42)
     );
 }
 
 test "quasiquote string" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `"hello"`
         \\r == (:string, "hello")
     );
 }
 
 test "quasiquote nil tuple" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `()`
         \\r == (:nil,)
     );
 }
 
 test "quasiquote produces tuple" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `(:a, :b)`
         \\r == (:tuple, ((:hash, "a"), (:hash, "b")))
     );
 }
 
 test "quasiquote produces table" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `{:a, :b}`
         \\r == (:table, ((:nil, :false, (:hash, "a")), (:nil, :false, (:hash, "b"))))
     );
 }
 
 test "quasiquote splice inserts value" {
-    try t.top_true(
+    try t.topTrue(
         \\let x = 10
         \\let r = `(:num, %x)`
         \\r == (:tuple, ((:hash, "num"), 10))
@@ -1062,7 +1062,7 @@ test "quasiquote splice inserts value" {
 }
 
 test "quasiquote table named key" {
-    try t.top_true(
+    try t.topTrue(
         \\let v = 42
         \\let r = `{key = %v}`
         \\r == (:table, (((:ident, "key"), :false, 42),))
@@ -1070,7 +1070,7 @@ test "quasiquote table named key" {
 }
 
 test "quasiquote nested splice in table" {
-    try t.top_true(
+    try t.topTrue(
         \\let x = 42
         \\let r = `{(:a, %x)}`
         \\r == (:table, ((:nil, :false, (:tuple, ((:hash, "a"), 42))),))
@@ -1078,7 +1078,7 @@ test "quasiquote nested splice in table" {
 }
 
 test "quasiquote multiple splices" {
-    try t.top_true(
+    try t.topTrue(
         \\let a = 20
         \\let b = 22
         \\let r = `(:add, %a, %b)`
@@ -1087,14 +1087,14 @@ test "quasiquote multiple splices" {
 }
 
 test "quasiquote bare ident" {
-    try t.top_true(
+    try t.topTrue(
         \\let r = `hello`
         \\r == (:ident, "hello")
     );
 }
 
 test "quasiquote table computed key with splice" {
-    try t.top_true(
+    try t.topTrue(
         \\let k = 99
         \\let v = 42
         \\let r = `{[%k] = %v}`
@@ -1107,12 +1107,12 @@ test "quasiquote table computed key with splice" {
 //
 
 test "closures capture outer locals by reference" {
-    try t.top_number(
+    try t.topNumber(
         \\ const make_adder = fn(x) fn(y) x + y
         \\ const add2 = make_adder(2)
         \\ add2(40)
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn() do
         \\     let x = 1
         \\     const get = fn() x
@@ -1121,7 +1121,7 @@ test "closures capture outer locals by reference" {
         \\ end
         \\ outer()
     , 2);
-    try t.top_number(
+    try t.topNumber(
         \\ const make_counter = fn() do
         \\     let x = 0
         \\     const inc = fn() do
@@ -1137,7 +1137,7 @@ test "closures capture outer locals by reference" {
 }
 
 test "nested assignment updates nearest lexical binding before globals" {
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn() do
         \\     let x = 1
         \\     const set = fn() do
@@ -1149,7 +1149,7 @@ test "nested assignment updates nearest lexical binding before globals" {
         \\ end
         \\ outer()
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 1
         \\ const set = fn() do
         \\     x = 42
@@ -1161,23 +1161,23 @@ test "nested assignment updates nearest lexical binding before globals" {
 }
 
 test "recursion works across top-level local and capturing closures" {
-    try t.top_number(
+    try t.topNumber(
         \\ const fact = fn(n) if n == 0 1 else n * fact(n - 1)
         \\ fact(5)
     , 120);
-    try t.top_true(
+    try t.topTrue(
         \\ const is_even = fn(n) if n == 0 1 else is_odd(n - 1)
         \\ const is_odd = fn(n) if n == 0 0 else is_even(n - 1)
         \\ is_even(10)
     );
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn() do
         \\     const fact = fn(n) if n == 0 1 else n * fact(n - 1)
         \\     fact(5)
         \\ end
         \\ outer()
     , 120);
-    try t.top_number(
+    try t.topNumber(
         \\ const make_fact = fn(scale) do
         \\     const fact = fn(n) if n == 0 scale else n * fact(n - 1)
         \\     fact
@@ -1188,7 +1188,7 @@ test "recursion works across top-level local and capturing closures" {
 }
 
 test "loops thread state and break with a single value" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 0
         \\ const result = loop do
         \\     if x < 10
@@ -1198,7 +1198,7 @@ test "loops thread state and break with a single value" {
         \\ end
         \\ result
     , 10);
-    try t.top_number(
+    try t.topNumber(
         \\ const scale = 2
         \\ let v = 1
         \\ loop do
@@ -1211,7 +1211,7 @@ test "loops thread state and break with a single value" {
 }
 
 test "foreach loop" {
-    try t.top_number(
+    try t.topNumber(
         \\ const tbl = {"foo", "bar", "baz"}
         \\ let i = 0
         \\ loop do
@@ -1224,7 +1224,7 @@ test "foreach loop" {
 }
 
 test "for loop iterates table values" {
-    try t.top_number(
+    try t.topNumber(
         \\ let seen = 0
         \\ for val, i in {10, 20, 30} do
         \\     if i == 0 do
@@ -1242,7 +1242,7 @@ test "for loop iterates table values" {
 }
 
 test "indexed table iteration gets value and index" {
-    try t.top_number(
+    try t.topNumber(
         \\ for val, i in {10, 20, 30} do
         \\     if i == 1 return val
         \\ end
@@ -1250,14 +1250,14 @@ test "indexed table iteration gets value and index" {
 }
 
 test "simple table_get with integer key" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = {10, 20, 30}
         \\ t[0] + t[1] + t[2]
     , 60);
 }
 
 test "for loop over table prints all values" {
-    try t.top_number(
+    try t.topNumber(
         \\ let s = 0
         \\ let t = {10, 20, 30}
         \\ for v in t
@@ -1267,7 +1267,7 @@ test "for loop over table prints all values" {
 }
 
 test "inner for loop" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = 0
         \\ for x in 1..10
         \\  for y in 10..20 t += (x * y)
@@ -1276,7 +1276,7 @@ test "inner for loop" {
 }
 
 test "for loop with range literal iterates numeric sequence" {
-    try t.top_number(
+    try t.topNumber(
         \\ let sum = 0
         \\ for i in 0..5 do
         \\     sum = sum + i
@@ -1286,7 +1286,7 @@ test "for loop with range literal iterates numeric sequence" {
 }
 
 test "for loop with range literal starting at 1" {
-    try t.top_number(
+    try t.topNumber(
         \\ let sum = 0
         \\ for i in 1..6 do
         \\     sum = sum + i
@@ -1296,7 +1296,7 @@ test "for loop with range literal starting at 1" {
 }
 
 test "for loop with range literal and variable end" {
-    try t.top_number(
+    try t.topNumber(
         \\ let n = 10
         \\ let sum = 0
         \\ for i in 0..n do
@@ -1307,7 +1307,7 @@ test "for loop with range literal and variable end" {
 }
 
 test "for loop with range produces loop result" {
-    try t.top_number(
+    try t.topNumber(
         \\ for i in 0..3 do
         \\     i + 10
         \\ end
@@ -1315,7 +1315,7 @@ test "for loop with range produces loop result" {
 }
 
 test "while loop via while <cond> do <expr> end" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 0
         \\ while x < 5 do
         \\     x = x + 1
@@ -1325,7 +1325,7 @@ test "while loop via while <cond> do <expr> end" {
 }
 
 test "while loop isn't ran unconditionally" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 0
         \\ while :false do
         \\     x = x + 1
@@ -1335,7 +1335,7 @@ test "while loop isn't ran unconditionally" {
 }
 
 test "while loop counts down" {
-    try t.top_number(
+    try t.topNumber(
         \\ let n = 3
         \\ while n > 0 do
         \\     n = n - 1
@@ -1349,7 +1349,7 @@ test "continue doesnt doesnt work outside of loop" {
 }
 
 test "continue in loop" {
-    try t.top_number(
+    try t.topNumber(
         \\ let i = 0
         \\ let result = 0
         \\ loop do
@@ -1362,7 +1362,7 @@ test "continue in loop" {
 }
 
 test "continue in while" {
-    try t.top_number(
+    try t.topNumber(
         \\ let i = 0
         \\ let result = 0
         \\ while i < 5 do
@@ -1375,7 +1375,7 @@ test "continue in while" {
 }
 
 test "continue in for range" {
-    try t.top_number(
+    try t.topNumber(
         \\ let result = 0
         \\ for i in 1..6 do
         \\   if i % 2 == 0 continue
@@ -1386,7 +1386,7 @@ test "continue in for range" {
 }
 
 test "continue in nested loops" {
-    try t.top_number(
+    try t.topNumber(
         \\ let result = 0
         \\ for i in 1..3 do
         \\   for j in 1..5 do
@@ -1399,7 +1399,7 @@ test "continue in nested loops" {
 }
 
 test "break in for loops" {
-    try t.top_number(
+    try t.topNumber(
         \\ let result = 0
         \\ for i in 0..10 do
         \\     if i == 5 break(i * 2)
@@ -1408,12 +1408,12 @@ test "break in for loops" {
         \\ result
     , 10);
 
-    try t.top_number(
+    try t.topNumber(
         \\ for i in 0..10 do
         \\     if i == 7 break(i)
         \\ end
     , 7);
-    try t.top_atom(
+    try t.topAtom(
         \\ const x = for i in 0..5 do
         \\   break :nil
         \\ end
@@ -1422,7 +1422,7 @@ test "break in for loops" {
 }
 
 test "break in while loops" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 0
         \\ let result = 0
         \\ while x < 10 do
@@ -1432,7 +1432,7 @@ test "break in while loops" {
         \\ end
         \\ result
     , 10);
-    try t.top_number(
+    try t.topNumber(
         \\ let i = 0
         \\ while i < 10 do
         \\     if i == 7 break(i)
@@ -1442,7 +1442,7 @@ test "break in while loops" {
 }
 
 test "while body result is loop value after iterations" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 0
         \\ let x = while do
         \\     a += 1
@@ -1453,7 +1453,7 @@ test "while body result is loop value after iterations" {
 }
 
 test "loop with locals inside does not corrupt loop result" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 0
         \\ let b = 1
         \\ let c = 2
@@ -1469,7 +1469,7 @@ test "loop with locals inside does not corrupt loop result" {
 }
 
 test "for range with preceding locals and body locals" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 0
         \\ let b = 1
         \\ let c = 2
@@ -1486,7 +1486,7 @@ test "for range with preceding locals and body locals" {
 }
 
 test "for range with two params and preceding locals" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 0
         \\ const x = for i, idx in 0..3 do
         \\     i + idx
@@ -1496,32 +1496,32 @@ test "for range with two params and preceding locals" {
 }
 
 test "triple-quoted multiline strings compile and evaluate" {
-    try t.top_string(
+    try t.topString(
         \\ """
         \\ hello
         \\ world
         \\ """
     , "hello\nworld");
 
-    try t.top_string(
+    try t.topString(
         \\ """inline"""
     , "inline");
 }
 
 test "test.skip keyword is valid syntax" {
-    try t.top_nil(
+    try t.topNil(
         \\ test / skip "skipped" do 1 + 1 end
     );
 }
 
 test "suite keyword compiles and returns nil" {
-    try t.top_nil(
+    try t.topNil(
         \\ suite "example" do
         \\     test "inner" do 1 end
         \\ end
     );
 
-    try t.top_nil(
+    try t.topNil(
         \\ suite "empty" do end
     );
 }
@@ -1699,7 +1699,7 @@ test "runtime renderer includes stack trace call chain" {
 }
 
 test "function return value destructuring" {
-    try t.top_number(
+    try t.topNumber(
         \\ const vector_mul = fn(a, b, factor)
         \\    (a * factor, b * factor)
         \\
@@ -1709,7 +1709,7 @@ test "function return value destructuring" {
 }
 
 test "basic loop with break" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 1
         \\ loop do
         \\     if a < 5
@@ -1736,7 +1736,7 @@ test "import caches modules and reuses the same table" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const a = import "./counter"
         \\ a.count = 41
         \\ const b = import "./counter"
@@ -1760,7 +1760,7 @@ test "import keeps module globals isolated from importer globals" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ let x = 99
         \\ const ans = import "./answer"
         \\ x + ans
@@ -1783,26 +1783,26 @@ test "import returns module value" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const ns = import "./vis"
         \\ ns
     , 9);
 }
 
 test "locals are still local" {
-    try t.top_number(
+    try t.topNumber(
         \\ do
         \\   let a = 5
         \\ end
         \\ let a = 7
         \\ a
     , 7);
-    try t.top_number(
+    try t.topNumber(
         \\ let a = 7
         \\ do let a = 5 end
         \\ a
     , 7);
-    try t.top_number(
+    try t.topNumber(
         \\ const a = 7
         \\ do const a = 5 end
         \\ a
@@ -1810,7 +1810,7 @@ test "locals are still local" {
 }
 
 test "top-level locals are real closure locals" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 1
         \\ const get = fn() x
         \\ x = 42
@@ -1823,7 +1823,7 @@ test "top-level locals are real closure locals" {
 }
 
 test "structs with comma-separated items and fn syntax" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     name: string,
         \\     fn get_name(self) self.name,
@@ -1834,7 +1834,7 @@ test "structs with comma-separated items and fn syntax" {
 }
 
 test "structs build struct instances" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
@@ -1843,7 +1843,7 @@ test "structs build struct instances" {
         \\ const user = User { name = "ana" }
         \\ user:age_next()
     , 1);
-    try t.top_string(
+    try t.topString(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
@@ -1851,7 +1851,7 @@ test "structs build struct instances" {
         \\ const user = User { name = "ana", age = 12 }
         \\ user.name
     , "ana");
-    try t.top_atom(
+    try t.topAtom(
         \\ struct User {
         \\     name: string,
         \\ }
@@ -1861,7 +1861,7 @@ test "structs build struct instances" {
 }
 
 test "struct fields are mutable" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     age: number = 0,
         \\ }
@@ -1883,7 +1883,7 @@ test "struct fields are mutable" {
         \\ let user = User {}
         \\ user.age = "old"
     , .TypeError, "field `age` on `User` wants number, got string");
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
@@ -1895,7 +1895,7 @@ test "struct fields are mutable" {
         \\ user = user:with_age_next()
         \\ user.age
     , 5);
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
@@ -1916,7 +1916,7 @@ test "struct fields are mutable" {
 }
 
 test "defaulted struct fields fill in missing values" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct Chain {
         \\     state = {6, 7},
         \\     count: number = 8,
@@ -2025,7 +2025,7 @@ test "imported module assignment is private to module cache" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const m = import "./private_state"
         \\ m
     , 7);
@@ -2039,7 +2039,7 @@ test "imported module assignment is private to module cache" {
 // misc behaviour doc
 //
 test "closure captures and updates outer variable" {
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn() do
         \\     let x = 1
         \\     const inc = fn() do
@@ -2055,7 +2055,7 @@ test "closure captures and updates outer variable" {
 }
 
 test "nested closure accesses upvalues from parent scope" {
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn(a) do
         \\     const middle = fn(b) do
         \\         const inner = fn() a + b
@@ -2069,7 +2069,7 @@ test "nested closure accesses upvalues from parent scope" {
 }
 
 test "multiple closures share same upvalue cell" {
-    try t.top_number(
+    try t.topNumber(
         \\ const make_pair = fn() do
         \\     let x = 0
         \\     const set = fn(v) do x = v x end
@@ -2085,7 +2085,7 @@ test "multiple closures share same upvalue cell" {
 // loop & control flow
 //
 test "loop breaks with explicit value" {
-    try t.top_number(
+    try t.topNumber(
         \\ loop do
         \\     break(42)
         \\ end
@@ -2093,7 +2093,7 @@ test "loop breaks with explicit value" {
 }
 
 test "break with value returns that value" {
-    try t.top_number(
+    try t.topNumber(
         \\ let i = 1
         \\ loop do
         \\     if i == 1
@@ -2105,7 +2105,7 @@ test "break with value returns that value" {
 }
 
 test "loop threading with guards" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 0
         \\ loop do
         \\     if x < 10
@@ -2116,7 +2116,7 @@ test "loop threading with guards" {
     , 10);
 }
 test "big loop doesnt crash" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 1
         \\ loop do
         \\     if x < 1000
@@ -2128,7 +2128,7 @@ test "big loop doesnt crash" {
 }
 
 test "if expressions" {
-    try t.top_number(
+    try t.topNumber(
         \\ if 1 == 1
         \\     5
         \\ else
@@ -2137,7 +2137,7 @@ test "if expressions" {
 }
 
 test "tail recursion reuses frames" {
-    try t.top_number(
+    try t.topNumber(
         \\ const count = fn(n)
         \\     if n == 1000
         \\         n
@@ -2148,7 +2148,7 @@ test "tail recursion reuses frames" {
 }
 
 test "recursive calls still evaluate" {
-    try t.top_number(
+    try t.topNumber(
         \\ const count = fn(n)
         \\     if n == 5000
         \\         n
@@ -2176,14 +2176,14 @@ test "assignment to constant fails" {
 // match
 //
 test "match wildcards" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x = 999
         \\ match x
         \\ | 1 => do 1 end
         \\ | 2 => do 2 end
         \\ | v => do v end
     , 999);
-    try t.top_number(
+    try t.topNumber(
         \\ const nextword = "."
         \\ let a = match nextword
         \\ | "." => 6
@@ -2196,14 +2196,14 @@ test "match wildcards" {
 }
 
 test "match guards" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x = 15
         \\ match x
         \\ | v when v < 10 => do 1 end
         \\ | v when v > 10 => do 2 end
         \\ | v => do 3 end
     , 2);
-    try t.top_number(
+    try t.topNumber(
         \\ let n = 0
         \\ for i in 0..7 do
         \\   let status: any = if i == 5
@@ -2219,14 +2219,14 @@ test "match guards" {
 }
 
 test "match tuple patterns" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x = (:ok, 42)
         \\ match x
         \\ | (:asdf, v) => 1
         \\ | (:ok, v) => v
         \\ | (:err, e) => 2
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const x = (:ok, 42)
         \\ match x
         \\ | (:asdf, v) => 1
@@ -2241,7 +2241,7 @@ test "match tuple patterns" {
 // assignment & binding
 //
 test "local binding shadows outer binding" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 10
         \\ const f = fn() do
         \\     let x = 20
@@ -2252,7 +2252,7 @@ test "local binding shadows outer binding" {
 }
 
 test "assignment resolves to nearest binding" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = 10
         \\ const f = fn() do
         \\     let x = 20
@@ -2285,14 +2285,14 @@ test "tuple binding mismatch reports item counts" {
 }
 
 test "tuple let binding initializes locals" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a, b = (1, 2)
         \\ a + b
     , 3);
 }
 
 test "num alias works in fn and method signatures" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct Chain {
         \\     fn take(self, count: num) count,
         \\ }
@@ -2302,7 +2302,7 @@ test "num alias works in fn and method signatures" {
 }
 
 test "num alias works in range bounds" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn f(count: num) do
         \\     let out = 0
         \\     for i in 0..count do
@@ -2315,7 +2315,7 @@ test "num alias works in range bounds" {
 }
 
 test "markov take body" {
-    try t.top_string(
+    try t.topString(
         \\ fn random(n) math.floor((time.now_ns() / 1000) % n)
         \\ fn pref(a, b) fmt("%v %v", a, b)
         \\ const NOWORD = string_of(10)
@@ -2462,7 +2462,7 @@ test "named call reports multiple bad parameters" {
 // fn semantics
 //
 test "function returns single value (last expression)" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() do
         \\     1
         \\     2
@@ -2473,7 +2473,7 @@ test "function returns single value (last expression)" {
 }
 
 test "function with multiple parameters" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a, b, c) a + b + c
         \\ f(10, 20, 30)
     , 60);
@@ -2493,7 +2493,7 @@ test "typed function alias call is checked" {
 }
 
 test "recursive function with guards" {
-    try t.top_number(
+    try t.topNumber(
         \\ const sum = fn(n)
         \\     match n
         \\     | 0 => do 0 end
@@ -2507,7 +2507,7 @@ test "recursive function with guards" {
 // operator behaviour
 //
 test "comparison with guard in match" {
-    try t.top_number(
+    try t.topNumber(
         \\ const check = fn(x)
         \\     match x
         \\     | v when v > 50 => do 1 end
@@ -2518,34 +2518,34 @@ test "comparison with guard in match" {
 }
 
 test "and operator works" {
-    try t.top_atom(
+    try t.topAtom(
         \\ 1 and 1 and :true
     , "true");
 }
 
 test "or operator works" {
-    try t.top_atom(
+    try t.topAtom(
         \\ 0 or 0 or :true
     , "true");
 }
 
 test "and operator short-circuit" {
-    try t.top_number(
+    try t.topNumber(
         \\ 0 and 999
     , 0);
 }
 
 test "string escaping works" {
-    try t.top_string("\"hello\\nworld\"", "hello\nworld");
+    try t.topString("\"hello\\nworld\"", "hello\nworld");
 }
 
 test "single and double quotes are distinct" {
-    try t.top_string("'hello\\nworld'", "hello\\nworld");
-    try t.top_string("\"hello\\nworld\"", "hello\nworld");
+    try t.topString("'hello\\nworld'", "hello\\nworld");
+    try t.topString("\"hello\\nworld\"", "hello\nworld");
 }
 
 test "spawned fiber with sleep completes" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(n) do sleep(1) n * 2 end
         \\ const h = spawn f(21)
         \\ join(h)
@@ -2553,7 +2553,7 @@ test "spawned fiber with sleep completes" {
 }
 
 test "channel with fibers" {
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(0)
         \\ const sender = fn(c, v) do send(c, v) v end
         \\ const s = spawn sender(ch, 42)
@@ -2561,7 +2561,7 @@ test "channel with fibers" {
         \\ join(s)
         \\ msg
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(0)
         \\ const worker = fn(id) do send(ch, id * 10) id end
         \\ const a = spawn worker(1)
@@ -2575,13 +2575,13 @@ test "channel with fibers" {
 }
 
 test "buffered channels" {
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(2)
         \\ send(ch, 10)
         \\ send(ch, 32)
         \\ recv(ch) + recv(ch)
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(3)
         \\ send(ch, 1)
         \\ send(ch, 2)
@@ -2591,13 +2591,13 @@ test "buffered channels" {
 }
 
 test "yield suspends and resumes fiber" {
-    try t.top_type(
+    try t.topType(
         \\ do yield end
     , .atom);
 }
 
 test "spawned buffered channel recv does not return missing" {
-    try t.top_number(
+    try t.topNumber(
         \\ let ch = chan(2)
         \\ let worker = fn(n) do
         \\   send(ch, n + 10)
@@ -2609,7 +2609,7 @@ test "spawned buffered channel recv does not return missing" {
 }
 
 test "multiple spawned joins survive nested calls" {
-    try t.top_number(
+    try t.topNumber(
         \\ let worker = fn(n) do
         \\   n + 10
         \\ end
@@ -2628,32 +2628,32 @@ test "multiple spawned joins survive nested calls" {
 //
 
 test "comp arithmetic" {
-    try t.top_number(
+    try t.topNumber(
         \\ comp (1 + 2 * 3)
     , 7);
-    try t.top_number(
+    try t.topNumber(
         \\ comp ((10 / 2) + (3 * 4))
     , 17);
-    try t.top_number(
+    try t.topNumber(
         \\ comp (-5 + 10)
     , 5);
 }
 
 test "comp result in runtime" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x = comp (2 + 3)
         \\ x * 2
     , 10);
 }
 
 test "comp string and bool ops" {
-    try t.top_string(
+    try t.topString(
         \\ comp ("hello" ~ " " ~ "world")
     , "hello world");
-    try t.top_atom(
+    try t.topAtom(
         \\ comp (1 < 2)
     , "true");
-    try t.top_atom(
+    try t.topAtom(
         \\ comp (:true and :true)
     , "true");
 }
@@ -2671,27 +2671,27 @@ test "comp errors" {
 }
 
 test "fn name(params) defines named function" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn add(a, b) a + b
         \\ add(5, 3)
     , 8);
 }
 
 test "fn name(params) multiple named functions" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn mul(x, y) x * y
         \\ fn add(a, b) a + b
         \\ mul(add(2, 3), 4)
     , 20);
 }
 test "match nested patterns" {
-    try t.top_number(
+    try t.topNumber(
         \\ const data = (:ok, (:inner, 42))
         \\ match data
         \\ | (:ok, (:inner, v)) => v
         \\ | _ => 0
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const data = (:ok, (:inner, 10))
         \\ match data
         \\ | (:ok, (:inner, v)) when v < 5 => 1
@@ -2701,7 +2701,7 @@ test "match nested patterns" {
 }
 
 test "channel receives from multiple producers preserve ordering" {
-    try t.top_number(
+    try t.topNumber(
         \\ const ch = chan(0)
         \\ const work = fn(id, v) do send(ch, v) id end
         \\ const a = spawn work(1, 100)
@@ -2713,7 +2713,7 @@ test "channel receives from multiple producers preserve ordering" {
 }
 
 test "channel select w/ multiple waiters" {
-    try t.top_number(
+    try t.topNumber(
         \\ const ch1 = chan(0)
         \\ const ch2 = chan(0)
         \\ spawn fn() send(ch1, 10)
@@ -2731,7 +2731,7 @@ test "macro inner binding invisible outside" {
 }
 
 test "numeric and string keys are distinct" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {}
         \\ t[1] = 100
         \\ t["1"] = 200
@@ -2744,14 +2744,14 @@ test "numeric and string keys are distinct" {
 //
 
 test "try ? unwraps ok tuple" {
-    try t.top_number(
+    try t.topNumber(
         \\ (:ok, 42)?
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() (:ok, 10)
         \\ f()?
     , 10);
-    try t.top_number(
+    try t.topNumber(
         \\ fn ok() -> (:ok, num) do
         \\   (:ok, 1)
         \\ end
@@ -2775,13 +2775,13 @@ test "try ? error propagation" {
 }
 
 test "try ? chains with pipe" {
-    try t.top_number(
+    try t.topNumber(
         \\ (:ok, 5)? |> fn(x) x * 2
     , 10);
 }
 
 test "try ? in pattern matching" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() (:ok, 7)
         \\ match f()?
         \\ | 7 => 100
@@ -2790,38 +2790,38 @@ test "try ? in pattern matching" {
 }
 
 test "nested ok tuples extracts inner" {
-    try t.top_type(
+    try t.topType(
         \\ (:ok, (:inner, 42))?
     , .tuple);
 }
 
 test "orelse type dispatch" {
-    try t.top_number(
+    try t.topNumber(
         \\ (:err, :fail) orelse 42
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ (:ok, 100) orelse 42
     , 100);
-    try t.top_number(
+    try t.topNumber(
         \\ :nil orelse 50
     , 50);
-    try t.top_number(
+    try t.topNumber(
         \\ 10 orelse 20
     , 10);
-    try t.top_number(
+    try t.topNumber(
         \\ (:err, :a) orelse (:err, :b) orelse 99
     , 99);
-    try t.top_number(
+    try t.topNumber(
         \\ (:ok, 15)? orelse 33
     , 15);
 }
 
 test "orelse right side" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() (:err, :no)
         \\ f() orelse 77
     , 77);
-    try t.top_number(
+    try t.topNumber(
         \\ (:err, :fail) orelse (:ok, 88)
     , 88);
 }
@@ -2833,28 +2833,28 @@ test "orelse right side" {
 //
 
 test "pipe: implicit single call" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a) a * 2
         \\ 21 |> f
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a) a * 2
         \\ 21 |> f()
     , 42);
 }
 
 test "pipe: implicit chained calls" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
         \\ 20 |> a |> b
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
         \\ 20 |> a() |> b()
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
         \\ 20 |> a() |> b
@@ -2862,13 +2862,13 @@ test "pipe: implicit chained calls" {
 }
 
 test "pipe: closures" {
-    try t.top_number(
+    try t.topNumber(
         \\ 20 |> fn(x) x + 22
     , 42);
 }
 
 test "pipe: implicit match subject" {
-    try t.top_number(
+    try t.topNumber(
         \\ 2
         \\ |> match
         \\    | x => 42
@@ -2878,62 +2878,62 @@ test "pipe: implicit match subject" {
 // pipe placeholders
 
 test "pipe: explicit placeholder arg position" {
-    try t.top_string(
+    try t.topString(
         \\ fn f(a, b) string(a) ~ string(b)
         \\ "asdf" |> f("got ", _)
     , "got asdf");
 }
 
 test "pipe: explicit placeholder method receiver" {
-    try t.top_number(
+    try t.topNumber(
         \\ const obj = { inner = 40, meth = fn(self, x) self.inner + x }
         \\ obj |> _:meth(2)
     , 42);
 }
 
 test "pipe: explicit placeholder index access" {
-    try t.top_number(
+    try t.topNumber(
         \\ const t = {5, 6, 7}
         \\ 1 |> t[_]
     , 6);
 }
 
 test "pipe: explicit placeholder expression" {
-    try t.top_string(
+    try t.topString(
         \\ "asdf" |> "aaa" ~ _:upper()
     , "aaaASDF");
 }
 
 test "pipe: explicit placeholder in nested call arg" {
-    try t.top_string(
+    try t.topString(
         \\ fn fmt(s, v) s ~ v
         \\ "asdf" |> fmt("aaa", _:upper())
     , "aaaASDF");
 }
 
 test "pipe: explicit placeholder in expr" {
-    try t.top_string(
+    try t.topString(
         \\ const x = "asdf"
         \\ x |> do string(_) end
     , "asdf");
 }
 
 test "pipe: multiple placeholders" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn add(a, b) a + b
         \\ 5 |> add(_, _)
     , 10);
 }
 
 test "pipe: placeholder as callee" {
-    try t.top_string(
+    try t.topString(
         \\ fn f(x) x:upper()
         \\ "asdf" |> f(_)
     , "ASDF");
 }
 
 test "pipe: method chain with state mutation" {
-    try t.top_number(
+    try t.topNumber(
         \\ let counter = 40
         \\ const obj = { 
         \\   val = 20, 
@@ -2949,7 +2949,7 @@ test "pipe: method chain with state mutation" {
 }
 
 test "pipe: nested scope capture" {
-    try t.top_string(
+    try t.topString(
         \\ "hello" |> do 
         \\    const transform = fn(s) s:upper()
         \\    transform(_)
@@ -2958,15 +2958,15 @@ test "pipe: nested scope capture" {
 }
 
 test "compiler: named parameters" {
-    try t.top_number(
+    try t.topNumber(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(x = 5, y = 3)
     , 8);
-    try t.top_number(
+    try t.topNumber(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(y = 3, x = 5)
     , 8);
-    try t.top_number(
+    try t.topNumber(
         \\ const add3 = fn(x: int, y: int, z: int) do x + y + z end
         \\ add3(1, y = 2, z = 3)
     , 6);
@@ -2988,25 +2988,25 @@ test "compiler: named parameters errors" {
 }
 
 test "named parameters with generics" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn identity[T](x: T) x
         \\ identity(x = 42)
     , 42);
-    try t.top_string(
+    try t.topString(
         \\ fn identity[T](x: T) x
         \\ identity(x = "hi")
     , "hi");
 }
 
 test "double assignment" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = {}
         \\ let c = (a.b = 5)
     , 5);
 }
 
 test "assignment expression returns assigned value" {
-    try t.top_number(
+    try t.topNumber(
         \\ let a = {}
         \\ let c = (a.b = 5)
         \\ c
@@ -3014,7 +3014,7 @@ test "assignment expression returns assigned value" {
 }
 
 test "for loop calls iterator" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = set_metatable({}, {
         \\   __iter = fn(self) do
         \\     let i = 0
@@ -3037,30 +3037,30 @@ test "for loop calls iterator" {
 //
 
 test "optional params basic" {
-    try t.top_atom(
+    try t.topAtom(
         \\ const f = fn(a, ?b) b
         \\ f(42)
     , "no");
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a, ?b) b
         \\ f(42, 10)
     , 10);
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a, ?b) a + b
         \\ f(3, 7)
     , 10);
 }
 
 test "optional params multiple" {
-    try t.top_atom(
+    try t.topAtom(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1)
     , "no");
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1, :no, 42)
     , 42);
-    try t.top_atom(
+    try t.topAtom(
         \\ const f = fn(?a, ?b) a
         \\ f()
     , "no");
@@ -3078,11 +3078,11 @@ test "optional params arity errors" {
 }
 
 test "optional params with typed function" {
-    try t.top_atom(
+    try t.topAtom(
         \\ const f = fn(a: number, ?b: number) b
         \\ f(42)
     , "no");
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn(a: number, ?b: number) a + (b orelse 0)
         \\ f(3, 7)
     , 10);
@@ -3101,7 +3101,7 @@ test "module import auto-binds filename" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./mymod"
         \\ mymod
     , 42);
@@ -3116,7 +3116,7 @@ test "module import with custom name" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import { m = "./mymod" }
         \\ m
     , 7);
@@ -3135,7 +3135,7 @@ test "module pub exports are accessible as fields" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const lib = import "./lib"
         \\ lib.y(lib.x)
     , 84);
@@ -3153,7 +3153,7 @@ test "module non-pub values are not exported" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const lib = import "./lib"
         \\ lib.visible
     , 42);
@@ -3170,7 +3170,7 @@ test "cross-module macro injection works" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./macros"
         \\ macros.double!(21)
     , 42);
@@ -3188,7 +3188,7 @@ test "non-pub macro is not injected" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./macros"
         \\ macros.visible!(99)
     , 99);
@@ -3212,7 +3212,7 @@ test "cross-module proc macro injection works" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./procs"
         \\ procs.add_one!(41)
     , 42);
@@ -3232,7 +3232,7 @@ test "cross-module pub struct is accessible" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./structs"
         \\ const b = structs.new_box(42)
         \\ b.val
@@ -3248,7 +3248,7 @@ test "const x = import \"foo\" with different names binds both" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const x = import "./mymod"
         \\ x.val
     , 42);
@@ -3274,7 +3274,7 @@ test "import empty module does not crash" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./empty"
         \\ 42
     , 42);
@@ -3289,7 +3289,7 @@ test "import in function body binds correctly" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ fn get_val() do
         \\   import "./helper"
         \\   helper.val
@@ -3310,7 +3310,7 @@ test "pub type alias from imported module is available" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./types"
         \\ const x: UserId = 42
         \\ types.greet(x)
@@ -3329,7 +3329,7 @@ test "non-pub type alias in imported module does not pollute importer" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./priv_types"
         \\ priv_types.val
     , 42);
@@ -3348,7 +3348,7 @@ test "pub type alias referencing another type alias from same module" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./chain"
         \\ chain.take(42)
     , 42);
@@ -3367,7 +3367,7 @@ test "pub type alias referencing a pub struct from same module" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./struct_types"
         \\ const p = struct_types.make(1, 2)
         \\ p.x + p.y
@@ -3386,7 +3386,7 @@ test "pub type alias works in type annotation after import" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./alias_mod"
         \\ const x: Code = 99
         \\ alias_mod.lookup(x)
@@ -3402,7 +3402,7 @@ test "module with only non-pub items compiles and imports" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./priv"
         \\ 1
     , 1);
@@ -3423,7 +3423,7 @@ test "pub import { x = \"a\" } re-exports module" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const outer = import "./outer"
         \\ outer.inner.val
     , 42);
@@ -3444,7 +3444,7 @@ test "pub import \"foo\" at statement level re-exports" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ const outer = import "./outer"
         \\ outer.inner.val
     , 42);
@@ -3463,7 +3463,7 @@ test "multi-import with two entries" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import { x = "./alpha", y = "./beta" }
         \\ x.a + y.b
     , 3);
@@ -3478,7 +3478,7 @@ test "import inside do block binds correctly" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ do
         \\   import "./helper"
         \\   helper.val
@@ -3495,7 +3495,7 @@ test "import with relative path works" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./sub_rel"
         \\ sub_rel.val
     , 42);
@@ -3539,7 +3539,7 @@ test "transitive pub import through re-export chain" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./middle"
         \\ middle.leaf.deep + middle.mid
     , 149);
@@ -3554,7 +3554,7 @@ test "same file imported under multiple names" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import { a = "./shared", b = "./shared" }
         \\ a.v + b.v
     , 14);
@@ -3577,7 +3577,7 @@ test "import with absolute path" {
 
     var result = try t.topResult(source, module_dir);
     defer result.deinit();
-    const actual = try result.value.as_number();
+    const actual = try result.value.asNumber();
     if (@abs(@as(f64, 42) - actual) > 0.000000001)
         return error.TestExpectedEqual;
 }
@@ -3625,7 +3625,7 @@ test "module with all pub decl types" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
     // val, add, and Pt should all appear in the export table
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./alltypes"
         \\ alltypes.val + alltypes.add(3, 4)
     , 49);
@@ -3647,7 +3647,7 @@ test "duplicate import name is rejected at compile time" {
 }
 
 test "labeled loops break from outer loop via label" {
-    try t.top_number(
+    try t.topNumber(
         \\ let r = 0
         \\ loop/a do
         \\   for i in 0..5 do
@@ -3657,14 +3657,14 @@ test "labeled loops break from outer loop via label" {
         \\ end
         \\ r
     , 3);
-    try t.top_number(
+    try t.topNumber(
         \\ let r = 0
         \\ while/a 1 == 1 do
         \\   r += 1
         \\   if r == 5 break/a(r)
         \\ end
     , 5);
-    try t.top_number(
+    try t.topNumber(
         \\ for/a i in 0..10 do
         \\   if i == 4 break/a(i * 10)
         \\ end
@@ -3672,7 +3672,7 @@ test "labeled loops break from outer loop via label" {
 }
 
 test "labeled continue targets outer while loop" {
-    try t.top_number(
+    try t.topNumber(
         \\ let r = 0
         \\ let i = 0
         \\ while/a i < 5 do
@@ -3685,20 +3685,20 @@ test "labeled continue targets outer while loop" {
 }
 
 test "labeled do block" {
-    try t.top_number(
+    try t.topNumber(
         \\ do/a
         \\   break/a(42)
         \\   0
         \\ end
     , 42);
-    try t.top_atom(
+    try t.topAtom(
         \\ do/a
         \\   let x = 10
         \\   if x > 5 break/a(:ok)
         \\   :never
         \\ end
     , "ok");
-    try t.top_number(
+    try t.topNumber(
         \\ let x = do/a
         \\   let y = 2
         \\   break/a(y * 21)
@@ -3708,7 +3708,7 @@ test "labeled do block" {
 }
 
 test "labeled loop: unlabeled break targets innermost" {
-    try t.top_number(
+    try t.topNumber(
         \\ let r = 0
         \\ loop/a do
         \\   for i in 0..3 do
@@ -3751,7 +3751,7 @@ test "import typed function reports arg type mismatch" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
     // correct types work
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./adder"
         \\ adder.add(1, 2)
     , 3);
@@ -3773,7 +3773,7 @@ test "import typed function with string param passes type check" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_string_in_dir(module_dir,
+    try t.topStringInDir(module_dir,
         \\ import "./echo"
         \\ echo.echo("ok")
     , "ok");
@@ -3790,7 +3790,7 @@ test "import typed function with no type annotations falls through" {
     });
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
-    try t.top_number_in_dir(module_dir,
+    try t.topNumberInDir(module_dir,
         \\ import "./plain"
         \\ plain.double(21)
     , 42);

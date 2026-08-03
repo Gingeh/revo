@@ -70,7 +70,7 @@ pub const core_atoms = enum(usize) {
 
     pub const lastFalse = @intFromEnum(@This().false);
 
-    pub inline fn atom_id(comptime a: @This()) usize {
+    pub inline fn atomId(comptime a: @This()) usize {
         return @intFromEnum(a);
     }
 

@@ -71,8 +71,10 @@ const MimAllocator = struct {
     }
 };
 
+var mimalloc_ctx: u8 = 0;
+
 pub const mim_allocator = Allocator{
-    .ptr = undefined,
+    .ptr = @ptrCast(&mimalloc_ctx),
     .vtable = &mim_allocator_vtable,
 };
 const mim_allocator_vtable = Allocator.VTable{

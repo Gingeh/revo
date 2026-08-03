@@ -1,3 +1,4 @@
+// zlint-disable line-length -- yeah
 const std = @import("std");
 const lang = @import("./root.zig");
 
@@ -639,8 +640,8 @@ const PatternMatcher = struct {
     fn init(allocator: std.mem.Allocator, single_cap: usize) !PatternMatcher {
         var self = PatternMatcher{
             .allocator = allocator,
-            .singles = undefined,
-            .groups = undefined,
+            .singles = .empty,
+            .groups = .empty,
         };
         self.singles = try std.ArrayList(SingleCapture).initCapacity(allocator, single_cap);
         errdefer self.singles.deinit(allocator);

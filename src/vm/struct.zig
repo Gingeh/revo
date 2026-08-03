@@ -41,7 +41,12 @@ pub const StructTypePool = struct {
         self.types.deinit(self.alloc);
     }
 
-    pub fn registerType(self: *StructTypePool, name: []const u8, fields: []const StructField, methods: std.StringHashMap(Data)) !StructTypeID {
+    pub fn registerType(
+        self: *StructTypePool,
+        name: []const u8,
+        fields: []const StructField,
+        methods: std.StringHashMap(Data),
+    ) !StructTypeID {
         var field_index = std.AutoHashMap(memory.AtomID, usize).init(self.alloc);
         errdefer field_index.deinit();
         for (fields, 0..) |f, idx| {
@@ -109,21 +114,13 @@ pub const StructInstancePool = struct {
     next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !StructInstancePool {
-        var self = StructInstancePool{
+        return StructInstancePool{
             .alloc = alloc,
-            .instances = undefined,
-            .marks = undefined,
+            .instances = try .initCapacity(alloc, 4),
+            .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
-            .next = undefined,
+            .next = try .initCapacity(alloc, 4),
         };
-        self.instances = try std.ArrayList(?StructInstance).initCapacity(alloc, 4);
-        errdefer self.instances.deinit(alloc);
-        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
-        errdefer self.marks.deinit();
-        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
-        errdefer self.next.deinit(alloc);
-
-        return self;
     }
 
     pub fn deinit(self: *StructInstancePool) void {
@@ -140,7 +137,18 @@ pub const StructInstancePool = struct {
         const fields = try self.alloc.alloc(Data, field_count);
         @memset(fields, revo.Data.new.core(.undef));
         errdefer self.alloc.free(fields);
-        return pool.create(self.alloc, StructInstance, StructInstanceID, &self.instances, &self.marks, &self.dead, &self.first, &self.last, &self.next, .{ .type_id = type_id, .fields = fields });
+        return pool.create(
+            self.alloc,
+            StructInstance,
+            StructInstanceID,
+            &self.instances,
+            &self.marks,
+            &self.dead,
+            &self.first,
+            &self.last,
+            &self.next,
+            .{ .type_id = type_id, .fields = fields },
+        );
     }
 
     pub fn get(self: *StructInstancePool, id: StructInstanceID) !*StructInstance {
@@ -162,7 +170,18 @@ pub const StructInstancePool = struct {
     }
 
     pub fn sweep(self: *StructInstancePool) void {
-        pool.sweep(self.alloc, StructInstance, StructInstanceID, &self.instances, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeStruct);
+        pool.sweep(
+            self.alloc,
+            StructInstance,
+            StructInstanceID,
+            &self.instances,
+            &self.marks,
+            &self.dead,
+            &self.first,
+            &self.last,
+            &self.next,
+            freeStruct,
+        );
     }
 
     pub fn bytes(self: *const StructInstancePool) usize {

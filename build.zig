@@ -100,7 +100,12 @@ fn binName(b: *std.Build, triple: []const u8, btype: BinaryType) []const u8 {
 }
 
 /// static
-fn buildMimalloc(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, dep: *Build.Dependency) !*std.Build.Step.Compile {
+fn buildMimalloc(
+    b: *Build,
+    target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    dep: *Build.Dependency,
+) !*std.Build.Step.Compile {
     const lib = b.addLibrary(
         .{
             .name = "mimalloc",
@@ -163,20 +168,14 @@ fn buildMimalloc(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
 }
 
 pub fn build(b: *Build) !void {
-    var target: std.Build.ResolvedTarget = undefined;
     // Defaults to 'musl' toolchain for linux system because otherwise the build fails with default settings,
     // but not when enabled 'llvm' and 'lld'. -hamza (Jun 14 2026)
-    var with_glibc: bool = undefined;
-    if (builtin.os.tag == .linux) {
-        with_glibc = b.option(bool, "glibc", "Build with llvm and link with glibc") orelse false;
-        if (with_glibc) {
-            target = b.standardTargetOptions(.{ .default_target = .{ .abi = .gnu } });
-        } else {
-            target = b.standardTargetOptions(.{ .default_target = .{ .abi = .musl } });
-        }
-    } else {
-        target = b.standardTargetOptions(.{});
-    }
+    const with_glibc = builtin.os.tag == .linux and
+        (b.option(bool, "glibc", "Build with llvm and link with glibc") orelse false);
+    const target = if (builtin.os.tag == .linux)
+        b.standardTargetOptions(.{ .default_target = if (with_glibc) .{ .abi = .gnu } else .{ .abi = .musl } })
+    else
+        b.standardTargetOptions(.{});
 
     // TODO: nan-boxing stores pointer tags in the high bits of a 64-bit value
     // 32bit builds are unsupported until a good implementation of tagged data is made
@@ -215,7 +214,12 @@ pub fn build(b: *Build) !void {
     const features = getFeatures(features_str);
 
     var git_exit_code: u8 = 0; // ignored, but it's a required argument
-    const git_output = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &git_exit_code, .ignore) catch VERSION;
+    const git_output = b.runAllowFail(
+        &.{ "git", "rev-parse", "--short", "HEAD" },
+        &git_exit_code,
+        .ignore,
+    ) catch VERSION;
+
     const dev_version = std.mem.trim(u8, git_output, " \n\r");
 
     // used for dev builds

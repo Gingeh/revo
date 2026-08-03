@@ -66,8 +66,8 @@ fn monotonic_ns(_: []const Data, vm: *VM) !NativeResult {
 test "time module works probably" {
     const testing = revo.lang.testing;
 
-    try testing.top_true("time.now() > 0");
-    try testing.top_true("time.monotonic() >= 0");
+    try testing.topTrue("time.now() > 0");
+    try testing.topTrue("time.monotonic() >= 0");
 }
 
 const std = @import("std");

@@ -23,14 +23,26 @@ pub fn deinit(self: *Project, allocator: std.mem.Allocator) void {
 /// detect project mode by walking ancestors of name for lib.json / exe.json
 pub fn detect(name: []const u8, io: std.Io, alloc: std.mem.Allocator) Project {
     const dir = std.fs.path.dirname(name) orelse return .{ .mode = .script, .root = "" };
-    const abs_dir = std.Io.Dir.realPathFileAlloc(std.Io.Dir.cwd(), io, dir, alloc) catch return .{ .mode = .script, .root = "" };
+    const abs_dir = std.Io.Dir.realPathFileAlloc(
+        std.Io.Dir.cwd(),
+        io,
+        dir,
+        alloc,
+    ) catch return .{ .mode = .script, .root = "" };
+
     defer alloc.free(abs_dir);
     return walkForManifest(abs_dir, io, alloc);
 }
 
 /// detect from current working directory
 pub fn detectFromCwd(io: std.Io, alloc: std.mem.Allocator) Project {
-    const abs_cwd = std.Io.Dir.realPathFileAlloc(std.Io.Dir.cwd(), io, ".", alloc) catch return .{ .mode = .script, .root = "" };
+    const abs_cwd = std.Io.Dir.realPathFileAlloc(
+        std.Io.Dir.cwd(),
+        io,
+        ".",
+        alloc,
+    ) catch return .{ .mode = .script, .root = "" };
+
     defer alloc.free(abs_cwd);
     return walkForManifest(abs_cwd, io, alloc);
 }

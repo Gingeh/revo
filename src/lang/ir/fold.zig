@@ -1,3 +1,4 @@
+// zlint-disable line-length -- yeah
 //! walk ir and fold constant expressions
 //! safe bc operands use .inst pointers (not register names),
 //! so data flow is correct whatever the control flow is

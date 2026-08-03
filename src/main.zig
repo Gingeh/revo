@@ -86,7 +86,14 @@ pub fn main(provided_init: std.process.Init) void {
     };
 }
 
-fn handleSource(init: std.process.Init, gpa: Allocator, arena: Allocator, name: []const u8, source: []const u8, config: Config) !void {
+fn handleSource(
+    init: std.process.Init,
+    gpa: Allocator,
+    arena: Allocator,
+    name: []const u8,
+    source: []const u8,
+    config: Config,
+) !void {
     switch (config.mode) {
         .run => try runSource(init, gpa, name, source, config),
         .bench => try benchSource(init, gpa, name, source, config),
@@ -114,7 +121,12 @@ fn runMain(init: std.process.Init) !void {
     if (args.len < 2) {
         const stdin_file = std.Io.File.stdin();
         if (!try stdin_file.isTty(init.io)) {
-            const source = std.Io.Dir.cwd().readFileAlloc(init.io, "/dev/stdin", arena, std.Io.Limit.unlimited) catch |err| {
+            const source = std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                "/dev/stdin",
+                arena,
+                std.Io.Limit.unlimited,
+            ) catch |err| {
                 printError(init, "reading stdin - {}", .{err});
                 return error.FileError;
             };
@@ -144,7 +156,12 @@ fn runMain(init: std.process.Init) !void {
     // else if no script path and stdin is pipe, read stdin then run
     if (config.script_path) |path| {
         if (std.mem.eql(u8, path, "-")) {
-            const source = std.Io.Dir.cwd().readFileAlloc(init.io, "/dev/stdin", arena, std.Io.Limit.unlimited) catch |err| {
+            const source = std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                "/dev/stdin",
+                arena,
+                std.Io.Limit.unlimited,
+            ) catch |err| {
                 printError(init, "reading stdin - {}", .{err});
                 return error.FileError;
             };
@@ -158,7 +175,12 @@ fn runMain(init: std.process.Init) !void {
     } else {
         const stdin_file = std.Io.File.stdin();
         if (!try stdin_file.isTty(init.io)) {
-            const source = std.Io.Dir.cwd().readFileAlloc(init.io, "/dev/stdin", arena, std.Io.Limit.unlimited) catch |err| {
+            const source = std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                "/dev/stdin",
+                arena,
+                std.Io.Limit.unlimited,
+            ) catch |err| {
                 printError(init, "reading stdin - {}", .{err});
                 return error.FileError;
             };
@@ -231,13 +253,20 @@ fn printSuccess(init: std.process.Init, comptime fmt: []const u8, args: anytype)
 }
 
 fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8) !VM {
-    return VM.init(.{ .alloc = gpa, .io = init.io, .argv = argv }) catch |err| {
+    return VM.init(.{ .alloc = gpa, .io = init.io, .argv = argv, .diag_alloc = gpa }) catch |err| {
         printError(init, "initializing vm - {}", .{err});
         return error.VmInitError;
     };
 }
 
-fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: []const u8, source_text: []const u8, test_mode: bool) !Artifact {
+fn compileSource(
+    init: std.process.Init,
+    vm: *VM,
+    gpa: Allocator,
+    source_name: []const u8,
+    source_text: []const u8,
+    test_mode: bool,
+) !Artifact {
     var ws = try revo.lang.Workspace.initWithVm(vm, gpa);
     defer ws.deinit();
 
@@ -407,7 +436,13 @@ fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, confi
     try runCompiledArtifact(init, gpa, &vm, "<inline>", artifact, code, config.echo_last);
 }
 
-fn runSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: []const u8, config: Config) !void { // echo_last: bool, test_mode: bool) !void {
+fn runSource(
+    init: std.process.Init,
+    gpa: Allocator,
+    path: []const u8,
+    source: []const u8,
+    config: Config,
+) !void {
     var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
@@ -421,7 +456,13 @@ fn runSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: [
     try runCompiledArtifact(init, gpa, &vm, path, artifact, source, config.echo_last);
 }
 
-fn runBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, config: Config) !void {
+fn runBytecode(
+    init: std.process.Init,
+    gpa: Allocator,
+    path: []const u8,
+    bytecode_data: []const u8,
+    config: Config,
+) !void {
     var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
@@ -502,7 +543,13 @@ fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source:
     try benchArtifact(init, gpa, &vm, path, artifact, source, config.bench_iters, config.echo_last);
 }
 
-fn benchBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, config: Config) !void {
+fn benchBytecode(
+    init: std.process.Init,
+    gpa: Allocator,
+    path: []const u8,
+    bytecode_data: []const u8,
+    config: Config,
+) !void {
     var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
@@ -528,7 +575,14 @@ fn benchBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytec
     );
 }
 
-fn compileToBytecode(init: std.process.Init, gpa: Allocator, arena: Allocator, path: []const u8, source: []const u8, config: Config) !void {
+fn compileToBytecode(
+    init: std.process.Init,
+    gpa: Allocator,
+    arena: Allocator,
+    path: []const u8,
+    source: []const u8,
+    config: Config,
+) !void {
     var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 

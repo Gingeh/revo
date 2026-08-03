@@ -67,7 +67,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
                 -1;
 
             if (revo.has_async_backend) {
-                _ = revo.async_backend_impl.poll_all(
+                _ = revo.async_backend_impl.pollAll(
                     &self.runtime.async_backend,
                     self,
                     timeout_ms,
@@ -137,7 +137,12 @@ pub inline fn execFiberUntilDepth(self: *VM, target_depth: usize) !?VM.EvalFailu
 // address; aligning the whole dispatch loop keeps that aliasing deterministic
 // regardless of unrelated changes elsewhere in the binary. wasm doesn't support
 // function alignment, so the aligned entry exists only on native targets.
-fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
+fn execFiberGenericWithAlloc(
+    self: *VM,
+    alloc: std.mem.Allocator,
+    comptime use_depth: bool,
+    target_depth: usize,
+) !?VM.EvalFailure {
     if (builtin.target.cpu.arch.isWasm()) {
         return execFiberDispatch(self, alloc, use_depth, target_depth);
     } else {
@@ -145,7 +150,12 @@ fn execFiberGenericWithAlloc(self: *VM, alloc: std.mem.Allocator, comptime use_d
     }
 }
 
-inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
+inline fn execFiberDispatch(
+    self: *VM,
+    alloc: std.mem.Allocator,
+    comptime use_depth: bool,
+    target_depth: usize,
+) !?VM.EvalFailure {
     @setEvalBranchQuota(2000);
     var fiber = self.currentFiber();
     std.debug.assert(fiber.pc < fiber.program.len);
@@ -197,7 +207,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 continue :dispatch instr.op;
             };
 
-            return self.fail(error.IncompatibleTypes, "cannot add {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot add {s} and {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         .concat => {
             if (try execConcat(self, regs, base, instr, alloc)) |failure| return failure;
@@ -217,7 +231,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             };
-            return self.fail(error.IncompatibleTypes, "cannot subtract {s} from {s}", .{ revo.std_lib.dataToString(rhs), revo.std_lib.dataToString(lhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot subtract {s} from {s}",
+                .{ revo.std_lib.dataToString(rhs), revo.std_lib.dataToString(lhs) },
+            );
         },
         .mul => {
             const lhs = regRead(regs, base, instr.b);
@@ -244,7 +262,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             };
-            return self.fail(error.IncompatibleTypes, "cannot divide {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot divide {s} by {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         .mod => {
             const lhs = regRead(regs, base, instr.b);
@@ -271,7 +293,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             };
-            return self.fail(error.IncompatibleTypes, "cannot mod {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot mod {s} by {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         inline .band, .bor, .bxor => |op| {
             const lhs = regRead(regs, base, instr.b);
@@ -294,14 +320,23 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 .bor => "cannot bor {s} and {s}",
                 else => "cannot bxor {s} and {s}",
             };
-            return self.fail(error.IncompatibleTypes, msg, .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                msg,
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         inline .shl, .shr => |op| {
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
                 if (revo.memory.numToI64(ln)) |li| if (revo.memory.numToI64(rn)) |ri| {
-                    if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+                    if (ri < 0 or ri > 63) return self.fail(
+                        error.ShiftAmountOutOfRange,
+                        "shift amount {d} out of range",
+                        .{ri},
+                    );
+
                     const shifted: i64 = switch (op) {
                         .shl => @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri))),
                         else => li >> @as(u6, @intCast(ri)),
@@ -312,7 +347,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                     continue :dispatch instr.op;
                 };
             };
-            return self.fail(error.IncompatibleTypes, "cannot shift {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot shift {s} by {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         .int_div => {
             const lhs = regRead(regs, base, instr.b);
@@ -330,7 +369,11 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             };
-            return self.fail(error.IncompatibleTypes, "cannot divide {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            return self.fail(
+                error.IncompatibleTypes,
+                "cannot divide {s} by {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
         },
         .mod_int => {
             const lhs = regRead(regs, base, instr.b);
@@ -375,7 +418,12 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
             }
             const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
             const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
-            if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
+            if (ri < 0 or ri > 63) return self.fail(
+                error.ShiftAmountOutOfRange,
+                "shift amount {d} out of range",
+                .{ri},
+            );
+
             const shifted: i64 = switch (op) {
                 .shl_int => @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri))),
                 else => li >> @as(u6, @intCast(ri)),
@@ -657,7 +705,12 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
             const idx: usize = @intFromFloat(idx_num);
             const t = try self.tuples.get(tuple_id);
             if (idx >= t.items.len)
-                return self.fail(error.InvalidTuple, "tuple index {d} out of range for tuple of length {d}", .{ idx, t.items.len });
+                return self.fail(
+                    error.InvalidTuple,
+                    "tuple index {d} out of range for tuple of length {d}",
+                    .{ idx, t.items.len },
+                );
+
             regWrite(regs, base, instr.a, t.items[idx]);
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -669,7 +722,12 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 return self.typeError("tuple", tuple_val);
             const t = try self.tuples.get(tuple_id);
             if (instr.bx >= t.items.len)
-                return self.fail(error.InvalidTuple, "tuple index {d} out of range for tuple of length {d}", .{ instr.bx, t.items.len });
+                return self.fail(
+                    error.InvalidTuple,
+                    "tuple index {d} out of range for tuple of length {d}",
+                    .{ instr.bx, t.items.len },
+                );
+
             regWrite(regs, base, instr.a, t.items[instr.bx]);
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -759,7 +817,12 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
         },
         .load_stdlib_global => {
             const value = self.stdlib_globals.get(instr.bx) orelse
-                return self.fail(error.UndefinedVariable, "undefined stdlib variable `{s}`", .{self.atomName(instr.bx)});
+                return self.fail(
+                    error.UndefinedVariable,
+                    "undefined stdlib variable `{s}`",
+                    .{self.atomName(instr.bx)},
+                );
+
             regWrite(regs, base, instr.a, value);
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -937,7 +1000,7 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
 
             const tag = tuple.items[0];
 
-            if (tag.asAtom() == revo.core_atoms.atom_id(.err)) {
+            if (tag.asAtom() == revo.core_atoms.atomId(.err)) {
                 if (propagate_errors) {
                     if (fiber.frames.items.len == 2) {
                         if (tuple.items.len > 1) {
@@ -969,7 +1032,7 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 continue :dispatch instr.op;
             }
 
-            if (tag.asAtom() == revo.core_atoms.atom_id(.ok)) {
+            if (tag.asAtom() == revo.core_atoms.atomId(.ok)) {
                 if (tuple.items.len > 1) {
                     regWrite(regs, base, instr.a, tuple.items[1]);
                 }
@@ -984,14 +1047,14 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 const tuple2 = try self.tuples.get(tid);
                 if (tuple2.items.len > 0) {
                     const tag2 = tuple2.items[0];
-                    break :blk tag2.asAtom() == revo.core_atoms.atom_id(.err);
+                    break :blk tag2.asAtom() == revo.core_atoms.atomId(.err);
                 }
                 break :blk false;
             } else false;
 
             const take = switch (op) {
                 .jump_if_not_nil_and_not_err => blk: {
-                    const is_nil = if (val.asAtom()) |a| a == revo.core_atoms.atom_id(.nil) else false;
+                    const is_nil = if (val.asAtom()) |a| a == revo.core_atoms.atomId(.nil) else false;
                     break :blk !is_nil and !is_err;
                 },
                 else => is_err,
@@ -1031,7 +1094,12 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
     return null;
 }
 
-noinline fn execFiberDispatchAligned(self: *VM, alloc: std.mem.Allocator, comptime use_depth: bool, target_depth: usize) align(4096) !?VM.EvalFailure {
+noinline fn execFiberDispatchAligned(
+    self: *VM,
+    alloc: std.mem.Allocator,
+    comptime use_depth: bool,
+    target_depth: usize,
+) align(4096) !?VM.EvalFailure {
     return execFiberDispatch(self, alloc, use_depth, target_depth);
 }
 
@@ -1060,7 +1128,13 @@ inline fn fetchNext(fiber: *VM.Fiber, instr: *Instruction) bool {
 /// so one allocation can build the whole result. only fires when every
 /// operand is a string and the chain is straight-line, so the intermediate
 /// result registers are dead temporaries
-noinline fn execConcat(self: *VM, regs_in: []Data, base_in: usize, instr: Instruction, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
+noinline fn execConcat(
+    self: *VM,
+    regs_in: []Data,
+    base_in: usize,
+    instr: Instruction,
+    alloc: std.mem.Allocator,
+) VM.EvalError!?VM.EvalFailure {
     var regs = regs_in;
     var base = base_in;
     var fiber = self.currentFiber();
@@ -1217,7 +1291,14 @@ noinline fn execConcat(self: *VM, regs_in: []Data, base_in: usize, instr: Instru
 /// stringify an operand for concat: `__tostring` metamethod if it yields a
 /// string, else a display render. null when the metamethod did not produce a
 /// string, so the caller can report the concat failure.
-noinline fn toStringOperand(self: *VM, fiber: **VM.Fiber, base: *usize, regs: *[]Data, alloc: std.mem.Allocator, operand: Data) VM.EvalError!?[]u8 {
+noinline fn toStringOperand(
+    self: *VM,
+    fiber: **VM.Fiber,
+    base: *usize,
+    regs: *[]Data,
+    alloc: std.mem.Allocator,
+    operand: Data,
+) VM.EvalError!?[]u8 {
     if (try self.getMetamethod(operand, "__tostring")) |mm| {
         const call_result = revo.std_lib.callUnaryMetamethod(mm, operand, self);
         fiber.* = self.currentFiber();
@@ -1243,7 +1324,7 @@ noinline fn execSlice(self: *VM, regs: []Data, base: usize, instr: Instruction) 
     const step_value = regRead(regs, base, instr.b + 2);
     const end_value = regRead(regs, base, instr.b + 3);
 
-    const nil_atom = revo.core_atoms.atom_id(.nil);
+    const nil_atom = revo.core_atoms.atomId(.nil);
 
     const step_num = if (step_value.asAtom() == nil_atom)
         @as(f64, 1)
@@ -1293,7 +1374,10 @@ noinline fn execSlice(self: *VM, regs: []Data, base: usize, instr: Instruction) 
             const start: isize = @intFromFloat(start_num);
             const step: isize = @intFromFloat(step_num);
             const end: isize = @intFromFloat(end_num);
-            var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(err);
+            var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(
+                err,
+            );
+
             defer out.deinit(self.runtime.alloc);
             var i = start;
             while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
@@ -1346,7 +1430,13 @@ noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instructi
     }
 }
 
-noinline fn execClosure(self: *VM, regs: []Data, base: usize, instr: Instruction, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
+noinline fn execClosure(
+    self: *VM,
+    regs: []Data,
+    base: usize,
+    instr: Instruction,
+    alloc: std.mem.Allocator,
+) VM.EvalError!?VM.EvalFailure {
     const fiber = self.currentFiber();
     const proto = try self.functions.getPrototype(instr.bx);
     self.noteGCPressure(@sizeOf(revo.functions.Closure) + @sizeOf(revo.functions.UpvalueID) * proto.upvalue_specs.len);
@@ -1363,7 +1453,12 @@ noinline fn execClosure(self: *VM, regs: []Data, base: usize, instr: Instruction
                 upv_buf[i] = closure2.upvalues[spec.index];
             }
         }
-        regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, upv_buf[0..proto.upvalue_specs.len])));
+        regWrite(
+            regs,
+            base,
+            instr.a,
+            Data.new.function(try self.functions.createClosure(instr.bx, upv_buf[0..proto.upvalue_specs.len])),
+        );
     } else {
         var list = try std.ArrayList(revo.functions.UpvalueID).initCapacity(alloc, proto.upvalue_specs.len);
         errdefer list.deinit(alloc);
@@ -1393,12 +1488,21 @@ noinline fn execPow(self: *VM, regs: []Data, base: usize, instr: Instruction) VM
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(revo.memory.ipow(li.?, ri.?)))));
         } else {
             const result = std.math.pow(f64, ln, rn);
-            if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            if (std.math.isNan(result)) return self.fail(
+                error.IncompatibleTypes,
+                "cannot exponentiate {s} by {s}",
+                .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+            );
+
             regWrite(regs, base, instr.a, Data.new.num(result));
         }
         return null;
     };
-    return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+    return self.fail(
+        error.IncompatibleTypes,
+        "cannot exponentiate {s} by {s}",
+        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+    );
 }
 
 noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
@@ -1416,7 +1520,12 @@ noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction)
         const ln: f64 = @bitCast(lhs.bits);
         const rn: f64 = @bitCast(rhs.bits);
         const result = std.math.pow(f64, ln, rn);
-        if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        if (std.math.isNan(result)) return self.fail(
+            error.IncompatibleTypes,
+            "cannot exponentiate {s} by {s}",
+            .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+        );
+
         regWrite(regs, base, instr.a, Data.new.num(result));
     }
     return null;
@@ -1432,13 +1541,26 @@ noinline fn execPowFloat(self: *VM, regs: []Data, base: usize, instr: Instructio
     const ln: f64 = @bitCast(lhs.bits);
     const rn: f64 = @bitCast(rhs.bits);
     const result = std.math.pow(f64, ln, rn);
-    if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+    if (std.math.isNan(result)) return self.fail(
+        error.IncompatibleTypes,
+        "cannot exponentiate {s} by {s}",
+        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+    );
+
     regWrite(regs, base, instr.a, Data.new.num(result));
     return null;
 }
 
 /// string * n fallback for .mul (numeric fast path stays inline)
-noinline fn execStringRepeat(self: *VM, regs: []Data, base: usize, instr: Instruction, lhs: Data, rhs: Data, alloc: std.mem.Allocator) VM.EvalError!?VM.EvalFailure {
+noinline fn execStringRepeat(
+    self: *VM,
+    regs: []Data,
+    base: usize,
+    instr: Instruction,
+    lhs: Data,
+    rhs: Data,
+    alloc: std.mem.Allocator,
+) VM.EvalError!?VM.EvalFailure {
     const StrNum = struct { s: revo.memory.StringID, n: f64 };
     const str_and_num: ?StrNum = blk: {
         if (lhs.asStr()) |ls| if (rhs.asNum()) |n|
@@ -1463,5 +1585,9 @@ noinline fn execStringRepeat(self: *VM, regs: []Data, base: usize, instr: Instru
         regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
         return null;
     }
-    return self.fail(error.IncompatibleTypes, "cannot multiply {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+    return self.fail(
+        error.IncompatibleTypes,
+        "cannot multiply {s} and {s}",
+        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+    );
 }

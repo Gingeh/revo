@@ -168,7 +168,12 @@ pub const FunctionSignature = struct {
 
 /// sentinel "any function" type,,, matches any callable value
 /// ptr identity;; only matches when &ANY_FN_SIG is used
-pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any, .param_names = &.{}, .is_any_fn_sig = true };
+pub const ANY_FN_SIG: FunctionSignature = .{
+    .params = &.{},
+    .return_type = .any,
+    .param_names = &.{},
+    .is_any_fn_sig = true,
+};
 
 /// sentinel type info for `any` used by the generic table sentinel
 const ANY_TI: TypeInfo = .{ .any = {} };
@@ -272,7 +277,7 @@ pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
             alloc.destroy(@constCast(sig));
         },
     }
-    ti.* = undefined;
+    ti.* = .never;
 }
 
 pub fn isNumeric(T: TypeInfo) bool {
@@ -518,7 +523,11 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .unary => |u| inferUnaryOp(u.op, inferExprType(ctx, u.expr)),
         .binary => |b| inferBinaryOp(b.op, inferExprType(ctx, b.left), inferExprType(ctx, b.right)),
         .and_expr, .or_expr => .bool,
-        .if_expr => |v| inferIfType(inferExprType(ctx, v.then_expr), if (v.else_expr) |e| inferExprType(ctx, e) else null),
+        .if_expr => |v| inferIfType(
+            inferExprType(ctx, v.then_expr),
+            if (v.else_expr) |e| inferExprType(ctx, e) else null,
+        ),
+
         .tuple => |items| inferTupleType(ctx, items),
         .table => |entries| inferTableType(ctx, entries),
         .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args),
@@ -740,21 +749,21 @@ const t = lang.testing;
 const VM = revo.VM;
 
 test "typed binding int accepts int literal" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: int = 42
         \\ x
     , 42);
 }
 
 test "typed binding float accepts float literal" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: float = 3.14
         \\ x
     , 3.14);
 }
 
 test "typed binding int accepts int literal coerced to float" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: float = 10
         \\ x
     , 10.0);
@@ -779,21 +788,21 @@ test "typed binding rejects int for string" {
 }
 
 test "typed binding table<int> accepts positional table literal" {
-    try t.top_number(
+    try t.topNumber(
         \\ let nums: table<int> = { 1, 2, 3 }
         \\ 1
     , 1);
 }
 
 test "typed binding table<string, int> accepts keyed table literal" {
-    try t.top_number(
+    try t.topNumber(
         \\ let pairs: table<string, int> = { a = 1, b = 2 }
         \\ 1
     , 1);
 }
 
 test "typed function params accept correct types" {
-    try t.top_number(
+    try t.topNumber(
         \\ const add = fn(a: int, b: int) a + b
         \\ add(3, 4)
     , 7);
@@ -814,7 +823,7 @@ test "typed function rejects first arg wrong type" {
 }
 
 test "atom union alias accepts literal and alias value in calls" {
-    try t.top_atom(
+    try t.topAtom(
         \\ type A = :one | :two
         \\ fn pick(how: A) -> any do
         \\   how
@@ -823,7 +832,7 @@ test "atom union alias accepts literal and alias value in calls" {
         \\ pick(pred)
     , "one");
 
-    try t.top_atom(
+    try t.topAtom(
         \\ type A = :one | :two
         \\ fn pick(how: A) -> any do
         \\   how
@@ -870,7 +879,7 @@ test "typed struct field assignment rejects wrong type" {
 }
 
 test "typed struct field assignment accepts correct type" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct User {
         \\     name: string = "",
         \\     age: number = 0,
@@ -970,12 +979,12 @@ test "comparison int == int emits eq_int" {
 }
 
 test "untyped code still works" {
-    try t.top_number("1 + 2 * 3", 7);
-    try t.top_number(
+    try t.topNumber("1 + 2 * 3", 7);
+    try t.topNumber(
         \\ let x = 10
         \\ x + 5
     , 15);
-    try t.top_string(
+    try t.topString(
         \\ let s = "hello"
         \\ s
     , "hello");
@@ -1004,7 +1013,7 @@ test "mixed int and float falls back to generic add" {
 }
 
 test "nested function with typed params" {
-    try t.top_number(
+    try t.topNumber(
         \\ const outer = fn(x: int) do
         \\     const inner = fn(y: int) y * 2
         \\     inner(x) + 1
@@ -1014,7 +1023,7 @@ test "nested function with typed params" {
 }
 
 test "function call with multiple typed params" {
-    try t.top_number(
+    try t.topNumber(
         \\ const calc = fn(a: int, b: float, c: int) do
         \\     a + b + c
         \\ end
@@ -1023,7 +1032,7 @@ test "function call with multiple typed params" {
 }
 
 test "return type validation accepts correct type" {
-    try t.top_number(
+    try t.topNumber(
         \\ const get_num = fn() -> int do
         \\     return 42
         \\ end
@@ -1032,7 +1041,7 @@ test "return type validation accepts correct type" {
 }
 
 test "atoms<->any relationship" {
-    try t.top_number(
+    try t.topNumber(
         \\ const get_num = fn() -> int do
         \\     return 42
         \\ end
@@ -1044,21 +1053,21 @@ test "atoms<->any relationship" {
 // typed const bindings
 //
 test "typed const binding int" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x: int = 42
         \\ x
     , 42);
 }
 
 test "typed const binding string" {
-    try t.top_string(
+    try t.topString(
         \\ const s: string = "hello"
         \\ s
     , "hello");
 }
 
 test "typed const binding float" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x: float = 3.14
         \\ x
     , 3.14);
@@ -1074,14 +1083,14 @@ test "typed const binding rejects wrong type" {
 // typed global bindings
 //
 test "typed global binding int" {
-    try t.top_number(
+    try t.topNumber(
         \\ global x: int = 42
         \\ x
     , 42);
 }
 
 test "typed global binding float" {
-    try t.top_number(
+    try t.topNumber(
         \\ global x: float = 1.5
         \\ x
     , 1.5);
@@ -1091,7 +1100,7 @@ test "typed global binding float" {
 // type alias at call sites
 //
 test "type alias used in function param" {
-    try t.top_number(
+    try t.topNumber(
         \\ type MyInt = int
         \\ const double = fn(x: MyInt) -> MyInt x * 2
         \\ double(21)
@@ -1099,7 +1108,7 @@ test "type alias used in function param" {
 }
 
 test "type alias used in binding" {
-    try t.top_string(
+    try t.topString(
         \\ type Name = string
         \\ let s: Name = "alice"
         \\ s
@@ -1107,7 +1116,7 @@ test "type alias used in binding" {
 }
 
 test "type alias int | float accepts int" {
-    try t.top_number(
+    try t.topNumber(
         \\ type Num = int | float
         \\ const add = fn(a: Num, b: Num) -> float a + b
         \\ add(3, 4)
@@ -1115,7 +1124,7 @@ test "type alias int | float accepts int" {
 }
 
 test "type alias int | float accepts float" {
-    try t.top_number(
+    try t.topNumber(
         \\ type Num = int | float
         \\ const add = fn(a: Num, b: Num) -> float a + b
         \\ add(3.5, 4.2)
@@ -1133,7 +1142,7 @@ test "type alias rejects type not in union" {
 // named union variants with payloads
 //
 test "named union variant ok result" {
-    try t.top_atom(
+    try t.topAtom(
         \\ type Result = :ok | :err
         \\ match 0
         \\ | 0 => :ok
@@ -1142,7 +1151,7 @@ test "named union variant ok result" {
 }
 
 test "named union variant err result" {
-    try t.top_atom(
+    try t.topAtom(
         \\ type Result = :ok | :err
         \\ match 1
         \\ | 0 => :ok
@@ -1162,7 +1171,7 @@ test "return type mismatch detects wrong explicit return" {
 }
 
 test "coercion in return type int to float" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn get() -> float do
         \\     return 42
         \\ end
@@ -1171,7 +1180,7 @@ test "coercion in return type int to float" {
 }
 
 test "explicit return matches return type" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn get() -> int do
         \\     return 99
         \\ end
@@ -1183,7 +1192,7 @@ test "explicit return matches return type" {
 // if/else branch type unification
 //
 test "if/else typed branches unify to number" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: int = 5
         \\ let y = if x > 0 10 else 20
         \\ y
@@ -1191,7 +1200,7 @@ test "if/else typed branches unify to number" {
 }
 
 test "if/else typed branches unify to string" {
-    try t.top_string(
+    try t.topString(
         \\ let x: int = 0
         \\ let y = if x > 0 "pos" else "non-pos"
         \\ y
@@ -1202,21 +1211,21 @@ test "if/else typed branches unify to string" {
 // tuple type inference
 //
 test "tuple type inference and access" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (1, "hi", 3.5)
         \\ t[0] + t[2]
     , 4.5);
 }
 
 test "tuple type with different types" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (10, 20, 30)
         \\ t[0] + t[1] + t[2]
     , 60);
 }
 
 test "nested tuple type" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = ((1, 2), (3, 4))
         \\ t[0][0] + t[1][1]
     , 5);
@@ -1226,28 +1235,28 @@ test "nested tuple type" {
 // string indexing
 //
 test "string indexing returns string" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "hello"
         \\ s[0]
     , "h");
 }
 
 test "string slicing uses half-open range bounds" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "hello"
         \\ s[1..4]
     , "ell");
 }
 
 test "stepped string slicing" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "abcdef"
         \\ s[5..-1..1]
     , "fedc");
 }
 
 test "tuple slicing returns a tuple" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (10, 20, 30, 40)
         \\ t[1..3][1]
     , 30);
@@ -1257,70 +1266,70 @@ test "tuple slicing returns a tuple" {
 // open-bound slicing
 //
 test "string slice open start [..n]" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "hello"
         \\ s[..4]
     , "hell");
 }
 
 test "string slice open end [n..]" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "hello"
         \\ s[2..]
     , "llo");
 }
 
 test "string slice open both [..]" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "hello"
         \\ s[..]
     , "hello");
 }
 
 test "tuple slice open start [..n]" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (10, 20, 30, 40)
         \\ t[..3][1]
     , 20);
 }
 
 test "tuple slice open end [n..]" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (10, 20, 30, 40)
         \\ t[2..][0]
     , 30);
 }
 
 test "tuple slice open both [..]" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (10, 20, 30, 40)
         \\ len(t[..])
     , 4);
 }
 
 test "string slice open step [n..step..m]" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "abcdef"
         \\ s[0..2..5]
     , "ace");
 }
 
 test "tuple slice open negative step [n..-step..m]" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (1, 2, 3, 4, 5)
         \\ t[4..-2..0][0]
     , 5);
 }
 
 test "string slice empty result" {
-    try t.top_string(
+    try t.topString(
         \\ let s: string = "abc"
         \\ s[2..2]
     , "");
 }
 
 test "tuple slice empty result" {
-    try t.top_number(
+    try t.topNumber(
         \\ let t = (1, 2, 3)
         \\ len(t[2..2])
     , 0);
@@ -1330,7 +1339,7 @@ test "tuple slice empty result" {
 // struct with nested struct fields
 //
 test "struct field access returns correct type" {
-    try t.top_number(
+    try t.topNumber(
         \\ struct User { name: string = "", age: int = 0 }
         \\ let u = User { name = "alice", age = 30 }
         \\ u.age + 12
@@ -1341,28 +1350,28 @@ test "struct field access returns correct type" {
 // any type accepts everything
 //
 test "any typed param accepts int" {
-    try t.top_number(
+    try t.topNumber(
         \\ const id = fn(x: any) x
         \\ id(42)
     , 42);
 }
 
 test "any typed param accepts string" {
-    try t.top_string(
+    try t.topString(
         \\ const id = fn(x: any) x
         \\ id("hello")
     , "hello");
 }
 
 test "any typed param accepts table" {
-    try t.top_number(
+    try t.topNumber(
         \\ const get = fn(t: any, k: any) t[k]
         \\ get({x = 99}, :x)
     , 99);
 }
 
 test "any typed binding accepts anything" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: any = 42
         \\ let y: any = "str"
         \\ let z: any = {a = 1}
@@ -1374,7 +1383,7 @@ test "any typed binding accepts anything" {
 // block type propagation
 //
 test "block type propagates last expression type" {
-    try t.top_number(
+    try t.topNumber(
         \\ let x: int = do
         \\     let a = 1
         \\     let b = 2
@@ -1425,7 +1434,7 @@ test "chained typed math emits add and mul" {
 // type alias union with multiple atom variants
 //
 test "multi-atom union alias in match" {
-    try t.top_atom(
+    try t.topAtom(
         \\ type Color = :red | :green | :blue
         \\ match :red
         \\ | :red => :green
@@ -1435,7 +1444,7 @@ test "multi-atom union alias in match" {
 }
 
 test "multi-atom union fn param accepts valid atom" {
-    try t.top_atom(
+    try t.topAtom(
         \\ type Color = :red | :green
         \\ fn pick(c: Color) c
         \\ pick(:green)
@@ -1446,14 +1455,14 @@ test "multi-atom union fn param accepts valid atom" {
 // void / nil type
 //
 test "nil typed fn body" {
-    try t.top_nil(
+    try t.topNil(
         \\ fn nothing() do :nil end
         \\ nothing()
     );
 }
 
 test "typed binding with void returns nil" {
-    try t.top_nil(
+    try t.topNil(
         \\ let x: any = :nil
         \\ x
     );
@@ -1466,7 +1475,7 @@ test "global typed binding rejects type mismatch" {
 }
 
 test "global typed binding accepts matching type" {
-    try t.top_number(
+    try t.topNumber(
         \\ const x: int = 42
         \\ x
     , 42);
@@ -1480,7 +1489,7 @@ test "typed assignment rejects type mismatch" {
 }
 
 test "untyped assignment allows type change" {
-    try t.top_string(
+    try t.topString(
         \\ let x = 5
         \\ x = "hello"
         \\ x
@@ -1491,7 +1500,7 @@ test "untyped assignment allows type change" {
 // bool type
 //
 test "bool typed binding" {
-    try t.top_true(
+    try t.topTrue(
         \\ let b: bool = 1 == 1
         \\ b
     );
@@ -1504,7 +1513,7 @@ test "bool typed binding rejects non-bool" {
 }
 
 test "not operator on bool stays bool" {
-    try t.top_false(
+    try t.topFalse(
         \\ let b: bool = not (1 == 1)
         \\ b
     );
@@ -1550,7 +1559,7 @@ test "tuple pattern binding respects type annotation" {
 }
 
 test "for loop expression produces int type" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn f() -> int do
         \\   for i in 0..5 do i end
         \\ end
@@ -1559,7 +1568,7 @@ test "for loop expression produces int type" {
 }
 
 test "type alias gets unaliased" {
-    try t.top_true(
+    try t.topTrue(
         \\ type Als =
         \\       (:aa, int)
         \\     | (:bb, float)
@@ -1572,7 +1581,7 @@ test "type alias gets unaliased" {
 }
 
 test "tuple type annotation" {
-    try t.top_true(
+    try t.topTrue(
         \\ let x: (:aa, int) | (:bb, float) = (:aa, 55)
         \\ let y: (:aa, int) | (:bb, float) = (:bb, 100.1)
         \\ 
@@ -1700,7 +1709,7 @@ fn testRuntime() revo.Runtime {
     return .{
         .alloc = std.testing.allocator,
         .io = std.testing.io,
-        .diag_alloc = undefined,
+        .diag_alloc = std.testing.allocator,
         .diag_arena = null,
     };
 }
@@ -1909,14 +1918,14 @@ test "generics repeated type param works" {
 }
 
 test "explicit call-site type args make[int]() resolves return type" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn make[T]() -> T 5
         \\ make[int]()
     , 5);
 }
 
 test "explicit call-site type args id[int](42) resolves return type" {
-    try t.top_number(
+    try t.topNumber(
         \\ fn id[T](x: T) -> T x
         \\ id[int](42)
     , 42);

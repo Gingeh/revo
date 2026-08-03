@@ -156,7 +156,14 @@ fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
     }
 }
 
-fn walkAndProcessImports(vm: *VM, node: *Node, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
+fn walkAndProcessImports(
+    vm: *VM,
+    node: *Node,
+    alloc: std.mem.Allocator,
+    inject_nodes: *std.ArrayList(*Node),
+    visited: *std.StringHashMap(void),
+    visited_sub: *std.StringHashMap(void),
+) !void {
     switch (node.expr) {
         .block => |items| {
             for (items) |item| try walkAndProcessImports(vm, item, alloc, inject_nodes, visited, visited_sub);
@@ -260,7 +267,15 @@ fn tryResolve(alloc: std.mem.Allocator, io: std.Io, dir: []const u8, name: []con
 /// read, parse, and extract macros/procs from a module for compile-time use
 /// does NOT compile or cache the module!!! runtime `import` handles that!
 /// extraction populates the expander env with qualified names (mod_name.macro!)
-fn processImport(vm: *VM, path: []const u8, mod_name: []const u8, alloc: std.mem.Allocator, inject_nodes: *std.ArrayList(*Node), visited: *std.StringHashMap(void), visited_sub: *std.StringHashMap(void)) !void {
+fn processImport(
+    vm: *VM,
+    path: []const u8,
+    mod_name: []const u8,
+    alloc: std.mem.Allocator,
+    inject_nodes: *std.ArrayList(*Node),
+    visited: *std.StringHashMap(void),
+    visited_sub: *std.StringHashMap(void),
+) !void {
     if (visited.contains(path)) return;
     try visited.put(path, {});
 
@@ -357,7 +372,13 @@ fn extractPubImportsOneLevel(
 
                 const resolved = try resolveModuleFile(vm, stmt.path) orelse return;
                 defer vm.runtime.alloc.free(resolved);
-                const source = try std.Io.Dir.cwd().readFileAlloc(vm.runtime.io, resolved, alloc, std.Io.Limit.unlimited);
+                const source = try std.Io.Dir.cwd().readFileAlloc(
+                    vm.runtime.io,
+                    resolved,
+                    alloc,
+                    std.Io.Limit.unlimited,
+                );
+
                 const sub_ast = try lang.parseSource(alloc, source);
                 try extractPubDefs(sub_ast, sub_prefix, alloc, inject_nodes);
             }
@@ -368,7 +389,12 @@ fn extractPubImportsOneLevel(
 }
 
 /// extract pub fn signatures from a module AST, qualified with prefix
-pub fn extractPubFnSigs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out: *std.StringHashMap(std.ArrayList(ImportFnMeta))) !void {
+pub fn extractPubFnSigs(
+    node: *Node,
+    prefix: []const u8,
+    alloc: std.mem.Allocator,
+    out: *std.StringHashMap(std.ArrayList(ImportFnMeta)),
+) !void {
     switch (node.expr) {
         .block => |items| {
             for (items) |item| try extractPubFnSigs(item, prefix, alloc, out);
@@ -614,15 +640,26 @@ pub fn expand(allocator: std.mem.Allocator, parsed: Parsed) !ExpandResult {
     return .{ .ok = .{ .root = final } };
 }
 
-pub fn expandWithVmSource(vm: *VM, allocator: std.mem.Allocator, parsed: Parsed, source_name: []const u8, source: []const u8) !ExpandWithVmResult {
+pub fn expandWithVmSource(
+    vm: *VM,
+    allocator: std.mem.Allocator,
+    parsed: Parsed,
+    source_name: []const u8,
+    source: []const u8,
+) !ExpandWithVmResult {
     const template_expanded = try expander.expandExpr(allocator, parsed.root);
     const proc_result = try proc.expandExprWithSource(vm, allocator, template_expanded, source_name, source);
     if (proc_result.error_report) |report| return .{ .proc_err = report };
-    const final = try expander.expandExpr(allocator, proc_result.root);
+    const final = try expander.expandExpr(allocator, proc_result.root.?);
     return .{ .ok = .{ .root = final } };
 }
 
-pub fn lower(vm: *VM, expanded: Expanded, opts: LowerOptions, type_annotations: ?*const std.AutoHashMap(*const Node, compiler.types.TypeInfo)) !LowerResult {
+pub fn lower(
+    vm: *VM,
+    expanded: Expanded,
+    opts: LowerOptions,
+    type_annotations: ?*const std.AutoHashMap(*const Node, compiler.types.TypeInfo),
+) !LowerResult {
     const lowered = try compiler.lowerExprArtifactReport(
         vm,
         expanded.root,

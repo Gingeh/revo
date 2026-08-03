@@ -37,7 +37,7 @@ fn inferTypeMap(self: *Compiler, name: []const u8) TypeInfo {
 }
 
 const TypeParamSubst = struct {
-    entries: [4]struct { name: []const u8, type: TypeInfo } = undefined,
+    entries: [4]struct { name: []const u8, type: TypeInfo } = @splat(.{ .name = &[_]u8{}, .type = .any }),
     count: usize = 0,
 
     pub fn get(self: *const TypeParamSubst, name: []const u8) ?TypeInfo {
@@ -50,13 +50,24 @@ const TypeParamSubst = struct {
     }
 };
 
-fn genericSubstReturnType(self: *Compiler, type_params: []const []const u8, type_args: []const []const u8, args: []const *Node, return_type: TypeInfo) TypeInfo {
+fn genericSubstReturnType(
+    self: *Compiler,
+    type_params: []const []const u8,
+    type_args: []const []const u8,
+    args: []const *Node,
+    return_type: TypeInfo,
+) TypeInfo {
     if (type_params.len <= 4) {
         var subst: TypeParamSubst = .{ .count = type_params.len };
         for (type_params, 0..) |tp, i| {
             subst.entries[i] = .{
                 .name = tp,
-                .type = if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any,
+                .type = if (i < type_args.len)
+                    types_mod.resolveTypeName(self, type_args[i])
+                else if (i < args.len and type_args.len == 0)
+                    inferExprType(self, args[i])
+                else
+                    .any,
             };
         }
         return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch .any;
@@ -65,7 +76,15 @@ fn genericSubstReturnType(self: *Compiler, type_params: []const []const u8, type
     var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
     defer param_map.deinit();
     for (type_params, 0..) |tp, i| {
-        param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
+        param_map.put(
+            tp,
+            if (i < type_args.len)
+                types_mod.resolveTypeName(self, type_args[i])
+            else if (i < args.len and type_args.len == 0)
+                inferExprType(self, args[i])
+            else
+                .any,
+        ) catch {};
     }
     return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch .any;
 }
@@ -109,7 +128,12 @@ pub fn inferFieldType(self: *Compiler, object: *const Node, name: []const u8) Ty
     };
 }
 
-pub fn inferFnType(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) TypeInfo {
+pub fn inferFnType(
+    self: *Compiler,
+    params: []const ast.FnParam,
+    return_type: ?*ast.TypeExpr,
+    type_params: []const []const u8,
+) TypeInfo {
     var param_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, params.len) catch return .any;
     defer param_types.deinit(self.alloc);
     var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, params.len) catch return .any;

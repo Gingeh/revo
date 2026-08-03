@@ -1,3 +1,4 @@
+// zlint-disable line-length
 const std = @import("std");
 
 const lang = @import("./root.zig");
@@ -112,29 +113,19 @@ const SemanticChecker = struct {
             .alloc = alloc,
             .source_name = source_name,
             .source = source,
-            .errors = undefined,
-            .scopes = undefined,
-            .type_aliases = std.StringHashMap(types_mod.TypeInfo).init(alloc),
-            .struct_layouts = std.StringHashMap([]const struct_layout.FieldDef).init(alloc),
-            .fn_sigs = undefined,
-            .return_types = undefined,
+            .errors = try .initCapacity(alloc, 8),
+            .scopes = try .initCapacity(alloc, 4),
+            .type_aliases = .init(alloc),
+            .struct_layouts = .init(alloc),
+            .fn_sigs = try .initCapacity(alloc, 4),
+            .return_types = try .initCapacity(alloc, 4),
             .type_map = type_map,
             .type_annotations = type_annotations,
-            .typed_names = std.StringHashMap(void).init(alloc),
-            .table_field_map = std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)).init(alloc),
-            .import_fn_sigs = std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)).init(alloc),
-            .dep_asts = undefined,
+            .typed_names = .init(alloc),
+            .table_field_map = .init(alloc),
+            .import_fn_sigs = .init(alloc),
+            .dep_asts = .empty,
         };
-        checker.errors = try std.ArrayList(diagnostic.Part).initCapacity(alloc, 8);
-        errdefer checker.errors.deinit(alloc);
-        checker.scopes = try std.ArrayList(Scope).initCapacity(alloc, 4);
-        errdefer checker.scopes.deinit(alloc);
-        checker.fn_sigs = try std.ArrayList(*FnSig).initCapacity(alloc, 4);
-        errdefer checker.fn_sigs.deinit(alloc);
-        checker.return_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, 4);
-        errdefer checker.return_types.deinit(alloc);
-        checker.dep_asts = try std.ArrayList(*const ast.Node).initCapacity(alloc, 0);
-        errdefer checker.dep_asts.deinit(alloc);
 
         try checker.pushScope();
         // registers builtins

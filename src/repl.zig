@@ -93,7 +93,17 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
 
     var buf: [256]u8 = undefined;
 
-    const commands = &[_][]const u8{ ":q", ":quit", ":clear", ":features", ":h", ":help", ":doc", ":apropos", ":doctest" };
+    const commands = &[_][]const u8{
+        ":q",
+        ":quit",
+        ":clear",
+        ":features",
+        ":h",
+        ":help",
+        ":doc",
+        ":apropos",
+        ":doctest",
+    };
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, wslice)) {
             const cmd_c = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch continue;
@@ -228,22 +238,21 @@ pub const Session = struct {
     project: revo.lang.Project = .{ .mode = .script, .root = "" },
 
     pub fn init(vm: *VM, gpa: Allocator, io: ?std.Io) !Session {
+        var workspace = try revo.lang.Workspace.initWithVm(vm, gpa);
+        errdefer workspace.deinit();
+        const source_acc = try std.ArrayList(u8).initCapacity(gpa, 256);
+        errdefer source_acc.deinit(gpa);
         var self = Session{
             .vm = vm,
             .gpa = gpa,
-            .workspace = undefined,
-            .source_acc = undefined,
-            .project = undefined,
+            .workspace = workspace,
+            .source_acc = source_acc,
         };
         self.project = if (io) |i|
             .detectFromCwd(i, gpa)
         else
             .{ .mode = .script, .root = "" };
         errdefer self.project.deinit(gpa);
-        self.workspace = try revo.lang.Workspace.initWithVm(vm, gpa);
-        errdefer self.workspace.deinit();
-        self.source_acc = try std.ArrayList(u8).initCapacity(gpa, 256);
-        errdefer self.source_acc.deinit(gpa);
 
         return self;
     }
@@ -524,7 +533,7 @@ const TestEnv = struct {
 
 fn initTestEnv(alloc: std.mem.Allocator) !TestEnv {
     const vm = try alloc.create(revo.VM);
-    vm.* = try revo.VM.init(.{ .alloc = alloc, .io = std.testing.io });
+    vm.* = try revo.VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
     const session = try Session.init(vm, alloc, std.testing.io);
     const out = std.Io.Writer.Allocating.init(alloc);
     revo.pretty.supports_color = false;

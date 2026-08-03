@@ -38,21 +38,13 @@ pub const TablePool = struct {
     next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !TablePool {
-        var self = TablePool{
+        return TablePool{
             .alloc = alloc,
-            .tables = undefined,
-            .marks = undefined,
+            .tables = try .initCapacity(alloc, 4),
+            .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
-            .next = undefined,
+            .next = try .initCapacity(alloc, 4),
         };
-        self.tables = try std.ArrayList(?Table).initCapacity(alloc, 4);
-        errdefer self.tables.deinit(alloc);
-        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
-        errdefer self.marks.deinit();
-        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
-        errdefer self.next.deinit(alloc);
-
-        return self;
     }
 
     pub fn deinit(self: *TablePool) void {
@@ -106,7 +98,18 @@ pub const TablePool = struct {
     }
 
     pub fn sweep(self: *TablePool) void {
-        pool.sweep(self.alloc, Table, memory.TableID, &self.tables, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeTable);
+        pool.sweep(
+            self.alloc,
+            Table,
+            memory.TableID,
+            &self.tables,
+            &self.marks,
+            &self.dead,
+            &self.first,
+            &self.last,
+            &self.next,
+            freeTable,
+        );
     }
 
     pub fn bytes(self: *const TablePool) usize {
@@ -186,8 +189,8 @@ pub const Table = struct {
 
         const Bucket = struct {
             status: enum(u8) { empty, occupied } = .empty,
-            key: Data = undefined,
-            val: Data = undefined,
+            key: Data = Data.new.nil(),
+            val: Data = Data.new.nil(),
             next: u32 = NULL_ID,
             prev: u32 = NULL_ID,
         };
@@ -237,7 +240,6 @@ pub const Table = struct {
             self.buckets[idx] = .{
                 .status = .occupied,
                 .key = key,
-                .val = undefined,
                 .next = NULL_ID,
                 .prev = self.last,
             };
@@ -250,7 +252,11 @@ pub const Table = struct {
         }
 
         fn grow(self: *HashPart, alloc: std.mem.Allocator) !void {
-            const new_len = if (self.buckets.len == 0) @as(u32, INIT_CAP) else @as(u32, @truncate(self.buckets.len * 2));
+            const new_len = if (self.buckets.len == 0) @as(u32, INIT_CAP) else @as(
+                u32,
+                @truncate(self.buckets.len * 2),
+            );
+
             const new_buckets = try alloc.alloc(Bucket, new_len);
             @memset(new_buckets, .{});
 
@@ -391,7 +397,7 @@ pub const Table = struct {
             const mt_id = self.metatable.?;
             const mt = try vm.tables.get(mt_id);
 
-            if (mt.getRawAtom(revo.core_atoms.atom_id(.__newindex), vm)) |newindex_method| {
+            if (mt.getRawAtom(revo.core_atoms.atomId(.__newindex), vm)) |newindex_method| {
                 if (newindex_method.asFunction()) |f| {
                     const table_data = Data.new.table(table_id);
                     _ = try vm.callFunction(Data.new.function(f), &[_]Data{ table_data, key, val });
@@ -463,7 +469,7 @@ pub const Table = struct {
         if (depth == 0) return null;
         if (self.metatable) |mt_id| {
             const mt = try vm.tables.get(mt_id);
-            if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), vm)) |index_method| {
+            if (mt.getRawAtom(revo.core_atoms.atomId(.__index), vm)) |index_method| {
                 if (index_method.asTable()) |table_id| {
                     const index_table = try vm.tables.get(table_id);
                     return try index_table.getWithDepth(key, vm, depth - 1);
@@ -500,21 +506,21 @@ pub const Table = struct {
 };
 
 test "table literals and field lookup work" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {answer = 41, extra = 1}
         \\ t.answer + t.extra
     , 42);
 }
 
 test "table positional access" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {41, 1}
         \\ t[0] + t[1]
     , 42);
 }
 
 test "table field assignment" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {answer = 41}
         \\ t.answer = t.answer + 1
         \\ t.answer
@@ -522,33 +528,33 @@ test "table field assignment" {
 }
 
 test "table with positional elements" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {10, 20, 30}
         \\ t[0] + t[1] + t[2]
     , 60);
 }
 
 test "mixed table with positional and named entries" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {100, 30, x = 20}
         \\ t[0] + t[1] + t.x
     , 150);
 }
 
 test "table numeric key canonicalization" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {1 = 41}
         \\ t[1.0] + 1
     , 42);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {1.0 = 41}
         \\ t[1] + 1
     , 42);
 }
 
 test "table float keys stay distinct when non integral" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {1 = 1, 1.5 = 41}
         \\ t[1] + t[1.5]
     , 42);
@@ -699,7 +705,7 @@ test "putRaw: integer key > len in empty table goes to hash" {
 //
 
 test "table lookup order" {
-    try testing.top_string(
+    try testing.topString(
         \\ const mt = {metafield = "second-", __index = fn(self) "last"}
         \\ const t = set_metatable({normal = "first-"}, mt)
         \\ t.normal ~ t.metafield ~ t.something
@@ -707,13 +713,13 @@ test "table lookup order" {
 }
 
 test "computed table keys use runtime values" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const key = "answer"
         \\ const t = {[key] = 41}
         \\ t["answer"]
     , 41);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ const k = :x
         \\ const t = {[k] = 9}
         \\ t.x
@@ -721,14 +727,14 @@ test "computed table keys use runtime values" {
 }
 
 test "array-style table literal" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const tbl = {10, 20, 30}
         \\ tbl[0] + tbl[1] + tbl[2]
     , 60);
 }
 
 test "numeric and string keys are distinct" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {}
         \\ t[1] = 100
         \\ t["1"] = 200
@@ -737,7 +743,7 @@ test "numeric and string keys are distinct" {
 }
 
 test "metatable __tostring works on tables" {
-    try testing.top_string(
+    try testing.topString(
         \\ const mt = {__tostring = fn(self) "custom"}
         \\ const t = set_metatable({a = 1}, mt)
         \\ string(t)
@@ -745,7 +751,7 @@ test "metatable __tostring works on tables" {
 }
 
 test "metatable __index for field access" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const mt = {__index = fn(self, key) 42}
         \\ const t = set_metatable({}, mt)
         \\ t.missing_field
@@ -753,7 +759,7 @@ test "metatable __index for field access" {
 }
 
 test "metatable __newindex for field assignment" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const mt = {__newindex = fn(self, key, value) table.rawset(self, key, 99)}
         \\ const t = set_metatable({}, mt)
         \\ t.x = 5
@@ -762,7 +768,7 @@ test "metatable __newindex for field assignment" {
 }
 
 test "multiple tables can share same metatable" {
-    try testing.top_true(
+    try testing.topTrue(
         \\ const mt = {get_val = fn(self) 77}
         \\ const t1 = set_metatable({}, mt)
         \\ const t2 = set_metatable({x = 1}, mt)
@@ -771,7 +777,7 @@ test "multiple tables can share same metatable" {
 }
 
 test "get_metatable retrieves correct metatable" {
-    try testing.top_true(
+    try testing.topTrue(
         \\ const mt = {get_val = fn(self) 50}
         \\ const t = set_metatable({}, mt)
         \\ const retrieved_mt = get_metatable(t)
@@ -780,7 +786,7 @@ test "get_metatable retrieves correct metatable" {
 }
 
 test "metatable on metatable works" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const mt = {get_val = fn(self) 9}
         \\ const t = set_metatable({}, mt)
         \\ t:get_val()
@@ -796,7 +802,7 @@ test "metamethod failures are runtime errors" {
 }
 
 test "method calls on metatable tables work" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const mt = {get_x = fn(self) self.x}
         \\ const t = set_metatable({x = 12}, mt)
         \\ t:get_x()
@@ -804,7 +810,7 @@ test "method calls on metatable tables work" {
 }
 
 test "non-table values can use metatable fields as methods" {
-    try testing.top_string(
+    try testing.topString(
         \\ const mt = {reverse = fn(self) "fdsa"}
         \\ set_metatable("", mt)
         \\ "asdf":reverse()
@@ -812,14 +818,14 @@ test "non-table values can use metatable fields as methods" {
 }
 
 test "pipe: explicit placeholder method receiver with table" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const obj = { inner = 40, meth = fn(self, x) self.inner + x }
         \\ obj |> _:meth(2)
     , 42);
 }
 
 test "pipe: explicit placeholder index access with table" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = {5, 6, 7}
         \\ 1 |> t[_]
     , 6);

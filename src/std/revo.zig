@@ -83,14 +83,14 @@ pub fn build(args: []const Data, vm: *VM) !NativeResult {
 }
 
 test "native eval works" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const (_, res) = revo.eval("21*2")
         \\ res
     , 42);
 }
 
 test "revo.build compiles source" {
-    try testing.top_atom(
+    try testing.topAtom(
         \\ revo.build("1 + 1")[0]
     , "ok");
 }

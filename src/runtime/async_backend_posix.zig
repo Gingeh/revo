@@ -104,13 +104,24 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
         },
     }
 
-    var rec: CompletionRecord = .{ .job_ptr = job, .fiber_id = job.fiber_id, .kind = @as(u8, @intFromEnum(job.kind)), .status = status, .bytes = bytes };
+    var rec: CompletionRecord = .{
+        .job_ptr = job,
+        .fiber_id = job.fiber_id,
+        .kind = @as(u8, @intFromEnum(job.kind)),
+        .status = status,
+        .bytes = bytes,
+    };
+
     // write record to pipe; best-effort but log if odd
     const written = std.c.write(wfd, @ptrCast(@alignCast(&rec)), @sizeOf(CompletionRecord));
     _ = written;
 }
 
-pub fn submit(self: *BackendState, vm_ptr: *anyopaque, job: *async_backend.AsyncJob) anyerror!async_backend.AsyncTicket {
+pub fn submit(
+    self: *BackendState,
+    vm_ptr: *anyopaque,
+    job: *async_backend.AsyncJob,
+) anyerror!async_backend.AsyncTicket {
     const vm: *revo.VM = @ptrCast(@alignCast(vm_ptr));
     errdefer {
         if (job.buffer) |buf| vm.runtime.alloc.free(buf);
@@ -129,7 +140,7 @@ pub fn submit(self: *BackendState, vm_ptr: *anyopaque, job: *async_backend.Async
     return 0;
 }
 
-fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
+fn processCompletion(vm: *revo.VM, rec: CompletionRecord) !void {
     const job = rec.job_ptr;
     switch (job.kind) {
         .socket_send => {
@@ -183,7 +194,7 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
     vm.runtime.alloc.destroy(job);
 }
 
-fn drain_pipe(vm: *revo.VM, bs: *BackendState) !bool {
+fn drainPipe(vm: *revo.VM, bs: *BackendState) !bool {
     var buf_arr: [@sizeOf(CompletionRecord)]u8 align(@alignOf(CompletionRecord)) = undefined;
     var any = false;
     while (true) {
@@ -192,13 +203,13 @@ fn drain_pipe(vm: *revo.VM, bs: *BackendState) !bool {
         if (n < @as(isize, @sizeOf(CompletionRecord))) break;
         const rec_ptr: *CompletionRecord = @ptrCast(@alignCast(&buf_arr));
         const rec = rec_ptr.*;
-        try process_completion(vm, rec);
+        try processCompletion(vm, rec);
         any = true;
     }
     return any;
 }
 
-fn poll_impl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bool {
+fn pollImpl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bool {
     const vm: *revo.VM = @ptrCast(@alignCast(vm_ptr));
     // the async backend owns the completion pipe, but socket recv/send
     // waiters are still driven by std_net.pollIoWaiters. poll both sources in
@@ -231,7 +242,7 @@ fn poll_impl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bo
 
     var woke_any = false;
     if (poll_fds.items[0].revents != 0) {
-        woke_any = try drain_pipe(vm, bs);
+        woke_any = try drainPipe(vm, bs);
     }
 
     // readiness remains latched for the socket, so dispatch the socket poller
@@ -242,6 +253,6 @@ fn poll_impl(bs: *BackendState, vm_ptr: *anyopaque, timeout_ms: i32) anyerror!bo
     return woke_any or io_woke;
 }
 
-pub fn poll_all(bs: *BackendState, vm: *anyopaque, timeout_ms: i32) anyerror!bool {
-    return poll_impl(bs, vm, timeout_ms);
+pub fn pollAll(bs: *BackendState, vm: *anyopaque, timeout_ms: i32) anyerror!bool {
+    return pollImpl(bs, vm, timeout_ms);
 }

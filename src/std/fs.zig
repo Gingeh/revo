@@ -161,7 +161,7 @@ fn wrapFile(vm: *VM, path: []const u8) !Data {
 
     const metatable = try vm.tables.create();
     var mt = try vm.tables.get(metatable);
-    const file_module = vm.globals.get(revo.core_atoms.file.atom_id()) orelse return error.FileModuleNotFound;
+    const file_module = vm.globals.get(revo.core_atoms.file.atomId()) orelse return error.FileModuleNotFound;
     try mt.putRaw(try vm.dataAtom("__index"), file_module, vm);
 
     const set_result = try meta.set_metatable_(&.{ Data.new.table(file_table), Data.new.table(metatable) }, vm);
@@ -489,7 +489,7 @@ test "fs.open/read reads file contents" {
     , file_path);
     defer alloc.free(source);
 
-    try testing.top_string(source, "hello from fs");
+    try testing.topString(source, "hello from fs");
 }
 
 test "fs.write overwrites file" {
@@ -509,7 +509,7 @@ test "fs.write overwrites file" {
     , file_path);
     defer alloc.free(source);
 
-    try testing.top_string(source, "new value");
+    try testing.topString(source, "new value");
 }
 
 test "fs.append appends to file" {
@@ -529,7 +529,7 @@ test "fs.append appends to file" {
     , file_path);
     defer alloc.free(source);
 
-    try testing.top_string(source, "hello world");
+    try testing.topString(source, "hello world");
 }
 
 test "fs.append creates missing file" {
@@ -548,7 +548,7 @@ test "fs.append creates missing file" {
     , file_path);
     defer alloc.free(source);
 
-    try testing.top_string(source, "created");
+    try testing.topString(source, "created");
 }
 
 test "fs.readdir returns table of entries" {
@@ -564,7 +564,7 @@ test "fs.readdir returns table of entries" {
         \\ type(fs.readdir('{s}'):unwrap()) == :table
     , dir_path);
     defer alloc.free(source);
-    try testing.top_true(source);
+    try testing.topTrue(source);
 }
 
 test "fs.readdir returns entries with name and kind" {
@@ -582,7 +582,7 @@ test "fs.readdir returns entries with name and kind" {
         \\ e1.name != :nil and e1.kind != :nil
     , dir_path);
     defer alloc.free(source);
-    try testing.top_true(source);
+    try testing.topTrue(source);
 }
 
 test "fs.dir:readdir() returns entries" {
@@ -599,7 +599,7 @@ test "fs.dir:readdir() returns entries" {
         \\ type(entries) == :table
     , dir_path);
     defer alloc.free(source);
-    try testing.top_true(source);
+    try testing.topTrue(source);
 }
 
 // issue: fs.readdir with relative path (e.g., ".") should work
@@ -616,7 +616,7 @@ test "fs.readdir works with current directory" {
         \\ type(entries) == :table
     , dir_path);
     defer alloc.free(source);
-    try testing.top_true(source);
+    try testing.topTrue(source);
 }
 
 const std = @import("std");

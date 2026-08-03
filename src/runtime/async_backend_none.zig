@@ -12,6 +12,6 @@ pub fn submit(_: *BackendState, _: *anyopaque, _: *async_backend.AsyncJob) anyer
     return error.OsNotSupported;
 }
 
-pub fn poll_all(_: *BackendState, _: *anyopaque, _: i32) anyerror!bool {
+pub fn pollAll(_: *BackendState, _: *anyopaque, _: i32) anyerror!bool {
     return false;
 }

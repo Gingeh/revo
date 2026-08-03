@@ -113,10 +113,21 @@ pub const EvalFailure = struct {
     trace: [max_trace_frames]TraceFrame = @splat(TraceFrame.empty()),
 
     pub fn render(self: EvalFailure, alloc: std.mem.Allocator, writer: *std.Io.Writer, source: []const u8) !void {
-        return self.renderAt(alloc, writer, self.report.source_name orelse "<source>", self.report.source orelse source);
+        return self.renderAt(
+            alloc,
+            writer,
+            self.report.source_name orelse "<source>",
+            self.report.source orelse source,
+        );
     }
 
-    pub fn renderAt(self: EvalFailure, alloc: std.mem.Allocator, writer: *std.Io.Writer, source_name: []const u8, source: []const u8) !void {
+    pub fn renderAt(
+        self: EvalFailure,
+        alloc: std.mem.Allocator,
+        writer: *std.Io.Writer,
+        source_name: []const u8,
+        source: []const u8,
+    ) !void {
         var report = self.report;
         report.source_name = source_name;
         report.source = source;
@@ -211,7 +222,9 @@ fn fmt(buf: []u8, comptime format: []const u8, args: anytype) []const u8 {
 fn dataText(vm: *revo.VM, val: revo.Data, buf: []u8) []const u8 {
     if (val.asNum()) |n| {
         if (n == @trunc(n)) {
-            if (n < @as(f64, @floatFromInt(std.math.maxInt(i63))) and n > @as(f64, @floatFromInt(std.math.minInt(i63)))) {
+            if (n < @as(f64, @floatFromInt(std.math.maxInt(i63))) and
+                n > @as(f64, @floatFromInt(std.math.minInt(i63))))
+            {
                 const i: i64 = @intFromFloat(n);
                 return fmt(buf, "{d}", .{i});
             }
@@ -334,7 +347,12 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
         .range_init => return fmt(buf, "r{d}, r{d}..r{d}, step=r{d}", .{ a, b, c, bx }),
         .range_loop => return fmt(buf, "r{d}, state=r{d}, idx=r{d}, -> L{d}", .{ a, b, c, bx }),
         .unwrap_result => return fmt(buf, "r{d}, mode={d}", .{ a, bx }),
-        .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => return fmt(buf, "r{d}, r{d}, {d}", .{ a, b, bx }),
+        .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => return fmt(
+            buf,
+            "r{d}, r{d}, {d}",
+            .{ a, b, bx },
+        ),
+
         else => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }), // bin arith & cmp
     }
 }
@@ -370,7 +388,10 @@ test "failure rendering includes stack trace frames" {
         .report = .{
             .source_name = "file.rv",
             .source = "ignored",
-            .parts = &.{ diagnostic.Part{ .@"error" = "boom" }, .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } } },
+            .parts = &.{
+                diagnostic.Part{ .@"error" = "boom" },
+                .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } },
+            },
         },
         .part_len = 2,
         .trace_len = 2,

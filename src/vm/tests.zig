@@ -8,7 +8,7 @@ const VM = @import("VM.zig").VM;
 const Scheduler = revo.vm.Scheduler;
 const vt_runtime = revo.lang.testing.runtime;
 
-fn trigger_gc(vm: *VM) void {
+fn triggerGc(vm: *VM) void {
     vm.gc_pending = true;
     vm.maybeCollectGarbage();
 }
@@ -173,7 +173,7 @@ test "vm gc keeps rooted tables and their children alive" {
     try vm.push(Data.new.table(parent_id));
     defer _ = vm.pop() catch {};
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     const parent = try vm.tables.get(parent_id);
     const child = parent.getRaw(try vm.ownDataString("child"), &vm) orelse unreachable;
@@ -189,7 +189,7 @@ test "vm gc keeps globals rooted tables alive" {
     const table_id = try vm.tables.create();
     try vm.setGlobal("alive", Data.new.table(table_id));
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     _ = try vm.tables.get(table_id);
 }
@@ -205,7 +205,7 @@ test "vm gc keeps tables written during sweep alive" {
         _ = try vm.tables.create();
     }
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     const key = try vm.ownDataString("child");
     const child_id = try vm.tables.create();
@@ -237,7 +237,7 @@ test "vm gc reuses freed function ids" {
         .const_local_bits = &.{},
     });
     const fn_id = try vm.functions.createClosure(proto_id, &.{});
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     try testing.expectError(error.FunctionDNE, vm.functions.get(fn_id));
     const reused = try vm.functions.createClosure(proto_id, &.{});
@@ -269,7 +269,7 @@ test "vm gc keeps rooted closures and captured tables alive" {
     try vm.push(Data.new.function(closure_id));
     defer _ = vm.pop() catch {};
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     _ = try vm.functions.get(closure_id);
     _ = try vm.tables.get(table_id);
@@ -295,7 +295,7 @@ test "vm gc keeps struct methods alive" {
     try methods.put("take", Data.new.function(fn_id));
     _ = try vm.struct_types.registerType("Chain", &.{}, methods);
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     _ = try vm.functions.get(fn_id);
 }
@@ -305,7 +305,7 @@ test "vm gc reuses freed tuple ids" {
     defer vm.deinit();
 
     const first_id = try vm.tuples.create(&.{Data.new.num(1)});
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     try testing.expectError(error.InvalidTuple, vm.tuples.get(first_id));
 
@@ -323,7 +323,7 @@ test "vm gc keeps rooted tuples and nested tuples alive" {
     try vm.push(Data.new.tuple(parent_id));
     defer _ = vm.pop() catch {};
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     const parent = try vm.tuples.get(parent_id);
     const child = try vm.tuples.get(child_id);
@@ -337,7 +337,7 @@ test "vm gc collects unreachable tuples" {
     defer vm.deinit();
 
     const tuple_id = try vm.tuples.create(&.{Data.new.num(9)});
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     try testing.expectError(error.InvalidTuple, vm.tuples.get(tuple_id));
 }
@@ -366,7 +366,7 @@ test "vm gc keeps rooted strings alive" {
     try vm.push(try vm.ownDataString(vm.stringValue(s)));
     defer _ = vm.pop() catch {};
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     try testing.expect(vm.strings.contains(s));
 }
@@ -412,7 +412,7 @@ test "vm gc stress test allocates many objects" {
         _ = vm.pop() catch {};
     }
 
-    trigger_gc(&vm);
+    triggerGc(&vm);
 
     _ = try vm.tables.get(table_ids.items[0]);
     _ = try vm.tuples.get(tuple_ids.items[0]);

@@ -431,7 +431,7 @@ fn testRuntime() revo.Runtime {
     return .{
         .alloc = std.testing.allocator,
         .io = std.testing.io,
-        .diag_alloc = undefined,
+        .diag_alloc = std.testing.allocator,
         .diag_arena = null,
     };
 }
@@ -454,19 +454,19 @@ test "dce: arithmetic with unused result is eliminated" {
 }
 
 test "dce regression tests" {
-    try t.top_number(
+    try t.topNumber(
         \\let x = 1 + 2
         \\x
     , 3);
 
-    try t.top_number(
+    try t.topNumber(
         \\if 1 == 1
         \\    42
         \\else
         \\    1 + 2
     , 42);
 
-    try t.top_number(
+    try t.topNumber(
         \\fn f() do
         \\    let _ = 1 + 2
         \\    let _ = 3 * 4
@@ -475,7 +475,7 @@ test "dce regression tests" {
         \\f()
     , 42);
 
-    try t.top_number(
+    try t.topNumber(
         \\do
         \\    1
         \\    2
@@ -483,17 +483,17 @@ test "dce regression tests" {
         \\end
     , 3);
 
-    try t.top_number("1 + 2 * 3", 7);
-    try t.top_string(
+    try t.topNumber("1 + 2 * 3", 7);
+    try t.topString(
         \\let s = "hello"
         \\s
     , "hello");
-    try t.top_number(
+    try t.topNumber(
         \\let x = 10
         \\x + 5
     , 15);
 
-    try t.top_number(
+    try t.topNumber(
         \\let x = 1 + 2
         \\let _ = x
         \\99
@@ -502,7 +502,7 @@ test "dce regression tests" {
     // the then and else branches write the same shared branch register,
     // so a linear last-writer scan only keeps one of them. both must
     // survive or the if-expression returns a raw number instead of a bool
-    try t.top_number(
+    try t.topNumber(
         \\let hold_count = 9297
         \\let queue_count = 23246
         \\fn f() do
@@ -517,7 +517,7 @@ test "dce regression tests" {
     // a while loop's break value flows back through a register; dce must
     // not treat the loop result as dead just because it is written on both
     // the loop-back and fall-through paths
-    try t.top_number(
+    try t.topNumber(
         \\fn f() do
         \\  let i = 0
         \\  while i < 3 do
@@ -529,7 +529,7 @@ test "dce regression tests" {
     , 3);
 
     // the same loop but the break value is consumed, so its move must live
-    try t.top_number(
+    try t.topNumber(
         \\let r = loop do
         \\  break 42
         \\end
@@ -538,7 +538,7 @@ test "dce regression tests" {
 
     // a function whose dead leading arithmetic is eliminated, with a
     // conditional jump inside that must still reach the right branches
-    try t.top_number(
+    try t.topNumber(
         \\fn f(x) do
         \\  7 * 8
         \\  9 + 10
@@ -553,7 +553,7 @@ test "dce regression tests" {
     // the function's first statement is a discarded expression, so the
     // prototype addr points at a now-dead instruction, it has2 be remapped
     // or the call lands on the wrong bytecode
-    try t.top_number(
+    try t.topNumber(
         \\fn f() do
         \\  1 + 2
         \\  42

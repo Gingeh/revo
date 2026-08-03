@@ -69,7 +69,10 @@ fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
             continue;
         }
         if (self.tables.marks.isSet(id)) continue;
-        if (pending == null) pending = std.ArrayList(revo.memory.TableID).initCapacity(alloc, 4) catch @panic("OOM in GC");
+        if (pending == null) pending = std.ArrayList(revo.memory.TableID).initCapacity(alloc, 4) catch @panic(
+            "OOM in GC",
+        );
+
         pending.?.append(alloc, id) catch @panic("OOM in GC");
         self.tables.marks.set(id);
     }

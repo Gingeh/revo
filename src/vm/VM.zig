@@ -54,7 +54,7 @@ pub const StructCacheEntry = struct {
     atom: mem.AtomID = 0,
     is_method: bool = false,
     offset: usize = 0,
-    value: Data = undefined,
+    value: Data = Data.new.nil(),
 };
 
 // main loop: run runnable fibers, wake sleepers
@@ -108,31 +108,30 @@ pub const Fiber = struct {
     waiters: std.ArrayList(FiberID),
 
     pub fn init(alloc: std.mem.Allocator, id: FiberID, program: []const Instruction, reg_count: usize) !Fiber {
-        var self = Fiber{
+        const registers = try alloc.alloc(Data, reg_count);
+        errdefer alloc.free(registers);
+        var frames = try std.ArrayList(Frame).initCapacity(alloc, INITIAL_HOT_FRAMES);
+        errdefer frames.deinit(alloc);
+        var open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 1);
+        errdefer open_upvalues.deinit(alloc);
+        var waiters = try std.ArrayList(FiberID).initCapacity(alloc, 1);
+        errdefer waiters.deinit(alloc);
+        const self = Fiber{
             .id = id,
             .pc = 0,
             .program = program,
             .debug_info_id = null,
-            .registers = undefined,
-            .frames = undefined,
-            .open_upvalues = undefined,
+            .registers = registers,
+            .frames = frames,
+            .open_upvalues = open_upvalues,
             .running = false,
             .state = .ready,
             .in_runq = false,
             .wait = .none,
             .parked_result_slot = null,
-            .waiters = undefined,
+            .waiters = waiters,
             .result = revo.Data.new.core(.nil),
         };
-
-        self.registers = try alloc.alloc(Data, reg_count);
-        errdefer alloc.free(self.registers);
-        self.frames = try std.ArrayList(Frame).initCapacity(alloc, INITIAL_HOT_FRAMES);
-        errdefer self.frames.deinit(alloc);
-        self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 1);
-        errdefer self.open_upvalues.deinit(alloc);
-        self.waiters = try std.ArrayList(FiberID).initCapacity(alloc, 1);
-        errdefer self.waiters.deinit(alloc);
 
         return self;
     }
@@ -202,8 +201,19 @@ gc_pause_factor: usize = 4,
 gc_nursery_threshold: usize = 8 * 1024 * 1024,
 
 /// for table lookups
-icache: [2][256]ICacheEntry = undefined,
-struct_cache: [512]StructCacheEntry = undefined,
+icache: [2][256]ICacheEntry = @splat(
+    @splat(
+        .{
+            .pc = std.math.maxInt(ProgramCounter),
+            .table_id = 0,
+            .version = 0,
+            .key = Data.new.nil(),
+            .value = Data.new.nil(),
+        },
+    ),
+),
+
+struct_cache: [512]StructCacheEntry = @splat(.{}),
 
 gc_mark_stack: std.ArrayList(MarkItem),
 gc_finalizers: std.AutoHashMap(mem.TableID, Data),
@@ -221,75 +231,55 @@ const MarkItem = union(enum) {
 pub fn init(runtime: revo.Runtime) !VM {
     var rt = runtime;
     rt.diag_arena = null;
-    rt.diag_alloc = undefined;
     try rt.ensureDiagArena();
     errdefer rt.deinitDiagArena();
+    var sched = try Scheduler.init(rt.alloc);
+    errdefer sched.deinit();
+    var constants = try std.ArrayList(Data).initCapacity(rt.alloc, 16);
+    errdefer constants.deinit(rt.alloc);
+    var tables = try TablePool.init(rt.alloc);
+    errdefer tables.deinit();
+    var tuples = try TuplePool.init(rt.alloc);
+    errdefer tuples.deinit();
+    var functions = try FunctionPool.init(rt.alloc);
+    errdefer functions.deinit();
+    var struct_instances = try struct_mod.StructInstancePool.init(rt.alloc);
+    errdefer struct_instances.deinit();
+    var strings = try Interner.init(rt.alloc);
+    errdefer strings.deinit();
+    var package_path = try std.ArrayList([]const u8).initCapacity(rt.alloc, 4);
+    errdefer package_path.deinit(rt.alloc);
+    var debug_infos = try std.ArrayList(DebugInfo).initCapacity(rt.alloc, 8);
+    errdefer debug_infos.deinit(rt.alloc);
+    var loading_stack = try std.ArrayList([]const u8).initCapacity(rt.alloc, 1);
+    errdefer loading_stack.deinit(rt.alloc);
+    var gc_mark_stack = try std.ArrayList(MarkItem).initCapacity(rt.alloc, 256);
+    errdefer gc_mark_stack.deinit(rt.alloc);
     var vm: VM = .{
         .runtime = rt,
-        .sched = undefined,
-        .constants = undefined,
+        .sched = sched,
+        .constants = constants,
         .stdlib_globals = Globals.init(rt.alloc),
-        .tables = undefined,
-        .tuples = undefined,
-        .functions = undefined,
+        .tables = tables,
+        .tuples = tuples,
+        .functions = functions,
         .struct_types = struct_mod.StructTypePool.init(rt.alloc),
-        .struct_instances = undefined,
-        .strings = undefined,
+        .struct_instances = struct_instances,
+        .strings = strings,
         .atoms = std.StringHashMap(mem.AtomID).init(rt.alloc),
         .module_cache = ModuleCache.init(rt.alloc),
-        .package_path = undefined,
-        .debug_infos = undefined,
+        .package_path = package_path,
+        .debug_infos = debug_infos,
         .globals = Globals.init(rt.alloc),
         .const_globals = ConstGlobals.init(rt.alloc),
         .module_dir = null,
-        .loading_stack = undefined,
+        .loading_stack = loading_stack,
         .loaded_extensions = .empty,
-        .gc_mark_stack = undefined,
+        .gc_mark_stack = gc_mark_stack,
         .gc_finalizers = std.AutoHashMap(mem.TableID, Data).init(rt.alloc),
     };
     try revo.async_backend_impl.init(&vm.runtime.async_backend);
     errdefer revo.async_backend_impl.deinit(&vm.runtime.async_backend);
-
-    vm.sched = try Scheduler.init(rt.alloc);
-    errdefer vm.sched.deinit();
-    vm.constants = try std.ArrayList(Data).initCapacity(rt.alloc, 16);
-    errdefer vm.constants.deinit(rt.alloc);
-    vm.tables = try TablePool.init(rt.alloc);
-    errdefer vm.tables.deinit();
-    vm.tuples = try TuplePool.init(rt.alloc);
-    errdefer vm.tuples.deinit();
-    vm.functions = try FunctionPool.init(rt.alloc);
-    errdefer vm.functions.deinit();
-    vm.struct_instances = try struct_mod.StructInstancePool.init(rt.alloc);
-    errdefer vm.struct_instances.deinit();
-    vm.strings = try Interner.init(rt.alloc);
-    errdefer vm.strings.deinit();
-    vm.package_path = try std.ArrayList([]const u8).initCapacity(rt.alloc, 4);
-    errdefer vm.package_path.deinit(rt.alloc);
-    vm.debug_infos = try std.ArrayList(DebugInfo).initCapacity(rt.alloc, 8);
-    errdefer vm.debug_infos.deinit(rt.alloc);
-    vm.loading_stack = try std.ArrayList([]const u8).initCapacity(rt.alloc, 1);
-    errdefer vm.loading_stack.deinit(rt.alloc);
-    vm.gc_mark_stack = try std.ArrayList(MarkItem).initCapacity(rt.alloc, 256);
-    errdefer vm.gc_mark_stack.deinit(rt.alloc);
-
-    // init icache with max pc to force miss
-    for (&vm.icache) |*bank| {
-        for (bank) |*entry| {
-            entry.* = .{
-                .pc = std.math.maxInt(ProgramCounter),
-                .table_id = 0,
-                .version = 0,
-                .key = undefined,
-                .value = undefined,
-            };
-        }
-    }
-
-    // struct cache entries start with an impossible type_id to force misses
-    for (&vm.struct_cache) |*entry| {
-        entry.* = .{};
-    }
 
     try vm.package_path.appendSlice(rt.alloc, &.{ "./?", "./lib/?", "/usr/local/lib/revo/?" });
 
@@ -547,7 +537,8 @@ pub inline fn regWrite(slots: []Data, base: usize, reg: opcode.Register, value: 
     if (builtin.mode != .ReleaseFast) {
         const slot = base + reg;
         if (slot >= slots.len)
-            @panic("register write out of bounds; this is a compiler bug, report at https://codeberg.org/lung/revo/issues");
+            @panic("register write out of bounds; this is a compiler bug, report at " ++
+                "https://codeberg.org/lung/revo/issues");
     }
     slots[base + reg] = value;
 }
@@ -571,7 +562,14 @@ pub inline fn icacheLookup(self: *VM, pc: ProgramCounter, table_id: mem.TableID,
     return null;
 }
 
-pub inline fn icacheInsert(self: *VM, pc: ProgramCounter, table_id: mem.TableID, version: usize, key: Data, value: Data) void {
+pub inline fn icacheInsert(
+    self: *VM,
+    pc: ProgramCounter,
+    table_id: mem.TableID,
+    version: usize,
+    key: Data,
+    value: Data,
+) void {
     const set = (pc ^ table_id) & (self.icache[0].len - 1);
     self.icache[1][set] = self.icache[0][set];
     self.icache[0][set] = .{ .pc = pc, .table_id = table_id, .version = version, .key = key, .value = value };
@@ -584,7 +582,14 @@ pub inline fn structCacheLookup(self: *VM, type_id: usize, atom: mem.AtomID) ?St
     return null;
 }
 
-pub inline fn structCacheInsert(self: *VM, type_id: usize, atom: mem.AtomID, is_method: bool, offset: usize, value: Data) void {
+pub inline fn structCacheInsert(
+    self: *VM,
+    type_id: usize,
+    atom: mem.AtomID,
+    is_method: bool,
+    offset: usize,
+    value: Data,
+) void {
     self.struct_cache[(type_id ^ atom) & (self.struct_cache.len - 1)] = .{
         .type_id = type_id,
         .atom = atom,
@@ -999,7 +1004,7 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
     try self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg });
 
     if (fiber.frames.items.len > caller_frame_depth) {
-        if (try self.execFiberUntilDepth(caller_frame_depth)) |_| return error.Panic;
+        if (try vm_exec.execFiberUntilDepth(self, caller_frame_depth)) |_| return error.Panic;
     }
 
     const result = fiber.registers[callee_slot];
@@ -1238,7 +1243,7 @@ fn callNonClosureFunction(
             try self.ensureAbsoluteSlot(args_end);
             const args = fiber.registers[args_start..args_end];
 
-            var c_args_buf: [16]root.functions.CRevoData = undefined;
+            var c_args_buf: [16]root.functions.CRevoData = @splat(.{ .tag = 0, .value = 0 });
             const c_args = if (args.len <= 16)
                 c_args_buf[0..args.len]
             else
@@ -1328,7 +1333,7 @@ fn callNonClosureFunction(
                 else => {
                     const tag = try self.internAtom(@errorName(err));
                     const items = [_]Data{
-                        Data.new.atom(revo.core_atoms.atom_id(.err)),
+                        Data.new.atom(revo.core_atoms.atomId(.err)),
                         Data.new.atom(tag),
                     };
                     const data = Data.new.tuple(try self.tuples.create(&items));
@@ -1558,7 +1563,7 @@ pub fn callRegister(
         // branch check explicit __call mm
         if (try self.getMetamethodByAtom(
             callee,
-            revo.core_atoms.atom_id(.__call),
+            revo.core_atoms.atomId(.__call),
         )) |mm| {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
@@ -1735,9 +1740,9 @@ fn structFieldValueMatches(
     expected_atom: revo.memory.AtomID,
     value: Data,
 ) bool {
-    if (expected_atom == revo.core_atoms.bool.atom_id()) {
-        const true_id = revo.core_atoms.atom_id(.true);
-        const false_id = revo.core_atoms.atom_id(.false);
+    if (expected_atom == revo.core_atoms.bool.atomId()) {
+        const true_id = revo.core_atoms.atomId(.true);
+        const false_id = revo.core_atoms.atomId(.false);
         return if (value.asAtom()) |v|
             v == true_id or v == false_id
         else
@@ -1781,7 +1786,7 @@ pub fn setStructField(
             );
             return error.Panic;
         };
-        self.structCacheInsert(instance.type_id, field_atom, false, @intCast(i), undefined);
+        self.structCacheInsert(instance.type_id, field_atom, false, @intCast(i), Data.new.nil());
         break :blk i;
     };
     if (desc.fields[idx].type_atom) |expected_atom| {
@@ -1848,7 +1853,7 @@ pub fn returnRegister(
             if (tuple.items.len >= 1) {
                 const tag = tuple.items[0];
                 if (tag.asAtom() ==
-                    revo.core_atoms.atom_id(.err))
+                    revo.core_atoms.atomId(.err))
                 {
                     self.panic_span = if (self.currentDebugInfo()) |debug|
                         self.spanAtPc(debug, if (fiber.pc > 0) fiber.pc - 1 else 0)

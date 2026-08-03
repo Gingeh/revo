@@ -231,8 +231,8 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
     const pred = args[1];
     if (!pred.isFunction()) return .errType(1, "function", dataToString(pred));
 
-    const atom_iter = revo.core_atoms.iter.atom_id();
-    const atom_pred = revo.core_atoms.pred.atom_id();
+    const atom_iter = revo.core_atoms.iter.atomId();
+    const atom_pred = revo.core_atoms.pred.atomId();
 
     const it_id = try vm.tables.create();
     const it = try vm.tables.get(it_id);
@@ -246,7 +246,7 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
         .param_types = &.{.any},
         .func = filterNext,
     });
-    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id), vm);
+    try mt.putRawAtom(revo.core_atoms.__call.atomId(), Data.new.function(call_fn_id), vm);
     try vm.setTableMetatable(it_id, mt_id);
 
     return .okData(Data.new.table(it_id));
@@ -265,7 +265,7 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 
     while (true) {
         const val = try vm.callFunction(iter, &.{});
-        if (val.asAtom()) |atom| if (atom == revo.core_atoms.atom_id(.done)) break;
+        if (val.asAtom()) |atom| if (atom == revo.core_atoms.atomId(.done)) break;
         try out.array.append(vm.runtime.alloc, val);
     }
 
@@ -277,9 +277,9 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 fn filterNext(args: []const Data, vm: *VM) !NativeResult {
     const tbl_id = args[0].asTable().?;
     const tbl = try vm.tables.get(tbl_id);
-    const iter = tbl.getRawAtom(revo.core_atoms.iter.atom_id(), vm).?;
-    const pred = tbl.getRawAtom(revo.core_atoms.pred.atom_id(), vm).?;
-    const done_id = revo.core_atoms.atom_id(.done);
+    const iter = tbl.getRawAtom(revo.core_atoms.iter.atomId(), vm).?;
+    const pred = tbl.getRawAtom(revo.core_atoms.pred.atomId(), vm).?;
+    const done_id = revo.core_atoms.atomId(.done);
 
     while (true) {
         const val = try vm.callFunction(iter, &.{});
@@ -559,11 +559,11 @@ pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
 
     if (obj.tag() == .function) return .okData(obj);
 
-    if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atom_id())) |mm|
+    if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atomId())) |mm|
         return .okData(try vm.callFunction(mm, &[_]Data{obj}));
 
     // callable tables are already iterators
-    if (obj.tag() == .table and try vm.getMetamethodByAtom(obj, revo.core_atoms.__call.atom_id()) != null)
+    if (obj.tag() == .table and try vm.getMetamethodByAtom(obj, revo.core_atoms.__call.atomId()) != null)
         return .okData(obj);
 
     if (obj.tag() == .string or obj.tag() == .tuple or obj.tag() == .table)
@@ -573,8 +573,8 @@ pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
 }
 
 fn makeCallableIterator(vm: *VM, obj: Data) !NativeResult {
-    const atom_obj = revo.core_atoms.obj.atom_id();
-    const atom_pos = revo.core_atoms.pos.atom_id();
+    const atom_obj = revo.core_atoms.obj.atomId();
+    const atom_pos = revo.core_atoms.pos.atomId();
 
     const it_id = try vm.tables.create();
     const it = try vm.tables.get(it_id);
@@ -588,7 +588,7 @@ fn makeCallableIterator(vm: *VM, obj: Data) !NativeResult {
         .param_types = &.{.any},
         .func = iteratorNext,
     });
-    try mt.putRawAtom(revo.core_atoms.__call.atom_id(), Data.new.function(call_fn_id), vm);
+    try mt.putRawAtom(revo.core_atoms.__call.atomId(), Data.new.function(call_fn_id), vm);
     try vm.setTableMetatable(it_id, mt_id);
 
     return .okData(Data.new.table(it_id));
@@ -600,8 +600,8 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
     const it = args[0];
     const it_id = it.asTable().?;
     const tbl = try vm.tables.get(it_id);
-    const atom_obj = revo.core_atoms.obj.atom_id();
-    const atom_pos = revo.core_atoms.pos.atom_id();
+    const atom_obj = revo.core_atoms.obj.atomId();
+    const atom_pos = revo.core_atoms.pos.atomId();
 
     const obj = tbl.getRaw(Data.new.atom(atom_obj), vm) orelse return .okData(revo.Data.new.core(.done));
     const pos_val = tbl.getRaw(Data.new.atom(atom_pos), vm) orelse return .okData(revo.Data.new.core(.done));
@@ -651,76 +651,76 @@ const dataToString = root.dataToString;
 const testing = revo.lang.testing;
 
 test "iter functions" {
-    try testing.top_string(
+    try testing.topString(
         \\ map("abc", fn(c) "x")
     , "xxx");
 
-    try testing.top_string(
+    try testing.topString(
         \\ map("", fn(c) "x")
     , "");
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ map((10, 20), fn(x) x * 2)[0] + map((10, 20), fn(x) x * 2)[1]
     , 60);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ map({a = 1, b = 2}, fn(v) v + 10).a
     , 11);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ reduce((1, 2, 3, 4), fn(acc, x) acc + x, 0)
     , 10);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ reduce("abc", fn(acc, c) acc + 1, 0)
     , 3);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ reduce("", fn(acc, c) acc + 1, 42)
     , 42);
 
-    try testing.top_atom(
+    try testing.topAtom(
         \\ each((1, 2, 3), fn(x) x)
     , "ok");
 
-    try testing.top_atom(
+    try testing.topAtom(
         \\ each("", fn(c) c)
     , "ok");
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ const it = filter((1, 2, 3, 4, 5), fn(x) x > 3)
         \\ it() + it()
     , 9);
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ find((1, 2, 3, 4), fn(x) x > 2)
     , 3);
 
-    try testing.top_atom(
+    try testing.topAtom(
         \\ find((1, 2), fn(x) x > 10)
     , "missing");
 
-    try testing.top_true(
+    try testing.topTrue(
         \\ all?((1, 2, 3), fn(x) x > 0)
     );
 
-    try testing.top_false(
+    try testing.topFalse(
         \\ all?((1, 2, 0), fn(x) x > 0)
     );
 
-    try testing.top_false(
+    try testing.topFalse(
         \\ any?((1, 2), fn(x) x > 10)
     );
 
-    try testing.top_true(
+    try testing.topTrue(
         \\ any?((0, 0, 3), fn(x) x > 2)
     );
 
-    try testing.top_true(
+    try testing.topTrue(
         \\ all?("", fn(x) 0)
     );
 
-    try testing.top_false(
+    try testing.topFalse(
         \\ any?("", fn(x) 0)
     );
 }

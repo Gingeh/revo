@@ -359,7 +359,10 @@ pub const Node = struct {
         switch (self.expr) {
             // atoms are same in both modes
             .number => |n| {
-                if (std.math.isFinite(n.value) and @floor(n.value) == n.value and n.value >= @as(f64, @floatFromInt(std.math.minInt(i64))) and n.value <= @as(f64, @floatFromInt(std.math.maxInt(i64))) and !n.is_float) {
+                if (std.math.isFinite(n.value) and @floor(n.value) == n.value and
+                    n.value >= @as(f64, @floatFromInt(std.math.minInt(i64))) and
+                    n.value <= @as(f64, @floatFromInt(std.math.maxInt(i64))) and !n.is_float)
+                {
                     try writer.print("{d}", .{@as(i64, @intFromFloat(n.value))});
                 } else {
                     try writer.print("{}", .{n.value});
@@ -1021,7 +1024,11 @@ pub fn walkAST(comptime Visitor: type, visitor: *Visitor, node: *const Node) voi
                     },
                     []StructItem => for (value) |item| {
                         if (@hasField(Visitor, "found") and visitor.found) return;
-                        if (item == .binding) visitor.visit(item.binding.value) else if (item.field.default_value) |def| visitor.visit(def);
+                        if (item == .binding) {
+                            visitor.visit(item.binding.value);
+                        } else if (item.field.default_value) |def| {
+                            visitor.visit(def);
+                        }
                     },
                     []TableEntry => for (value) |entry| {
                         if (@hasField(Visitor, "found") and visitor.found) return;
@@ -1075,7 +1082,8 @@ test "hasUnderscore" {
     res = (try lang.parse(arena, .{ .text = "x", .name = "<>" }, .{})).ok;
     try std.testing.expect(!hasUnderscore(res.root));
     res = (try lang.parse(arena, .{ .text = "(_, x)", .name = "<>" }, .{})).ok;
-    // std.debug.print("is: {s}\n\n\n\n of len {d}\n\n", .{ res.root.expr.tuple[0].expr.ident, res.root.expr.tuple[0].expr.ident.len });
+    // std.debug.print("is: {s}\n\n\n\n of len {d}\n\n", .{ res.root.expr.tuple[0].expr.ident,
+    //     res.root.expr.tuple[0].expr.ident.len });
     try std.testing.expect(hasUnderscore(res.root));
     res = (try lang.parse(arena, .{ .text = "call{_, x}", .name = "<>" }, .{})).ok;
     try std.testing.expect(hasUnderscore(res.root));
@@ -1236,7 +1244,11 @@ pub fn walkExpr(
         .import_stmt => |v| allocNode(allocator, expr.span, .{
             .import_stmt = .{ .name = v.name, .path = v.path, .pub_ = v.pub_ },
         }),
-        .decl => |d| allocNode(allocator, expr.span, .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind, .pub_ = d.pub_ } }),
+        .decl => |d| allocNode(
+            allocator,
+            expr.span,
+            .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind, .pub_ = d.pub_ } },
+        ),
 
         .comp_block => |cb| allocNode(allocator, expr.span, .{ .comp_block = .{
             .expr = try ctx.walk(allocator, cb.expr, ctx),
@@ -1246,7 +1258,19 @@ pub fn walkExpr(
             .target = try ctx.walk(allocator, v.target, ctx),
             .value = try ctx.walk(allocator, v.value, ctx),
         } }),
-        .binding => |v| allocNode(allocator, expr.span, .{ .binding = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx), .mutable = v.mutable } }),
+        .binding => |v| allocNode(
+            allocator,
+            expr.span,
+            .{ .binding = .{ .target = try ctx.walk(
+                allocator,
+                v.target,
+                ctx,
+            ), .type_name = v.type_name, .value = try ctx.walk(
+                allocator,
+                v.value,
+                ctx,
+            ), .mutable = v.mutable } },
+        ),
 
         .tuple => |items| allocNode(allocator, expr.span, .{
             .tuple = try walkSliceWith(allocator, items, Transform, ctx),

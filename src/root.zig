@@ -12,15 +12,11 @@ pub const Runtime = struct {
     io: std.Io,
     argv: []const [:0]const u8 = &.{},
     stdin: ?std.Io.File = null,
-    // SAFETY: set by init() before use
-    stdout: std.Io.File = undefined,
-    // SAFETY: set by init() before use
-    stderr: std.Io.File = undefined,
     vm: ?*VM = null,
     async_backend: async_backend_impl.BackendState = .{},
 
     /// allocator for diagnostic reports (usually an arena)
-    diag_alloc: std.mem.Allocator = undefined,
+    diag_alloc: std.mem.Allocator,
     /// arena backing diag_alloc; null when not arena-backed
     diag_arena: ?*std.heap.ArenaAllocator = null,
 
@@ -30,7 +26,6 @@ pub const Runtime = struct {
             .alloc = alloc,
             .io = io,
             .argv = argv,
-            .diag_alloc = undefined,
             .diag_arena = null,
         };
 

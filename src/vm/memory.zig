@@ -45,7 +45,7 @@ pub const Data = struct {
             return Data.numberRaw(n);
         }
         pub inline fn core(comptime a: core_atoms) Data {
-            return Data.new.atom(a.atom_id());
+            return Data.new.atom(a.atomId());
         }
 
         pub inline fn nil() Data {
@@ -142,7 +142,7 @@ pub const Data = struct {
     }
 
     // inline numeric accessors used in hot paths
-    // asNum -> ?f64, as_number -> error-union
+    // asNum -> ?f64, asNumber -> error-union
     //
     // fast path: unboxed bits (ordinary f64s, including +/-inf and -nan)
     // never match BOX_MASK. only the canonical NaN (tag nibble 8, empty
@@ -156,7 +156,7 @@ pub const Data = struct {
         return @bitCast(self.bits);
     }
 
-    pub inline fn as_number(self: Data) !f64 {
+    pub inline fn asNumber(self: Data) !f64 {
         if (!self.isNumber()) return error.TypeError;
         return @bitCast(self.bits);
     }
@@ -192,12 +192,14 @@ pub const Data = struct {
         return null;
     }
     pub inline fn asStructVal(self: Data) ?StructInstanceID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_val))
+        if ((self.bits & BOX_MASK) == BOX_MASK and
+            ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_val))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asStructType(self: Data) ?StructTypeID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_type))
+        if ((self.bits & BOX_MASK) == BOX_MASK and
+            ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_type))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }

@@ -31,21 +31,13 @@ pub const TuplePool = struct {
     next: std.ArrayList(usize),
 
     pub fn init(alloc: std.mem.Allocator) !TuplePool {
-        var self = TuplePool{
+        return TuplePool{
             .alloc = alloc,
-            .tuples = undefined,
-            .marks = undefined,
+            .tuples = try .initCapacity(alloc, 4),
+            .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
-            .next = undefined,
+            .next = try .initCapacity(alloc, 4),
         };
-        self.tuples = try std.ArrayList(?Tuple).initCapacity(alloc, 4);
-        errdefer self.tuples.deinit(alloc);
-        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
-        errdefer self.marks.deinit();
-        self.next = try std.ArrayList(usize).initCapacity(alloc, 4);
-        errdefer self.next.deinit(alloc);
-
-        return self;
     }
 
     pub fn deinit(self: *TuplePool) void {
@@ -61,7 +53,18 @@ pub const TuplePool = struct {
     pub fn create(self: *TuplePool, items: []const Data) !memory.TupleID {
         const owned = try self.alloc.dupe(Data, items);
         errdefer self.alloc.free(owned);
-        return pool.create(self.alloc, Tuple, memory.TupleID, &self.tuples, &self.marks, &self.dead, &self.first, &self.last, &self.next, .{ .alloc = self.alloc, .items = owned });
+        return pool.create(
+            self.alloc,
+            Tuple,
+            memory.TupleID,
+            &self.tuples,
+            &self.marks,
+            &self.dead,
+            &self.first,
+            &self.last,
+            &self.next,
+            .{ .alloc = self.alloc, .items = owned },
+        );
     }
 
     pub fn get(self: *TuplePool, id: memory.TupleID) !*Tuple {
@@ -79,7 +82,18 @@ pub const TuplePool = struct {
     }
 
     pub fn sweep(self: *TuplePool) void {
-        pool.sweep(self.alloc, Tuple, memory.TupleID, &self.tuples, &self.marks, &self.dead, &self.first, &self.last, &self.next, freeTuple);
+        pool.sweep(
+            self.alloc,
+            Tuple,
+            memory.TupleID,
+            &self.tuples,
+            &self.marks,
+            &self.dead,
+            &self.first,
+            &self.last,
+            &self.next,
+            freeTuple,
+        );
     }
 
     pub fn bytes(self: *const TuplePool) usize {
@@ -113,7 +127,7 @@ test "parses tuple literals and keeps paren grouping distinct" {
     try testing.expectPrinted("(_, x)", "(tuple _ x)");
     try testing.expectPrinted("(1,)", "(tuple 1)");
     try testing.expectPrinted("(1)", "1");
-    try testing.top_nil("()");
+    try testing.topNil("()");
 }
 
 test "parses tuple destructuring in bindings assignment and match" {
@@ -123,42 +137,44 @@ test "parses tuple destructuring in bindings assignment and match" {
         \\ match (:ok, "x")
         \\ | (:ok, value) => value
         \\ | (:err, err) => err
-    , "(block (binding (tuple-pattern a b) (tuple :ok \"value\")) (assign (tuple-pattern a b) (tuple :err \"other\")) (match (tuple :ok \"x\") (arm (tuple-pattern :ok value) value) (arm (tuple-pattern :err err) err)))");
+    , "(block (binding (tuple-pattern a b) (tuple :ok \"value\")) (assign " ++
+        "(tuple-pattern a b) (tuple :err \"other\")) " ++
+        "(match (tuple :ok \"x\") (arm (tuple-pattern :ok value) value) (arm (tuple-pattern :err err) err)))");
 }
 
 test "tuple destructuring ignores extras but errors when too short" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const a, b = (1, 2, 3)
         \\ a + b
     , 3);
 }
 
 test "tuple destructuring" {
-    try testing.top_true(":true");
+    try testing.topTrue(":true");
 }
 
 test "tuple destructuring assmt doesnt die" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ let (a, b) = (1, 2)
         \\ a = 123
         \\ a
     , 123);
-    try testing.top_number(
+    try testing.topNumber(
         \\ let (a, b) = (1, 2)
         \\ b
     , 2);
-    try testing.top_number(
+    try testing.topNumber(
         \\ const (a, b) = (1, 2)
         \\ b
     , 2);
-    try testing.top_number(
+    try testing.topNumber(
         \\ const a, b = (1, 2)
         \\ b
     , 2);
 }
 
 test "tuple length" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ const t = (1, 2, 3, 4, 5)
         \\ len(t)
     , 5);

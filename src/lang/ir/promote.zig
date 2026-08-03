@@ -1,3 +1,4 @@
+// zlint-disable line-length -- yeah
 //! loop-carried register promotion, runs after `peephole.peepholeIr`
 //!
 //! keeps loop-carried locals in dedicated vm registers instead of loading and

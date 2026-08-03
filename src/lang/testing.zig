@@ -9,7 +9,7 @@ pub fn runtime() revo.Runtime {
     return .{
         .alloc = alloc,
         .io = io,
-        .diag_alloc = undefined,
+        .diag_alloc = alloc,
         .diag_arena = null,
     };
 }
@@ -124,7 +124,7 @@ pub fn topResultMode(source: []const u8, module_dir: ?[]const u8, test_mode: boo
 }
 
 fn expectTopNumber(result: *TopResult, expected: f64) !void {
-    const actual = result.value.as_number() catch {
+    const actual = result.value.asNumber() catch {
         std.debug.print("result was not a number, it was {s}\n", .{revo.std_lib.typeof(result.value)});
         return error.TypeMismatch;
     };
@@ -154,55 +154,55 @@ fn expectTopTypeValue(result: *TopResult, expected: revo.memory.Type) !void {
     try std.testing.expect(result.value.tag() == expected);
 }
 
-pub fn top_number(source: []const u8, expected: f64) !void {
+pub fn topNumber(source: []const u8, expected: f64) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try expectTopNumber(&result, expected);
 }
 
-pub fn top_number_in_dir(module_dir: []const u8, source: []const u8, expected: f64) !void {
+pub fn topNumberInDir(module_dir: []const u8, source: []const u8, expected: f64) !void {
     var result = try topResult(source, module_dir);
     defer result.deinit();
     try expectTopNumber(&result, expected);
 }
 
-pub fn top_atom(source: []const u8, expected: []const u8) !void {
+pub fn topAtom(source: []const u8, expected: []const u8) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try expectTopAtom(&result, expected);
 }
 
-pub fn top_string(source: []const u8, expected: []const u8) !void {
+pub fn topString(source: []const u8, expected: []const u8) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try expectTopString(&result, expected);
 }
 
-pub fn top_string_in_dir(module_dir: []const u8, source: []const u8, expected: []const u8) !void {
+pub fn topStringInDir(module_dir: []const u8, source: []const u8, expected: []const u8) !void {
     var result = try topResult(source, module_dir);
     defer result.deinit();
     try expectTopString(&result, expected);
 }
 
-pub fn top_type(source: []const u8, expected: revo.memory.Type) !void {
+pub fn topType(source: []const u8, expected: revo.memory.Type) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try expectTopTypeValue(&result, expected);
 }
 
-pub fn top_nil(source: []const u8) !void {
+pub fn topNil(source: []const u8) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try std.testing.expectEqual(revo.Data.new.nil(), result.value);
 }
 
-pub fn top_true(source: []const u8) !void {
+pub fn topTrue(source: []const u8) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try std.testing.expect(!revo.isFalse(result.value));
 }
 
-pub fn top_false(source: []const u8) !void {
+pub fn topFalse(source: []const u8) !void {
     var result = try topResult(source, null);
     defer result.deinit();
     try std.testing.expect(revo.isFalse(result.value));

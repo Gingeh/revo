@@ -125,7 +125,7 @@ pos: usize = 0,
 stop_token: ?TokenType = null,
 allow_bare_calls: bool = true, // permit `f "str"`, disabled in pattern positions
 stop_on_stmt_start: bool = false, // treat statement-starting tokens as expr boundaries
-errors: std.ArrayList(diagnostic.Part) = undefined,
+errors: std.ArrayList(diagnostic.Part) = .empty,
 errors_inited: bool = false,
 first_error_kind: ?Kind = null,
 first_error_message: []const u8 = "",
@@ -319,16 +319,12 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
             };
             self.stop_token = prev_stop;
 
-            var step_node: *Node = undefined;
-            var end_node: *Node = undefined;
-
-            if (self.match(.dotdot)) {
-                step_node = step_or_end;
-                end_node = try self.parseExpression(BP.range);
-            } else {
-                step_node = try self.allocExpr(step_or_end.span, .{ .number = .{ .value = 1, .is_float = false } });
-                end_node = step_or_end;
-            }
+            const has_step = self.match(.dotdot);
+            const end_node = if (has_step) try self.parseExpression(BP.range) else step_or_end;
+            const step_node = if (has_step)
+                step_or_end
+            else
+                try self.allocExpr(step_or_end.span, .{ .number = .{ .value = 1, .is_float = false } });
             left = try self.buildRangeExpr(left, end_node, step_node);
             continue;
         }
@@ -476,7 +472,10 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_spawn => self.parseUnary(.spawn, 60, token),
         .kw_join => self.parseUnary(.join, 60, token),
         .kw_yield => blk: {
-            break :blk self.allocExpr(token.span(), .{ .unary = .{ .op = .yield, .expr = try self.allocExpr(token.span(), .nil) } });
+            break :blk self.allocExpr(
+                token.span(),
+                .{ .unary = .{ .op = .yield, .expr = try self.allocExpr(token.span(), .nil) } },
+            );
         },
         .lsquiggly => self.parseTable(token),
         .kw_type => {
@@ -488,7 +487,12 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .backtick_string => try self.parseQuasiquote(token),
         .eof => return error.UnexpectedToken,
         .colon => blk: {
-            try self.recordError(.UnexpectedToken, "':' without a following name is not a value; use ':name' for an atom", token.span());
+            try self.recordError(
+                .UnexpectedToken,
+                "':' without a following name is not a value; use ':name' for an atom",
+                token.span(),
+            );
+
             break :blk self.allocExpr(token.span(), .nil);
         },
         else => return error.UnexpectedToken,
@@ -618,7 +622,10 @@ fn parseFnWithBodyMin(self: *Parser, start: Token, body_min_bp: u8) anyerror!*No
             const bind_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
                 .binding = .{ .target = target, .value = fn_node, .mutable = false },
             });
-            return self.allocExpr(Span.merge(start.span(), body.span), .{ .decl = .{ .inner = bind_node, .kind = ast.DeclKind.con } });
+            return self.allocExpr(
+                Span.merge(start.span(), body.span),
+                .{ .decl = .{ .inner = bind_node, .kind = ast.DeclKind.con } },
+            );
         }
         return error.UnexpectedToken;
     }
@@ -711,58 +718,60 @@ fn parseTypeExpr(self: *Parser) anyerror!*ast.TypeExpr {
 /// const x = expr or let x = expr, with const (a, b) = <expr> tuple destructuring
 /// with tuples and type annotations
 fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerror!*Node {
-    comptime var mutable: bool = false;
-    comptime {
-        if (kind == ast.DeclKind.con) {
-            mutable = false;
-        } else if (kind == ast.DeclKind.let) {
-            mutable = true;
-        } else if (kind == ast.DeclKind.global) {
-            mutable = false;
+    const mutable: bool = switch (kind) {
+        ast.DeclKind.con => false,
+        ast.DeclKind.let => true,
+        ast.DeclKind.global => false,
+        else => @compileError("unsupported binding kind to parseBinding"),
+    };
+
+    const target: *Node = blk: {
+        if (self.check(.lparen)) {
+            _ = self.advance();
+            const t = try self.parseTuplePattern(.rparen);
+            _ = try self.expect(.rparen);
+            break :blk t;
         } else {
-            @compileError("unsupported binding kind to parseBinding");
-        }
-    }
+            const first = try self.expectIdent();
+            if (self.match(.comma)) {
+                var items = try std.ArrayList(*Node).initCapacity(self.alloc, 2);
+                errdefer items.deinit(self.alloc);
+                try items.append(self.alloc, try self.allocExpr(first.span(), .{ .ident = first.text }));
 
-    var binding: ast.Binding = .{ .target = undefined, .value = undefined, .mutable = mutable };
-
-    if (self.check(.lparen)) {
-        _ = self.advance();
-        binding.target = try self.parseTuplePattern(.rparen);
-        _ = try self.expect(.rparen);
-    } else {
-        const first = try self.expectIdent();
-        if (self.match(.comma)) {
-            var items = try std.ArrayList(*Node).initCapacity(self.alloc, 2);
-            errdefer items.deinit(self.alloc);
-            try items.append(self.alloc, try self.allocExpr(first.span(), .{ .ident = first.text }));
-
-            while (true) {
-                const item = try self.expectIdent();
-                try items.append(self.alloc, try self.allocExpr(item.span(), .{ .ident = item.text }));
-                if (!self.match(.comma)) break;
+                while (true) {
+                    const item = try self.expectIdent();
+                    try items.append(self.alloc, try self.allocExpr(item.span(), .{ .ident = item.text }));
+                    if (!self.match(.comma)) break;
+                }
+                break :blk try self.allocExpr(ast.spanFromNodes(items.items, first.span()), .{
+                    .tuple_pattern = try items.toOwnedSlice(self.alloc),
+                });
+            } else {
+                break :blk try self.allocExpr(first.span(), .{ .ident = first.text });
             }
-            binding.target = try self.allocExpr(ast.spanFromNodes(items.items, first.span()), .{
-                .tuple_pattern = try items.toOwnedSlice(self.alloc),
-            });
-        } else {
-            binding.target = try self.allocExpr(first.span(), .{ .ident = first.text });
         }
-    }
+    };
 
+    var type_name: ?*ast.TypeExpr = null;
     if (self.match(.colon)) {
-        binding.type_name = try self.parseTypeExpr();
+        type_name = try self.parseTypeExpr();
     }
     _ = try self.expect(.assign);
-    binding.value = try self.parseStatementExpression(0);
+    var value = try self.parseStatementExpression(0);
 
     // for const x = import "foo", use binding name as module name
     // so macros qualify as x.macro! instead of foo.macro!
-    if (binding.value.expr == .import_stmt and binding.target.expr == .ident) {
-        binding.value.expr.import_stmt.name = binding.target.expr.ident;
+    if (value.expr == .import_stmt and target.expr == .ident) {
+        value.expr.import_stmt.name = target.expr.ident;
     }
 
-    const span = Span.merge(start.span(), binding.value.span);
+    const span = Span.merge(start.span(), value.span);
+    const binding = ast.Binding{
+        .target = target,
+        .value = value,
+        .mutable = mutable,
+        .type_name = type_name,
+    };
     const binding_node = try self.allocExpr(span, .{ .binding = binding });
 
     return self.allocExpr(span, .{ .decl = .{ .inner = binding_node, .kind = kind } });
@@ -784,7 +793,10 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
         },
         .kw_struct => {
             const struct_def = try self.parseStruct(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = struct_def, .kind = ast.DeclKind.struct_decl } });
+            return self.allocExpr(
+                start.span(),
+                .{ .decl = .{ .inner = struct_def, .kind = ast.DeclKind.struct_decl } },
+            );
         },
         .kw_test => blk: {
             var skip = false;
@@ -825,7 +837,10 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
             const node = try self.allocExpr(Span.merge(start.span(), type_expr.span), .{
                 .type_alias = .{ .name = name.text, .type_expr = type_expr },
             });
-            break :blk self.allocExpr(start.span(), .{ .decl = .{ .inner = node, .kind = ast.DeclKind.type_alias_decl } });
+            break :blk self.allocExpr(
+                start.span(),
+                .{ .decl = .{ .inner = node, .kind = ast.DeclKind.type_alias_decl } },
+            );
         },
         else => return error.UnexpectedToken,
     };
@@ -945,7 +960,11 @@ fn parseForRangeEnd(self: *Parser, start: *Node, default_step: *Node, dotdot_end
 fn sentinelForStep(step: *const Node) f64 {
     const val = switch (step.expr) {
         .number => step.expr.number.value,
-        .unary => |u| if (u.op == .negate and u.expr.expr == .number) -u.expr.expr.number.value else return std.math.inf(f64),
+        .unary => |u| if (u.op == .negate and u.expr.expr == .number)
+            -u.expr.expr.number.value
+        else
+            return std.math.inf(f64),
+
         else => return std.math.inf(f64),
     };
     if (val < 0) return -std.math.inf(f64);
@@ -975,7 +994,18 @@ fn parseContinue(self: *Parser, start: Token) anyerror!*Node {
 
 /// pub prefix on declarations
 fn parsePubPrefix(self: *Parser, _: Token) anyerror!*Node {
-    const pub_keywords = comptime [_]TokenType{ .kw_const, .kw_let, .kw_fn, .kw_struct, .kw_test, .kw_suite, .kw_proc, .kw_type, .kw_macro, .kw_import };
+    const pub_keywords = comptime [_]TokenType{
+        .kw_const,
+        .kw_let,
+        .kw_fn,
+        .kw_struct,
+        .kw_test,
+        .kw_suite,
+        .kw_proc,
+        .kw_type,
+        .kw_macro,
+        .kw_import,
+    };
     var found = false;
     inline for (pub_keywords) |kt| {
         if (self.check(kt)) {
@@ -1266,14 +1296,14 @@ fn parseTable(self: *Parser, start: Token) anyerror!*Node {
 }
 
 test "compiled table equals-key entries" {
-    try testing_helpers.top_number("{ a = 5 }[:a]", 5);
-    try testing_helpers.top_number("{ 7 = 10 }[7]", 10);
-    try testing_helpers.top_number("{ \"a\" = 5 }[\"a\"]", 5);
-    try testing_helpers.top_number("let t = { 1 } t[1] = 5 len(t)", 2);
+    try testing_helpers.topNumber("{ a = 5 }[:a]", 5);
+    try testing_helpers.topNumber("{ 7 = 10 }[7]", 10);
+    try testing_helpers.topNumber("{ \"a\" = 5 }[\"a\"]", 5);
+    try testing_helpers.topNumber("let t = { 1 } t[1] = 5 len(t)", 2);
 }
 
 test "compiled table square bracket special case" {
-    try testing_helpers.top_number("let k = \"asdf\" { [k] = 5 }[\"asdf\"]", 5);
+    try testing_helpers.topNumber("let k = \"asdf\" { [k] = 5 }[\"asdf\"]", 5);
 }
 
 test "parser table square bracket parses" {
@@ -1337,7 +1367,10 @@ fn parseTuplePattern(self: *Parser, terminator: TokenType) anyerror!*Node {
     }
 
     const end_span = if (items.items.len == 0) self.peek().span() else items.items[items.items.len - 1].span;
-    return self.allocExpr(ast.spanFromNodes(items.items, end_span), .{ .tuple_pattern = try items.toOwnedSlice(self.alloc) });
+    return self.allocExpr(
+        ast.spanFromNodes(items.items, end_span),
+        .{ .tuple_pattern = try items.toOwnedSlice(self.alloc) },
+    );
 }
 
 /// turn expression into pattern: expr -> (expr, expr, ...)
@@ -1625,7 +1658,9 @@ fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bo
 fn canContinueExpression(self: *Parser, left: *const Node) bool {
     const t = self.peek().type;
     if (t == .dot or t == .lbracket or t == .assign or t == .dotdot or t == .pipe_forward or t == .hash) return true;
-    if (t == .plus_assign or t == .minus_assign or t == .star_assign or t == .slash_assign or t == .percent_assign) return true;
+    if (t == .plus_assign or t == .minus_assign or t == .star_assign or
+        t == .slash_assign or t == .percent_assign) return true;
+
     if (logical_binding_table.get(t) != null) return true;
     if (infix_binding_table.get(t) != null) return true;
     if (t == .lparen and (exprAllowsParenCall(left) or self.tokenAdjacent(left.span.end))) return true;
@@ -1891,7 +1926,11 @@ fn parseInterpolatedString(self: *Parser, token: Token) anyerror!*Node {
     }
 
     var call_args = try std.ArrayList(*Node).initCapacity(self.alloc, args.items.len + 1);
-    try call_args.append(self.alloc, try self.allocExpr(token.span(), .{ .string = try format.toOwnedSlice(self.alloc) }));
+    try call_args.append(
+        self.alloc,
+        try self.allocExpr(token.span(), .{ .string = try format.toOwnedSlice(self.alloc) }),
+    );
+
     try call_args.appendSlice(self.alloc, args.items);
     args.deinit(self.alloc);
     const callee = try self.allocExpr(token.span(), .{ .ident = "fmt" });

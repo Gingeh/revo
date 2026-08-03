@@ -435,8 +435,8 @@ pub const TypeSpec = union(enum) {
 };
 
 fn isBoolAtom(atom: mem.AtomID) bool {
-    const true_id = revo.core_atoms.atom_id(.true);
-    const false_id = revo.core_atoms.atom_id(.false);
+    const true_id = revo.core_atoms.atomId(.true);
+    const false_id = revo.core_atoms.atomId(.false);
     return atom == true_id or atom == false_id;
 }
 
@@ -461,8 +461,8 @@ pub fn okAtom(vm: *VM) NativeResult {
 pub fn resultTag(vm: *VM, comptime tag: ResultTag) !mem.AtomID {
     _ = vm;
     return switch (tag) {
-        .ok => revo.core_atoms.atom_id(.ok),
-        .err => revo.core_atoms.atom_id(.err),
+        .ok => revo.core_atoms.atomId(.ok),
+        .err => revo.core_atoms.atomId(.err),
     };
 }
 
@@ -546,28 +546,28 @@ pub fn fmt(args: []const Data, vm: *VM) !NativeResult {
 }
 
 test "fmt %d formats numbers" {
-    try testing.top_string(
+    try testing.topString(
         \\ fmt("%d", 42)
     , "42");
-    try testing.top_string(
+    try testing.topString(
         \\ fmt("%d", 1.5)
     , "1.5");
-    try testing.top_string(
+    try testing.topString(
         \\ fmt("%d", "10.5")
     , "10.5");
-    try testing.top_string(
+    try testing.topString(
         \\ fmt("%d", :hello)
     , "<un-number-able>");
 }
 
 test "fmt escapes literal percent" {
-    try testing.top_string(
+    try testing.topString(
         \\ fmt("100%%")
     , "100%");
 }
 
 test "fmt %? uses debug rendering" {
-    try testing.top_string(
+    try testing.topString(
         \\ const mt = {__debug = fn(self) "custom-debug"}
         \\ const t = set_metatable({}, mt)
         \\ fmt("%?", t)
@@ -575,7 +575,7 @@ test "fmt %? uses debug rendering" {
 }
 
 test "fmt rendering is recursive" {
-    try testing.top_string(
+    try testing.topString(
         \\ const mt = {__display = fn(self) "shown", __debug = fn(self) "debug"}
         \\ const t = set_metatable({}, mt)
         \\ fmt("%v|%?|%d", {x = t}, {x = t}, {x = t})
@@ -607,7 +607,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
         if (tpl.items.len != 2)
             return .{ .ok = Data.new.nil() };
         const tag = tpl.items[0].asAtom() orelse return .{ .ok = Data.new.nil() };
-        if (tag != revo.core_atoms.atom_id(.err))
+        if (tag != revo.core_atoms.atomId(.err))
             return .{ .ok = Data.new.nil() };
 
         var obuf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
@@ -691,7 +691,7 @@ pub fn debug_(args: []const Data, vm: *VM) !NativeResult {
 /// for strings: byte length, for tables: array + map parts
 /// uses __len metamethod if available
 pub fn len_(args: []const Data, vm: *VM) !NativeResult {
-    const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.atom_id(.__len));
+    const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.atomId(.__len));
     if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     return switch (args[0].tag()) {
         .string => .okData(Data.new.num(vm.stringValue(args[0].asString().?).len)),
@@ -711,7 +711,7 @@ pub fn inspect(args: []const Data, vm: *VM) !NativeResult {
 
 pub fn typeof(d: Data) []const u8 {
     return switch (d.tag()) {
-        .atom => if (d.asAtom().? == revo.core_atoms.atom_id(.nil)) "nil" else "atom",
+        .atom => if (d.asAtom().? == revo.core_atoms.atomId(.nil)) "nil" else "atom",
         .struct_val => "struct",
         .struct_type => "type",
         else => |e| @tagName(e),
@@ -746,7 +746,7 @@ pub fn try_(args: []const Data, vm: *VM) !NativeResult {
     if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
     const tag = tuple.items[0];
     const atom = tag.asAtom() orelse return .errType(0, "tuple starting with atom", "tuple starting with non-atom");
-    const ok_id = revo.core_atoms.atom_id(.ok);
+    const ok_id = revo.core_atoms.atomId(.ok);
     if (atom != ok_id) return panic_(&[1]Data{tuple.items[1]}, vm);
     return .{ .ok = tuple.items[1] };
 }
@@ -762,7 +762,7 @@ pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
     const tag = tuple.items[0];
     if (tag.asAtom() == null) return .errType(0, "tuple starting with atom", "tuple starting with non-atom");
 
-    const err_tag = revo.core_atoms.atom_id(.err);
+    const err_tag = revo.core_atoms.atomId(.err);
     if (tag.asAtom().? == err_tag) {
         return .{ .ok = tuple.items[1] };
     }
@@ -790,7 +790,7 @@ pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
 
     const channel_id = try vm.sched.channelCreate(&vm.tables, cap);
     const res = try vm.tuples.create(&[2]Data{
-        Data.new.atom(revo.core_atoms.chan.atom_id()),
+        Data.new.atom(revo.core_atoms.chan.atomId()),
         Data.new.num(channel_id),
     });
     return .okData(Data.new.tuple(res));
@@ -801,7 +801,7 @@ fn chanIdOf(args: []const Data, vm: *VM) NativeResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
     const t = vm.tuples.get(tuple_id) catch return .errType(0, "chan tuple", "tuple");
     if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
-    const chan_atom = revo.core_atoms.chan.atom_id();
+    const chan_atom = revo.core_atoms.chan.atomId();
     if (t.items[0].asAtom() != chan_atom)
         return .errType(0, "chan tuple", "tuple");
     const chan_id = t.items[1].asNum() orelse return .errType(0, "chan tuple", "tuple");
@@ -988,21 +988,21 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
     if (args.len == 1) {
         const t = args[0].asTable() orelse return .errType(0, "table", typeof(args[0]));
         const table = try vm.tables.get(t);
-        if (try table.get(Data.new.atom(revo.core_atoms.path.atom_id()), vm)) |v| {
+        if (try table.get(Data.new.atom(revo.core_atoms.path.atomId()), vm)) |v| {
             path = if (v.asString()) |id|
                 vm.stringValue(id)
             else if (v.asAtom()) |atom|
-                if (atom == revo.core_atoms.atom_id(.undef) or atom == revo.core_atoms.atom_id(.nil))
+                if (atom == revo.core_atoms.atomId(.undef) or atom == revo.core_atoms.atomId(.nil))
                     path
                 else
                     return .errType(0, "string", typeof(v))
             else
                 return .errType(0, "string", typeof(v));
         }
-        if (try table.get(Data.new.atom(revo.core_atoms.delimiter.atom_id()), vm)) |v| {
+        if (try table.get(Data.new.atom(revo.core_atoms.delimiter.atomId()), vm)) |v| {
             if (v.asAtom()) |atom| {
-                const eof_id = revo.core_atoms.eof.atom_id();
-                if (atom == revo.core_atoms.nil.atom_id() or atom == eof_id)
+                const eof_id = revo.core_atoms.eof.atomId();
+                if (atom == revo.core_atoms.nil.atomId() or atom == eof_id)
                     read_eof = true
                 else
                     return .errType(0, "string, :nil, or :eof", typeof(v));
@@ -1060,7 +1060,7 @@ pub fn gensym(args: []const Data, vm: *VM) !NativeResult {
 }
 
 test "gensym produces different values on each call" {
-    try revo.lang.testing.top_atom(
+    try revo.lang.testing.topAtom(
         \\ const a = gensym()
         \\ const b = gensym()
         \\ a != b
@@ -1351,89 +1351,89 @@ pub fn typeUtils(vm: *VM) !void {
 }
 
 test "type predicates" {
-    try testing.top_true("number?(42)");
-    try testing.top_true("string?(\"hello\")");
-    try testing.top_true("table?({})");
-    try testing.top_true("atom?(:ok)");
-    try testing.top_true("function?(fn() 42)");
+    try testing.topTrue("number?(42)");
+    try testing.topTrue("string?(\"hello\")");
+    try testing.topTrue("table?({})");
+    try testing.topTrue("atom?(:ok)");
+    try testing.topTrue("function?(fn() 42)");
 
-    try testing.top_true("tuple?((1, 2))");
-    try testing.top_false("tuple?(42)");
-    try testing.top_true("struct Foo { x = 1 } struct_val?(Foo{})");
-    try testing.top_false("struct Foo { x = 1 } struct_val?(42)");
-    try testing.top_true("struct Foo { x = 1 } struct_type?(Foo)");
-    try testing.top_false("struct Foo { x = 1 } struct_type?(42)");
+    try testing.topTrue("tuple?((1, 2))");
+    try testing.topFalse("tuple?(42)");
+    try testing.topTrue("struct Foo { x = 1 } struct_val?(Foo{})");
+    try testing.topFalse("struct Foo { x = 1 } struct_val?(42)");
+    try testing.topTrue("struct Foo { x = 1 } struct_type?(Foo)");
+    try testing.topFalse("struct Foo { x = 1 } struct_type?(42)");
 }
 
 test "array methods" {
-    try testing.top_number("{1, 2, 3}:first()", 1);
-    try testing.top_number("{1, 2, 3}:last()", 3);
-    try testing.top_true("{1, 2, 3}:contains?(2)");
-    try testing.top_false("{1, 2, 3}:contains?(5)");
-    try testing.top_number("{1, 2, 3}:index_of(2)", 1);
-    try testing.top_number("{1, 2, 3}:sum()", 6);
+    try testing.topNumber("{1, 2, 3}:first()", 1);
+    try testing.topNumber("{1, 2, 3}:last()", 3);
+    try testing.topTrue("{1, 2, 3}:contains?(2)");
+    try testing.topFalse("{1, 2, 3}:contains?(5)");
+    try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
+    try testing.topNumber("{1, 2, 3}:sum()", 6);
 }
 
 test "array sort" {
-    try testing.top_number("{3, 1, 2}:sort():first()", 1);
-    try testing.top_number("{3, 1, 2}:sort():last()", 3);
-    try testing.top_number("{1, 5, 3}:sort_by(fn(a, b) a > b):first()", 5);
+    try testing.topNumber("{3, 1, 2}:sort():first()", 1);
+    try testing.topNumber("{3, 1, 2}:sort():last()", 3);
+    try testing.topNumber("{1, 5, 3}:sort_by(fn(a, b) a > b):first()", 5);
 }
 
 test "array transform" {
-    try testing.top_number("{1, 2, 3}:reverse():first()", 3);
-    try testing.top_number("{1, 2, 3}:unique():sum()", 6);
-    try testing.top_number("{1, 2, 1, 3, 2}:unique():sum()", 6);
+    try testing.topNumber("{1, 2, 3}:reverse():first()", 3);
+    try testing.topNumber("{1, 2, 3}:unique():sum()", 6);
+    try testing.topNumber("{1, 2, 1, 3, 2}:unique():sum()", 6);
 }
 
 test "string creation" {
-    try testing.top_string("string_of(97)", "a");
-    try testing.top_string("string_of((72, 105))", "Hi");
-    try testing.top_string("string_of((82, 101, 118, 111))", "Revo");
+    try testing.topString("string_of(97)", "a");
+    try testing.topString("string_of((72, 105))", "Hi");
+    try testing.topString("string_of((82, 101, 118, 111))", "Revo");
 }
 
 test "string table conversion" {
-    try testing.top_number("len(\"abc\":table())", 3);
-    try testing.top_number("\"a\":ascii()", 97);
-    try testing.top_number("\"Hello\":ascii()", 72);
+    try testing.topNumber("len(\"abc\":table())", 3);
+    try testing.topNumber("\"a\":ascii()", 97);
+    try testing.topNumber("\"Hello\":ascii()", 72);
 }
 
 test "array flatten" {
-    try testing.top_number("{{1, 2}, {3, 4}}:flatten():sum()", 10);
-    try testing.top_number("{{1}, {2, 3}, {4}}:flatten():sum()", 10);
+    try testing.topNumber("{{1, 2}, {3, 4}}:flatten():sum()", 10);
+    try testing.topNumber("{{1}, {2, 3}, {4}}:flatten():sum()", 10);
 }
 
 test "stdlib json time and string modules are exposed" {
-    try testing.top_string("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
-    try testing.top_number("json.decode(\"{{ \\\"a\\\" : 1}}\"):unwrap().a", 1);
-    try testing.top_true("time.now() > 0");
-    try testing.top_number("len(string.split(\"a,b\", \",\"))", 2);
+    try testing.topString("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
+    try testing.topNumber("json.decode(\"{{ \\\"a\\\" : 1}}\"):unwrap().a", 1);
+    try testing.topTrue("time.now() > 0");
+    try testing.topNumber("len(string.split(\"a,b\", \",\"))", 2);
 }
 
 test "len" {
-    try testing.top_number("len(\"hi\")", 2);
-    try testing.top_number("len(\"\")", 0);
-    try testing.top_number("len(\"abcde\")", 5);
-    try testing.top_number("len((1, 2, 3))", 3);
-    try testing.top_number("len((1,))", 1);
-    try testing.top_number("len({})", 0);
+    try testing.topNumber("len(\"hi\")", 2);
+    try testing.topNumber("len(\"\")", 0);
+    try testing.topNumber("len(\"abcde\")", 5);
+    try testing.topNumber("len((1, 2, 3))", 3);
+    try testing.topNumber("len((1,))", 1);
+    try testing.topNumber("len({})", 0);
 }
 
 test "meatballs are distinct" {
-    try testing.top_string(
+    try testing.topString(
         \\ const a = set_metatable({}, {__tostring = fn(self) "foo"})
         \\ const b = set_metatable({}, {__tostring = fn(self) "bar"})
         \\ string(a)
     , "foo");
 
-    try testing.top_string(
+    try testing.topString(
         \\ const a = set_metatable(:true, {__tostring = fn(self) "foo"})
         \\ string(1 == 1)
     , "foo");
 }
 
 test "bullshit: metatable constructors closures and method chaining" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ let Counter = set_metatable({}, {
         \\   new = fn(start) do
         \\     const state = {n = start}
@@ -1452,19 +1452,19 @@ test "bullshit: metatable constructors closures and method chaining" {
 }
 
 test "natives register as functions" {
-    try testing.top_type("len", .function);
-    try testing.top_type("number", .function);
-    try testing.top_type("assert", .function);
-    try testing.top_true("assert(type(len) == :function)");
+    try testing.topType("len", .function);
+    try testing.topType("number", .function);
+    try testing.topType("assert", .function);
+    try testing.topTrue("assert(type(len) == :function)");
 }
 
 test "expect" {
-    try testing.top_atom(
+    try testing.topAtom(
         \\ let r = expect(1 == 2)
         \\ r[0]
     , "err");
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ expect(42)?
     , 42);
 }
@@ -1478,7 +1478,7 @@ test "read works" {
         try tmp.dir.writeFile(io, .{ .sub_path = "readme.rv", .data = "hello\nworld" });
         const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
         defer std.testing.allocator.free(module_dir);
-        try testing.top_string_in_dir(module_dir,
+        try testing.topStringInDir(module_dir,
             \\ read({path = "readme.rv"}):unwrap()
         , "hello");
     }
@@ -1489,7 +1489,7 @@ test "read works" {
         try tmp.dir.writeFile(io, .{ .sub_path = "delim.txt", .data = "a|b|c" });
         const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
         defer std.testing.allocator.free(module_dir);
-        try testing.top_string_in_dir(module_dir,
+        try testing.topStringInDir(module_dir,
             \\ read({path = "delim.txt", delimiter = "|"}):unwrap()
         , "a");
     }
@@ -1500,7 +1500,7 @@ test "read works" {
         try tmp.dir.writeFile(io, .{ .sub_path = "exact.txt", .data = "let line = :nil\nwhile do\n    let result = read()\n" });
         const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
         defer std.testing.allocator.free(module_dir);
-        try testing.top_string_in_dir(module_dir,
+        try testing.topStringInDir(module_dir,
             \\ read({path = "exact.txt"}):unwrap()
         , "let line = :nil");
     }

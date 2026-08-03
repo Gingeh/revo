@@ -25,14 +25,17 @@ pub fn register(vm: *revo.VM) !void {
     const iter_val = Data.new.function(id);
     try vm.globals.put(try vm.internAtom("__proc_iter"), iter_val);
     try vm.stdlib_globals.put(try vm.internAtom("__proc_iter"), iter_val);
-    const apply_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .function, .table }, procApply) });
+    const apply_id = try vm.functions.create(
+        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .function, .table }, procApply) },
+    );
+
     const apply_val = Data.new.function(apply_id);
     try vm.globals.put(try vm.internAtom("__proc_apply"), apply_val);
     try vm.stdlib_globals.put(try vm.internAtom("__proc_apply"), apply_val);
 }
 
 pub const ExpandReport = struct {
-    root: *Node,
+    root: ?*Node = null,
     error_report: ?diagnostic.Report = null,
 };
 
@@ -43,7 +46,12 @@ const ProcFailure = struct {
     message: []const u8,
 };
 
-fn buildReport(allocator: std.mem.Allocator, source_name: []const u8, source: []const u8, info: ProcFailure) !diagnostic.Report {
+fn buildReport(
+    allocator: std.mem.Allocator,
+    source_name: []const u8,
+    source: []const u8,
+    info: ProcFailure,
+) !diagnostic.Report {
     var parts: [2]diagnostic.Part = undefined;
     const slice = if (info.span) |s| blk: {
         parts[0] = .{ .@"error" = info.message };
@@ -68,14 +76,20 @@ pub fn expandExpr(vm: *revo.VM, allocator: std.mem.Allocator, expr: *Node) Expan
     return expandInEnv(vm, allocator, expr, &env, .expand);
 }
 
-pub fn expandExprWithSource(vm: *revo.VM, allocator: std.mem.Allocator, expr: *Node, source_name: []const u8, source: []const u8) !ExpandReport {
+pub fn expandExprWithSource(
+    vm: *revo.VM,
+    allocator: std.mem.Allocator,
+    expr: *Node,
+    source_name: []const u8,
+    source: []const u8,
+) !ExpandReport {
     var env = ProcEnv.init(allocator);
     defer env.deinit();
     env.source_name = source_name;
     env.source = source;
     const node = expandInEnv(vm, allocator, expr, &env, .expand) catch |err| {
         if (env.error_info) |info| {
-            return .{ .root = undefined, .error_report = try buildReport(allocator, source_name, source, info) };
+            return .{ .root = null, .error_report = try buildReport(allocator, source_name, source, info) };
         }
         return err;
     };
@@ -151,14 +165,29 @@ fn expandInEnv(
             }
             var child = try env.clone();
             defer child.deinit();
-            const walked = ast.walkSliceWith(allocator, items, ProcCtx, .{ .vm = vm, .env = &child, .mode = mode }) catch |err| {
+            const walked = ast.walkSliceWith(
+                allocator,
+                items,
+                ProcCtx,
+                .{ .vm = vm, .env = &child, .mode = mode },
+            ) catch |err| {
                 if (child.error_info) |info| env.error_info = info;
                 return err;
             };
             break :blk ast.allocNode(allocator, expr.span, .{ .block = walked });
         },
         .binding => |binding| expandBinding(vm, allocator, expr.span, binding, env, mode),
-        .call => |call| maybeExpandCall(vm, allocator, expr.span, call.callee, call.args, call.implicit_self, env, mode),
+        .call => |call| maybeExpandCall(
+            vm,
+            allocator,
+            expr.span,
+            call.callee,
+            call.args,
+            call.implicit_self,
+            env,
+            mode,
+        ),
+
         .proc_macro => |pm| blk: {
             if (!std.mem.endsWith(u8, pm.name, "!")) return error.InvalidProcName;
             const body = try expandInEnv(vm, allocator, pm.body, env, .runtimeize);
@@ -290,7 +319,13 @@ fn evalProcMacro(
     env: *ProcEnv,
 ) ExpandError!*Node {
     if (env.active.items.len >= max_recursion_depth) {
-        env.error_info = .{ .proc_name = def.name, .stage = "expand", .span = span, .message = "proc macro recursion depth exceeded" };
+        env.error_info = .{
+            .proc_name = def.name,
+            .stage = "expand",
+            .span = span,
+            .message = "proc macro recursion depth exceeded",
+        };
+
         return error.RecursiveProcMacro;
     }
     try env.pushActive(def.name);
@@ -326,7 +361,12 @@ fn makeRuntimeProcCall(
 ) ExpandError!*Node {
     const items_list = try listNode(allocator, span, args);
     const wrapper_fn = try fnNode(allocator, span, &.{def.param}, def.body);
-    return callNode(allocator, span, try ast.allocNode(allocator, span, .{ .ident = "__proc_apply" }), &.{ wrapper_fn, items_list });
+    return callNode(
+        allocator,
+        span,
+        try ast.allocNode(allocator, span, .{ .ident = "__proc_apply" }),
+        &.{ wrapper_fn, items_list },
+    );
 }
 
 const ProcRun = struct {
@@ -390,13 +430,22 @@ fn reportProcExpandError(env: *ProcEnv, proc_name: []const u8, span: Span, err: 
 
 fn decodeProcResult(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: Data) ExpandError!*Node {
     if (data.asAtom()) |atom| {
-        return if (atom == revo.core_atoms.atom_id(.nil)) ast.allocNode(allocator, span, .nil) else error.InvalidProcReturn;
+        return if (atom == revo.core_atoms.atomId(.nil)) ast.allocNode(
+            allocator,
+            span,
+            .nil,
+        ) else error.InvalidProcReturn;
     }
     if (data.asTuple()) |_| {
         return decodeExprNode(vm, allocator, span, data);
     }
     if (data.asTable()) |tid| {
-        return decodeNodeSequence(vm, allocator, span, (vm.tables.get(tid) catch return error.InvalidProcReturn).array.items);
+        return decodeNodeSequence(
+            vm,
+            allocator,
+            span,
+            (vm.tables.get(tid) catch return error.InvalidProcReturn).array.items,
+        );
     }
     return error.InvalidProcReturn;
 }
@@ -422,7 +471,15 @@ fn encodeExpr(allocator: std.mem.Allocator, node: *const Node, splices: []const 
         var items = try std.ArrayList(*Node).initCapacity(allocator, if (node.expr.number.is_float) 3 else 2);
         errdefer items.deinit(allocator);
         try items.append(allocator, try atomNode(allocator, node.span, "number"));
-        try items.append(allocator, try ast.allocNode(allocator, node.span, .{ .number = .{ .value = node.expr.number.value, .is_float = node.expr.number.is_float } }));
+        try items.append(
+            allocator,
+            try ast.allocNode(
+                allocator,
+                node.span,
+                .{ .number = .{ .value = node.expr.number.value, .is_float = node.expr.number.is_float } },
+            ),
+        );
+
         if (node.expr.number.is_float) try items.append(allocator, try atomNode(allocator, node.span, "float"));
         return tupleNode(allocator, node.span, try items.toOwnedSlice(allocator));
     }
@@ -502,7 +559,11 @@ fn encodeValue(
             if (pi.size == .slice) {
                 var items = try std.ArrayList(*Node).initCapacity(allocator, value.len);
                 errdefer items.deinit(allocator);
-                for (value) |item| try items.append(allocator, try encodeValue(allocator, span, pi.child, item, splices));
+                for (value) |item| try items.append(
+                    allocator,
+                    try encodeValue(allocator, span, pi.child, item, splices),
+                );
+
                 return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
             }
             if (pi.size == .one) {
@@ -542,7 +603,10 @@ fn encodeValue(
             var items = try std.ArrayList(*Node).initCapacity(allocator, ti.@"struct".fields.len);
             errdefer items.deinit(allocator);
             inline for (ti.@"struct".fields) |field| {
-                try items.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name), splices));
+                try items.append(
+                    allocator,
+                    try encodeValue(allocator, span, field.type, @field(value, field.name), splices),
+                );
             }
             return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
         },
@@ -550,7 +614,11 @@ fn encodeValue(
         .array => {
             var items = try std.ArrayList(*Node).initCapacity(allocator, ti.array.len);
             errdefer items.deinit(allocator);
-            inline for (value) |item| try items.append(allocator, try encodeValue(allocator, span, ti.array.child, item, splices));
+            inline for (value) |item| try items.append(
+                allocator,
+                try encodeValue(allocator, span, ti.array.child, item, splices),
+            );
+
             return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
         },
 
@@ -566,7 +634,12 @@ fn decodeExprNode(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: 
     if (std.mem.eql(u8, tag, "number")) {
         if (tuple.items.len < 2) return error.InvalidProcReturn;
         const value = tuple.items[1].asNum() orelse return error.InvalidProcReturn;
-        const is_float = tuple.items.len >= 3 and tuple.items[2].asAtom() != null and std.mem.eql(u8, vm.atomName(tuple.items[2].asAtom().?), "float");
+        const is_float = tuple.items.len >= 3 and tuple.items[2].asAtom() != null and std.mem.eql(
+            u8,
+            vm.atomName(tuple.items[2].asAtom().?),
+            "float",
+        );
+
         if (tuple.items.len != 2 and tuple.items.len != 3) return error.InvalidProcReturn;
         return ast.allocNode(allocator, span, .{ .number = .{ .value = value, .is_float = is_float } });
     }
@@ -688,7 +761,15 @@ fn decodeValue(
             inline for (un.fields) |field| {
                 if (std.mem.eql(u8, field.name, union_tag)) {
                     var union_idx: usize = 1;
-                    const union_payload = try decodePayload(vm, allocator, span, field.type, union_tuple.items, &union_idx);
+                    const union_payload = try decodePayload(
+                        vm,
+                        allocator,
+                        span,
+                        field.type,
+                        union_tuple.items,
+                        &union_idx,
+                    );
+
                     if (union_idx != union_tuple.items.len) return error.InvalidProcReturn;
                     return @unionInit(T, field.name, union_payload);
                 }
@@ -726,7 +807,7 @@ fn decodeValue(
                     const tuple = vm.tuples.get(tid) catch return error.InvalidProcReturn;
                     break :blk tuple.items;
                 },
-                .atom => if (data.asAtom().? == revo.core_atoms.atom_id(.nil)) &.{} else return error.InvalidProcReturn,
+                .atom => if (data.asAtom().? == revo.core_atoms.atomId(.nil)) &.{} else return error.InvalidProcReturn,
                 else => return error.InvalidProcReturn,
             };
             if (array_items.len != arr.len) return error.InvalidProcReturn;
@@ -766,7 +847,7 @@ fn decodeSliceValue(
             const tuple = vm.tuples.get(tid) catch return error.InvalidProcReturn;
             break :blk tuple.items;
         },
-        .atom => if (data.asAtom().? == revo.core_atoms.atom_id(.nil)) &.{} else return error.InvalidProcReturn,
+        .atom => if (data.asAtom().? == revo.core_atoms.atomId(.nil)) &.{} else return error.InvalidProcReturn,
         else => return error.InvalidProcReturn,
     };
 
@@ -862,7 +943,7 @@ fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0]));
     const iter_tbl = try vm.tables.get(iter_id);
-    const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atom_id(), vm) orelse Data.new.num(0);
+    const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atomId(), vm) orelse Data.new.num(0);
     return .{ .ok = index_data };
 }
 
@@ -872,7 +953,7 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     const expected_name = vm.atomName(expected_atom);
 
     const item = (try iterStep(args[0..1], vm, true)).ok;
-    if (item.asAtom() == revo.core_atoms.atom_id(.nil)) {
+    if (item.asAtom() == revo.core_atoms.atomId(.nil)) {
         var panic_msg = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 64);
         defer panic_msg.deinit(vm.runtime.alloc);
         try panic_msg.appendSlice(vm.runtime.alloc, "proc iter:next_of expected :");
@@ -913,7 +994,11 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
 
 fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const callee = if (args[0].isFunction()) args[0] else return .errType(0, "function", revo.std_lib.dataToString(args[0]));
+    const callee = if (args[0].isFunction()) args[0] else return .errType(
+        0,
+        "function",
+        revo.std_lib.dataToString(args[0]),
+    );
 
     const iter_value = try makeIterValue(vm, args[1]);
     const result = try vm.callFunction(callee, &.{iter_value});
@@ -923,14 +1008,26 @@ fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
 fn makeIterValue(vm: *revo.VM, items: Data) !Data {
     const iter_id = try vm.tables.create();
     const iter_tbl = try vm.tables.get(iter_id);
-    try iter_tbl.putRawAtom(revo.core_atoms.items.atom_id(), items, vm);
-    try iter_tbl.putRawAtom(revo.core_atoms.index.atom_id(), Data.new.num(0), vm);
+    try iter_tbl.putRawAtom(revo.core_atoms.items.atomId(), items, vm);
+    try iter_tbl.putRawAtom(revo.core_atoms.index.atomId(), Data.new.num(0), vm);
 
-    const next_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, next) });
-    const peek_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, peek) });
-    const consumed_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, consumed) });
-    const next_of_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .table, .atom }, nextOf) });
-    try iter_tbl.putRawAtom(revo.core_atoms.next.atom_id(), Data.new.function(next_id), vm);
+    const next_id = try vm.functions.create(
+        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, next) },
+    );
+
+    const peek_id = try vm.functions.create(
+        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, peek) },
+    );
+
+    const consumed_id = try vm.functions.create(
+        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, consumed) },
+    );
+
+    const next_of_id = try vm.functions.create(
+        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .table, .atom }, nextOf) },
+    );
+
+    try iter_tbl.putRawAtom(revo.core_atoms.next.atomId(), Data.new.function(next_id), vm);
     try iter_tbl.putRawAtom(try vm.internAtom("peek"), Data.new.function(peek_id), vm);
     try iter_tbl.putRawAtom(try vm.internAtom("consumed"), Data.new.function(consumed_id), vm);
     try iter_tbl.putRawAtom(try vm.internAtom("next_of"), Data.new.function(next_of_id), vm);
@@ -954,8 +1051,14 @@ fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.Nativ
     if (args.len != 1) return .errArity(args.len, 1);
     const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0]));
     const iter_tbl = try vm.tables.get(iter_id);
-    const items_data = iter_tbl.getRawAtom(revo.core_atoms.items.atom_id(), vm) orelse return .{ .ok = revo.Data.new.core(.nil) };
-    const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atom_id(), vm) orelse Data.new.num(0);
+    const items_data = iter_tbl.getRawAtom(
+        revo.core_atoms.items.atomId(),
+        vm,
+    ) orelse return .{ .ok = revo.Data.new.core(
+        .nil,
+    ) };
+
+    const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atomId(), vm) orelse Data.new.num(0);
     const idx = if (index_data.asNum()) |n| try revo.asIndex(n) else return error.TypeError;
 
     const item = if (items_data.asTable()) |tid| blk: {
@@ -969,7 +1072,7 @@ fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.Nativ
     } else revo.Data.new.core(.nil);
 
     if (advance) {
-        try iter_tbl.putRawAtom(revo.core_atoms.index.atom_id(), Data.new.num(idx + 1), vm);
+        try iter_tbl.putRawAtom(revo.core_atoms.index.atomId(), Data.new.num(idx + 1), vm);
     }
     return .{ .ok = item };
 }
@@ -977,7 +1080,7 @@ fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.Nativ
 const testing = @import("testing.zig");
 
 test "proc macro" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc ftwo!(iter) do
         \\   let x = 40 + 2
         \\   {(:number, 42)}
@@ -987,7 +1090,7 @@ test "proc macro" {
 }
 
 test "proc macro can rewrite to a constant expression" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc answer!(iter) do
         \\   {(:number, 42)}
         \\ end
@@ -996,7 +1099,7 @@ test "proc macro can rewrite to a constant expression" {
 }
 
 test "proc macro uses explicit call args only" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc add3!(iter) do
         \\   let a = iter:next()
         \\   let b = iter:next()
@@ -1008,7 +1111,7 @@ test "proc macro uses explicit call args only" {
 }
 
 test "proc macro uses peek without consuming" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc dup_add!(iter) do
         \\   let a = iter:peek()
         \\   let b = iter:next()
@@ -1019,7 +1122,7 @@ test "proc macro uses peek without consuming" {
 }
 
 test "proc macro does not consume outer siblings" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc take1!(iter) do
         \\   let a = iter:next()
         \\   {a}
@@ -1030,7 +1133,7 @@ test "proc macro does not consume outer siblings" {
 }
 
 test "proc macro can build if_expr from explicit args" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc choose!(iter) do
         \\   let cond = iter:next()
         \\   let yes = iter:next()
@@ -1044,7 +1147,7 @@ test "proc macro can build if_expr from explicit args" {
 
 test "proc macro print! expands fmt call" {
     if (true) return error.SkipZigTest; // noisy
-    try testing.top_atom(
+    try testing.topAtom(
         \\ proc print!(iter) do
         \\   let fmt = iter:next_of(:string)
         \\   let args = {}
@@ -1064,7 +1167,7 @@ test "proc macro print! expands fmt call" {
 
 test "proc cmul from examples works" {
     if (true) return error.SkipZigTest; // noisy
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc cmul!(iter) do
         \\   inspect(iter:peek())
         \\   let a = 10 + iter:next_of(:number)
@@ -1082,7 +1185,7 @@ test "proc cmul from examples works" {
 
 test "nested proc passthrough can take iter next directly" {
     if (true) return error.SkipZigTest; // noisy
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc take1!(iter) do
         \\   let x = iter:next()
         \\   print(x)
@@ -1098,7 +1201,7 @@ test "nested proc passthrough can take iter next directly" {
 
 test "inspect can print iter next directly without changing it" {
     if (true) return error.SkipZigTest; // noisy
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc outer!(iter) do
         \\   let first = inspect(iter:next())
         \\   {first}
@@ -1108,7 +1211,7 @@ test "inspect can print iter next directly without changing it" {
 }
 
 test "proc iter next_of unwraps payload values" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc sum3!(iter) do
         \\   let a = iter:next_of(:number)
         \\   let b = iter:next_of(:number)
@@ -1120,7 +1223,7 @@ test "proc iter next_of unwraps payload values" {
 }
 
 test "proc macro can use comp inside body" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ proc add_comp!(iter) do
         \\   const n = comp (1 + 1)
         \\   {(:number, n + iter:next_of(:number))}

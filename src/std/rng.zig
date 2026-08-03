@@ -156,7 +156,7 @@ fn randomNumber(comptime T: type, vm: *VM, lowerBound: T, upperBound: T) T {
 }
 
 test "getting random element from table" {
-    try testing.top_number(
+    try testing.topNumber(
         \\ rng.set_seed(2226)
         \\ const elem = rng.choice({1, 2, 3})
         \\ elem
@@ -164,7 +164,7 @@ test "getting random element from table" {
 }
 
 test "seed setting and resetting" {
-    try testing.top_true(
+    try testing.topTrue(
         \\ rng.set_seed(2226)
         \\ const x = rng.rand(10)
         \\

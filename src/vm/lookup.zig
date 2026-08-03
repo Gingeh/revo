@@ -39,7 +39,10 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
             // fast path::: tuple numeric indexing should not require mm lookup
             if (tuple_ref) |t| {
                 const idx_opt: ?usize = if (key.asNum()) |n|
-                    if (n >= 0 and @floor(n) == n and n <= @as(f64, @floatFromInt(std.math.maxInt(usize)))) @as(usize, @intFromFloat(n)) else null
+                    if (n >= 0 and @floor(n) == n and n <= @as(f64, @floatFromInt(std.math.maxInt(usize)))) @as(
+                        usize,
+                        @intFromFloat(n),
+                    ) else null
                 else
                     null;
                 if (idx_opt) |idx| {
@@ -78,7 +81,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
                     return .{ .value = method, .from_meta = true };
                 }
                 if (desc.field_index.get(atom)) |i| {
-                    self.structCacheInsert(instance.type_id, atom, false, @intCast(i), undefined);
+                    self.structCacheInsert(instance.type_id, atom, false, @intCast(i), Data.new.nil());
                     return .{ .value = instance.fields[i], .from_meta = false };
                 }
             }
@@ -107,7 +110,7 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID) V
     if (mt.getRaw(key, self)) |value| {
         return .{ .value = value, .from_meta = true };
     }
-    if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), self)) |indexer| {
+    if (mt.getRawAtom(revo.core_atoms.atomId(.__index), self)) |indexer| {
         return resolveIndex(self, object, key, indexer);
     }
     return null;
@@ -146,7 +149,7 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
                 if (mt.getRaw(key, self)) |value| {
                     return .{ .value = value, .from_meta = true };
                 }
-                if (mt.getRawAtom(revo.core_atoms.atom_id(.__index), self)) |next_indexer| {
+                if (mt.getRawAtom(revo.core_atoms.atomId(.__index), self)) |next_indexer| {
                     return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1);
                 }
             }

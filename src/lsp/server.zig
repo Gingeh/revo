@@ -42,8 +42,14 @@ const Handler = struct {
     deinited: bool = false,
     project: lang.Project = .{ .mode = .script, .root = "" },
 
-    fn init(alloc: std.mem.Allocator, transport: *lsp.Transport, io: std.Io, mode: revo.lang.RunMode, project_root: []const u8) !Handler {
-        var vm = try revo.VM.init(.{ .alloc = alloc, .io = io });
+    fn init(
+        alloc: std.mem.Allocator,
+        transport: *lsp.Transport,
+        io: std.Io,
+        mode: revo.lang.RunMode,
+        project_root: []const u8,
+    ) !Handler {
+        var vm = try revo.VM.init(.{ .alloc = alloc, .io = io, .diag_alloc = alloc });
         errdefer vm.deinit();
         var workspace = try Workspace.Workspace.init(alloc);
         errdefer workspace.deinit();
@@ -183,7 +189,11 @@ const Handler = struct {
     }
 
     /// full-document sync; reparse n push updated diagnostics
-    pub fn @"textDocument/didChange"(h: *Handler, arena: std.mem.Allocator, params: T.TextDocument.DidChangeParams) !void {
+    pub fn @"textDocument/didChange"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.TextDocument.DidChangeParams,
+    ) !void {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return;
         // full sync; only the last change matters
         if (params.contentChanges.len == 0) return;
@@ -197,19 +207,34 @@ const Handler = struct {
     }
 
     /// close the file in ws and drop uri mappings
-    pub fn @"textDocument/didClose"(h: *Handler, arena: std.mem.Allocator, params: T.TextDocument.DidCloseParams) !void {
+    pub fn @"textDocument/didClose"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.TextDocument.DidCloseParams,
+    ) !void {
         if (h.uri_to_file.get(params.textDocument.uri)) |file_id| {
             h.ws.close(file_id);
         }
         h.unregisterDoc(params.textDocument.uri);
-        try h.transport.writeNotification(h.io, arena, "textDocument/publishDiagnostics", T.publish_diagnostics.Params, .{
-            .uri = params.textDocument.uri,
-            .diagnostics = &.{},
-        }, .{});
+        try h.transport.writeNotification(
+            h.io,
+            arena,
+            "textDocument/publishDiagnostics",
+            T.publish_diagnostics.Params,
+            .{
+                .uri = params.textDocument.uri,
+                .diagnostics = &.{},
+            },
+            .{},
+        );
     }
 
     /// go-to-definition; position is 1-based inside workspace, 0-based otw
-    pub fn @"textDocument/definition"(h: *Handler, arena: std.mem.Allocator, params: T.Definition.Params) !?T.Definition.Result {
+    pub fn @"textDocument/definition"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.Definition.Params,
+    ) !?T.Definition.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const ws_pos = add1(params.position);
         const loc = try h.ws.definition(arena, file_id, ws_pos, .{}) orelse return null;
@@ -302,7 +327,11 @@ const Handler = struct {
     }
 
     /// get all refs to the symbol at position
-    pub fn @"textDocument/references"(h: *Handler, arena: std.mem.Allocator, params: T.reference.Params) !?[]const T.Location {
+    pub fn @"textDocument/references"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.reference.Params,
+    ) !?[]const T.Location {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const ws_pos = add1(params.position);
         const refs = try h.ws.references(arena, file_id, ws_pos, .{});
@@ -359,7 +388,10 @@ const Handler = struct {
         const snap = h.ws.snapshot(file_id) orelse return null;
         const ws_pos = add1(params.position);
         const cursor_off = positionToOffset(snap.text, ws_pos) orelse return null;
-        return @as(?T.completion.Result, try completion.completions(&h.vm, &h.ws, arena, file_id, snap.text, cursor_off));
+        return @as(
+            ?T.completion.Result,
+            try completion.completions(&h.vm, &h.ws, arena, file_id, snap.text, cursor_off),
+        );
     }
 
     /// search workspace-wide by query str
@@ -421,15 +453,26 @@ const Handler = struct {
             );
         } else {
             // clear previous diags
-            try h.transport.writeNotification(h.io, arena, "textDocument/publishDiagnostics", T.publish_diagnostics.Params, .{
-                .uri = uri,
-                .diagnostics = &.{},
-            }, .{});
+            try h.transport.writeNotification(
+                h.io,
+                arena,
+                "textDocument/publishDiagnostics",
+                T.publish_diagnostics.Params,
+                .{
+                    .uri = uri,
+                    .diagnostics = &.{},
+                },
+                .{},
+            );
         }
     }
 
     /// check rename validity
-    pub fn @"textDocument/prepareRename"(h: *Handler, arena: std.mem.Allocator, params: T.prepare_rename.Params) !?T.prepare_rename.Result {
+    pub fn @"textDocument/prepareRename"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.prepare_rename.Params,
+    ) !?T.prepare_rename.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const ws_pos = add1(params.position);
         const range = try h.ws.prepareRename(arena, file_id, ws_pos, .{}) orelse return null;
@@ -465,7 +508,11 @@ const Handler = struct {
     }
 
     /// return type inlay hints for visible bindings
-    pub fn @"textDocument/inlayHint"(h: *Handler, arena: std.mem.Allocator, params: T.InlayHint.Params) !?[]const T.InlayHint {
+    pub fn @"textDocument/inlayHint"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.InlayHint.Params,
+    ) !?[]const T.InlayHint {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const ws_range: Workspace.Range = .{ .start = add1(params.range.start), .end = add1(params.range.end) };
         const ws_hints = try h.ws.inlayHints(arena, file_id, ws_range, .{});

@@ -1,26 +1,29 @@
 {
-  "ignore": [
-    "vendor",
-    "zig-out",
-    "src/c"
-  ],
-  "rules": {
-    "avoid-as": "warn",
-    "case-convention": "warn",
-    "allocator-first-param": "off",
-    "useless-error-return": "off",
-    "unused-decls": "warn",
-    "homeless-try": "error",
-    "no-catch-return": "warn",
-    "empty-file": "warn",
-    "line-length": "off",
-    "no-print": "warn",
-    "returned-stack-reference": "off",
-    "duplicate-case": "off",
-    "no-unresolved": "error",
-    "unsafe-undefined": "warn",
-    "suppressed-errors": "warn",
-    "no-return-try": "off",
-    "must-return-ref": "warn"
-  }
+	"ignore": [
+		"vendor",
+		"zig-out",
+		"src/c",
+		"zig-pkg",
+		"src/std",
+		"src/main_wasm.zig"
+	],
+	"rules": {
+		"avoid-as": "warn",
+		"case-convention": "warn",
+		"allocator-first-param": "off",
+		"useless-error-return": "off",
+		"unused-decls": "warn",
+		"homeless-try": "error",
+		"no-catch-return": "warn",
+		"empty-file": "warn",
+		"line-length": "warn",
+		"no-print": "off",
+		"returned-stack-reference": "off",
+		"duplicate-case": "off",
+		"no-unresolved": "error",
+		"unsafe-undefined": "warn",
+		"suppressed-errors": "off",
+		"no-return-try": "off",
+		"must-return-ref": "warn"
+	}
 }

@@ -171,37 +171,19 @@ pub const FunctionPool = struct {
     segments: std.ArrayList([]const revo.Instruction),
 
     pub fn init(alloc: std.mem.Allocator) !FunctionPool {
-        var self = FunctionPool{
+        return FunctionPool{
             .alloc = alloc,
-            .functions = undefined,
-            .function_marks = undefined,
+            .functions = try .initCapacity(alloc, 16),
+            .function_marks = try .initEmpty(alloc, 64),
             .function_dead = .empty,
-            .function_next = undefined,
-            .prototypes = undefined,
-            .upvalues = undefined,
-            .upvalue_marks = undefined,
+            .function_next = try .initCapacity(alloc, 16),
+            .prototypes = try .initCapacity(alloc, 16),
+            .upvalues = try .initCapacity(alloc, 16),
+            .upvalue_marks = try .initEmpty(alloc, 64),
             .upvalue_dead = .empty,
-            .upvalue_next = undefined,
-            .segments = undefined,
+            .upvalue_next = try .initCapacity(alloc, 16),
+            .segments = try .initCapacity(alloc, 4),
         };
-        self.functions = try std.ArrayList(?Function).initCapacity(alloc, 16);
-        errdefer self.functions.deinit(alloc);
-        self.function_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
-        errdefer self.function_marks.deinit();
-        self.function_next = try std.ArrayList(usize).initCapacity(alloc, 16);
-        errdefer self.function_next.deinit(alloc);
-        self.prototypes = try std.ArrayList(Prototype).initCapacity(alloc, 16);
-        errdefer self.prototypes.deinit(alloc);
-        self.upvalues = try std.ArrayList(?Upvalue).initCapacity(alloc, 16);
-        errdefer self.upvalues.deinit(alloc);
-        self.upvalue_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
-        errdefer self.upvalue_marks.deinit();
-        self.upvalue_next = try std.ArrayList(usize).initCapacity(alloc, 16);
-        errdefer self.upvalue_next.deinit(alloc);
-        self.segments = try std.ArrayList([]const revo.Instruction).initCapacity(alloc, 4);
-        errdefer self.segments.deinit(alloc);
-
-        return self;
     }
 
     pub fn deinit(self: *FunctionPool) void {
@@ -232,7 +214,18 @@ pub const FunctionPool = struct {
     }
 
     pub inline fn create(self: *FunctionPool, func: Function) !mem.FunctionID {
-        return pool.create(self.alloc, Function, mem.FunctionID, &self.functions, &self.function_marks, &self.function_dead, &self.function_first, &self.function_last, &self.function_next, func);
+        return pool.create(
+            self.alloc,
+            Function,
+            mem.FunctionID,
+            &self.functions,
+            &self.function_marks,
+            &self.function_dead,
+            &self.function_first,
+            &self.function_last,
+            &self.function_next,
+            func,
+        );
     }
 
     pub fn createPrototype(self: *FunctionPool, proto: Prototype) !PrototypeID {
@@ -272,7 +265,11 @@ pub const FunctionPool = struct {
         return id;
     }
 
-    pub inline fn createClosure(self: *FunctionPool, prototype_id: PrototypeID, upvalues: []const UpvalueID) !mem.FunctionID {
+    pub inline fn createClosure(
+        self: *FunctionPool,
+        prototype_id: PrototypeID,
+        upvalues: []const UpvalueID,
+    ) !mem.FunctionID {
         const proto = try self.getPrototype(prototype_id);
         return self.create(.{ .closure = .{
             .prototype = prototype_id,
@@ -293,7 +290,18 @@ pub const FunctionPool = struct {
     }
 
     pub inline fn createUpvalue(self: *FunctionPool, upvalue: Upvalue) !UpvalueID {
-        return pool.create(self.alloc, Upvalue, UpvalueID, &self.upvalues, &self.upvalue_marks, &self.upvalue_dead, &self.upvalue_first, &self.upvalue_last, &self.upvalue_next, upvalue);
+        return pool.create(
+            self.alloc,
+            Upvalue,
+            UpvalueID,
+            &self.upvalues,
+            &self.upvalue_marks,
+            &self.upvalue_dead,
+            &self.upvalue_first,
+            &self.upvalue_last,
+            &self.upvalue_next,
+            upvalue,
+        );
     }
 
     pub inline fn get(self: *FunctionPool, id: mem.FunctionID) !*Function {
@@ -330,8 +338,31 @@ pub const FunctionPool = struct {
     }
 
     pub fn sweep(self: *FunctionPool) void {
-        pool.sweep(self.alloc, Function, mem.FunctionID, &self.functions, &self.function_marks, &self.function_dead, &self.function_first, &self.function_last, &self.function_next, freeFunction);
-        pool.sweep(self.alloc, Upvalue, UpvalueID, &self.upvalues, &self.upvalue_marks, &self.upvalue_dead, &self.upvalue_first, &self.upvalue_last, &self.upvalue_next, freeUpvalue);
+        pool.sweep(
+            self.alloc,
+            Function,
+            mem.FunctionID,
+            &self.functions,
+            &self.function_marks,
+            &self.function_dead,
+            &self.function_first,
+            &self.function_last,
+            &self.function_next,
+            freeFunction,
+        );
+
+        pool.sweep(
+            self.alloc,
+            Upvalue,
+            UpvalueID,
+            &self.upvalues,
+            &self.upvalue_marks,
+            &self.upvalue_dead,
+            &self.upvalue_first,
+            &self.upvalue_last,
+            &self.upvalue_next,
+            freeUpvalue,
+        );
     }
 
     pub inline fn bytes(self: *const FunctionPool) usize {
@@ -377,46 +408,46 @@ fn freeUpvalue(_: *Upvalue, _: std.mem.Allocator) ?Upvalue {
 }
 
 test "functions call with lexical locals" {
-    try t.top_number(
+    try t.topNumber(
         \\ const id = fn(x) x
         \\ id(42)
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const add = fn(a, b) a + b
         \\ add(20, 22)
     , 42);
-    try t.top_number(
+    try t.topNumber(
         \\ const forty_two = fn() 42
         \\ forty_two()
     , 42);
 }
 
 test "functions return exactly one value" {
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() do
         \\     1
         \\     2
         \\ end
         \\ f()
     , 2);
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() do
         \\     return 41
         \\     0
         \\ end
         \\ f()
     , 41);
-    try t.top_nil(
+    try t.topNil(
         \\ const f = fn() do
         \\     return :nil
         \\ end
         \\ f()
     );
-    try t.top_type(
+    try t.topType(
         \\ const f = fn() (1, 2)
         \\ f()
     , .tuple);
-    try t.top_number(
+    try t.topNumber(
         \\ const f = fn() do
         \\ return 1 2 end
         \\ f()
@@ -471,6 +502,9 @@ test "function pool prototype ownership and upvalue slot reuse" {
 
     const up_id = try fn_pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(1), .owner_fiber_id = null });
     fn_pool.sweep();
-    const up_reused = try fn_pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(2), .owner_fiber_id = null });
+    const up_reused = try fn_pool.createUpvalue(
+        .{ .open_index = null, .closed = Data.new.num(2), .owner_fiber_id = null },
+    );
+
     try std.testing.expectEqual(up_id, up_reused);
 }

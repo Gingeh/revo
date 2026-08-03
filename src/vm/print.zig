@@ -64,7 +64,13 @@ fn popVisiting() void {
     visiting_len -= 1;
 }
 
-fn styledPrint(writer: *std.Io.Writer, mode: Data.RenderMode, color: []const u8, comptime fmt: []const u8, args: anytype) anyerror!void {
+fn styledPrint(
+    writer: *std.Io.Writer,
+    mode: Data.RenderMode,
+    color: []const u8,
+    comptime fmt: []const u8,
+    args: anytype,
+) anyerror!void {
     const colored = mode == .pretty;
     if (colored) try style(writer, color);
     try writer.print(fmt, args);

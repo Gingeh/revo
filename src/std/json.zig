@@ -145,11 +145,11 @@ fn objectToData(object: json.ObjectMap, vm: *VM) anyerror!Data {
 test "json encode and decode round trip" {
     const testing = revo.lang.testing;
 
-    try testing.top_string(
+    try testing.topString(
         \\ json.encode(("a", "b", "c")):unwrap()
     , "[\"a\",\"b\",\"c\"]");
 
-    try testing.top_number(
+    try testing.topNumber(
         \\ json.decode("{{ \"a\" : 1}}"):unwrap().a
     , 1);
 }

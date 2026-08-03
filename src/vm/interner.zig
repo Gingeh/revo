@@ -17,18 +17,15 @@ dead: std.ArrayList(memory.StringID),
 by_name: std.StringHashMap(memory.StringID),
 
 pub fn init(alloc: std.mem.Allocator) !Interner {
+    const core_atoms_fields = @typeInfo(revo.core_atoms).@"enum".fields;
     var self = Interner{
         .alloc = alloc,
-        .slots = undefined,
-        .marks = undefined,
+        .slots = try std.ArrayList(?[]u8).initCapacity(alloc, core_atoms_fields.len),
+        .marks = try std.DynamicBitSet.initEmpty(alloc, 64),
         .dead = .empty,
         .by_name = std.StringHashMap(memory.StringID).init(alloc),
     };
-    const core_atoms_fields = @typeInfo(revo.core_atoms).@"enum".fields;
-
-    self.slots = try std.ArrayList(?[]u8).initCapacity(alloc, core_atoms_fields.len);
     errdefer self.slots.deinit(alloc);
-    self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
     errdefer self.marks.deinit();
 
     inline for (core_atoms_fields) |field| {

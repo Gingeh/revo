@@ -960,7 +960,17 @@ pub fn inspectDetailed(
         .project_root = project_root,
     };
 
-    const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text, known_globals, &type_map, &type_annotations, .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve });
+    const semantic_error = try semantic.analyze(
+        alloc,
+        root,
+        snap.name,
+        snap.text,
+        known_globals,
+        &type_map,
+        &type_annotations,
+        .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve },
+    );
+
     const cache_diag = if (semantic_error) |err|
         try copyError(self.alloc, err, snap.name, snap.text)
     else
@@ -1289,7 +1299,13 @@ fn resolveOpenImportOrOpen(
 fn openFromDisk(self: *Workspace, path: []const u8) ?FileId {
     const vm = self.vm orelse return null;
     const io = vm.runtime.io;
-    const text = std.Io.Dir.cwd().readFileAlloc(io, path, self.alloc, .limited(std.math.maxInt(usize))) catch return null;
+    const text = std.Io.Dir.cwd().readFileAlloc(
+        io,
+        path,
+        self.alloc,
+        .limited(std.math.maxInt(usize)),
+    ) catch return null;
+
     defer self.alloc.free(text);
     _ = self.openWith(path, text, .{}) catch return null;
     return self.file_names.get(path);
@@ -2016,7 +2032,7 @@ test "workspace caches repeated analysis" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io });
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
     defer vm.deinit();
 
     var ws = try Workspace.initWithVm(&vm, alloc);
@@ -2036,7 +2052,7 @@ test "workspace invalidates cache on change" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io });
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
     defer vm.deinit();
 
     var ws = try Workspace.initWithVm(&vm, alloc);
@@ -2072,7 +2088,7 @@ test "workspace invalidates dependent caches" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io });
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
     defer vm.deinit();
 
     var ws = try Workspace.initWithVm(&vm, alloc);
@@ -2114,7 +2130,7 @@ test "analysis returns snapshot and artifact" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io });
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
     defer vm.deinit();
 
     var ws = try Workspace.initWithVm(&vm, alloc);

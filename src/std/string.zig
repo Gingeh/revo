@@ -548,15 +548,15 @@ fn string_call(args: []const Data, vm: *VM) !root.NativeResult {
 }
 
 test "string metatable" {
-    try testing.top_string("\"hello\":sub(0, 2)", "he");
+    try testing.topString("\"hello\":sub(0, 2)", "he");
 
-    try testing.top_number("len(\"asdf\")", 4);
-    try testing.top_number("\"asdf\":len()", 4);
-    try testing.top_string("\"asdf\":with(1, \"y\")", "aydf");
-    try testing.top_string("string(\"asdf\")", "asdf");
-    try testing.top_string("\"asdf\"[2]", "d");
-    try testing.top_string("\"asdf\" ~ \"qwer\"", "asdfqwer");
-    try testing.top_string("\"ab\" * 3", "ababab");
+    try testing.topNumber("len(\"asdf\")", 4);
+    try testing.topNumber("\"asdf\":len()", 4);
+    try testing.topString("\"asdf\":with(1, \"y\")", "aydf");
+    try testing.topString("string(\"asdf\")", "asdf");
+    try testing.topString("\"asdf\"[2]", "d");
+    try testing.topString("\"asdf\" ~ \"qwer\"", "asdfqwer");
+    try testing.topString("\"ab\" * 3", "ababab");
 }
 
 /// > string:contains?(substr: string) -> bool
@@ -616,19 +616,19 @@ fn join(args: []const Data, vm: *VM) !NativeResult {
 }
 
 test "string methods" {
-    try testing.top_true("\"hello\":contains?(\"ell\")");
-    try testing.top_false("\"hello\":contains?(\"xyz\")");
-    try testing.top_number("\"hello\":index_of(\"ll\")", 2);
-    try testing.top_string("string_of(97)", "a");
-    try testing.top_string("string_of((72, 105))", "Hi");
-    try testing.top_string("'hello':upper()", "HELLO");
+    try testing.topTrue("\"hello\":contains?(\"ell\")");
+    try testing.topFalse("\"hello\":contains?(\"xyz\")");
+    try testing.topNumber("\"hello\":index_of(\"ll\")", 2);
+    try testing.topString("string_of(97)", "a");
+    try testing.topString("string_of((72, 105))", "Hi");
+    try testing.topString("'hello':upper()", "HELLO");
     try testing.expectCompileError("'hello':sub('x', 2)", .ParseError);
     try testing.expectCompileError("'hello':sub(2, 2, 3)", .ParseError);
-    try testing.top_number("'hello':find('el')", 1);
+    try testing.topNumber("'hello':find('el')", 1);
     try testing.expectCompileError("'hello':find(42)", .ParseError);
-    try testing.top_string("'hello':replace('l', 'x')", "hexxo");
+    try testing.topString("'hello':replace('l', 'x')", "hexxo");
     try testing.expectCompileError("'hello':replace(1, 'x')", .ParseError);
-    try testing.top_string("'hello':add(' world')", "hello world");
+    try testing.topString("'hello':add(' world')", "hello world");
     try testing.expectRuntimeFailureWithMessage(
         \\ "abc":with(1, "")
     , .TypeError, "arg 2: wants non-empty string, got string");

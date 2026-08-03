@@ -204,7 +204,10 @@ pub fn popScope(self: *Compiler) void {
 pub fn findLocalInCurrentScope(self: *Compiler, name: []const u8) ?*LocalVar {
     const fn_idx = self.functions.items.len - 1;
     const state = &self.functions.items[fn_idx];
-    const start = if (state.scope_starts.items.len == 0) 0 else state.scope_starts.items[state.scope_starts.items.len - 1];
+    const start = if (state.scope_starts.items.len == 0)
+        0
+    else
+        state.scope_starts.items[state.scope_starts.items.len - 1];
     var i = state.locals.items.len;
     while (i > start) {
         i -= 1;
@@ -316,7 +319,13 @@ pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
                 const saved = fn_state.type_params;
                 fn_state.type_params = binding.value.expr.fn_expr.type_params;
                 defer fn_state.type_params = saved;
-                try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type, binding.value.expr.fn_expr.type_params);
+                try declareFnSignature(
+                    self,
+                    name,
+                    binding.value.expr.fn_expr.params,
+                    binding.value.expr.fn_expr.return_type,
+                    binding.value.expr.fn_expr.type_params,
+                );
             },
             else => {},
         },
@@ -368,7 +377,8 @@ pub fn constTupleIndex(self: *Compiler, index: anytype) ?usize {
         .number => |n| n.value,
         else => return null,
     };
-    if (!std.math.isFinite(key_num) or @floor(key_num) != key_num or key_num < 0 or key_num > @as(f64, @floatFromInt(std.math.maxInt(usize)))) return null;
+    if (!std.math.isFinite(key_num) or @floor(key_num) != key_num or key_num < 0 or
+        key_num > @as(f64, @floatFromInt(std.math.maxInt(usize)))) return null;
     const is_tuple = switch (index.object.expr) {
         .ident => |name| blk: {
             const l = resolveLocalVar(self, name) orelse break :blk false;
@@ -384,7 +394,8 @@ pub fn constTupleIndex(self: *Compiler, index: anytype) ?usize {
 pub fn addUpvalue(self: *Compiler, fn_idx: usize, spec: UpvalueSpec) !revo.UpvalueID {
     const state = &self.functions.items[fn_idx];
     for (state.upvalues.items, 0..) |existing, idx| {
-        if (existing.is_local == spec.is_local and existing.index == spec.index and existing.mutable == spec.mutable) return @intCast(idx);
+        if (existing.is_local == spec.is_local and existing.index == spec.index and
+            existing.mutable == spec.mutable) return @intCast(idx);
     }
     const id: revo.UpvalueID = @intCast(state.upvalues.items.len);
     try state.upvalues.append(self.alloc, spec);
@@ -394,7 +405,12 @@ pub fn addUpvalue(self: *Compiler, fn_idx: usize, spec: UpvalueSpec) !revo.Upval
 pub fn resolveUpvalueRecursive(self: *Compiler, fn_idx: usize, name: []const u8) !?revo.UpvalueID {
     if (fn_idx == 0) return null;
     const enc = fn_idx - 1;
-    if (resolveLocalVarIn(self, enc, name)) |local| return try addUpvalue(self, fn_idx, .{ .is_local = true, .index = local.slot, .mutable = local.mutable });
+    if (resolveLocalVarIn(self, enc, name)) |local| return try addUpvalue(
+        self,
+        fn_idx,
+        .{ .is_local = true, .index = local.slot, .mutable = local.mutable },
+    );
+
     if (try resolveUpvalueRecursive(self, enc, name)) |slot| {
         const spec = self.functions.items[enc].upvalues.items[slot];
         return try addUpvalue(self, fn_idx, .{ .is_local = false, .index = @intCast(slot), .mutable = spec.mutable });
@@ -407,7 +423,12 @@ pub fn resolveUpvalue(self: *Compiler, name: []const u8) !?revo.UpvalueID {
     return resolveUpvalueRecursive(self, self.functions.items.len - 1, name);
 }
 
-pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) !*FunctionState.FnSig {
+pub fn allocFnSig(
+    self: *Compiler,
+    params: []const ast.FnParam,
+    return_type: ?*ast.TypeExpr,
+    type_params: []const []const u8,
+) !*FunctionState.FnSig {
     const sig = try self.alloc.create(FunctionState.FnSig);
     errdefer self.alloc.destroy(sig);
 
@@ -440,7 +461,13 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
     return sig;
 }
 
-pub fn declareFnSignature(self: *Compiler, name: []const u8, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) !void {
+pub fn declareFnSignature(
+    self: *Compiler,
+    name: []const u8,
+    params: []const ast.FnParam,
+    return_type: ?*ast.TypeExpr,
+    type_params: []const []const u8,
+) !void {
     const state = currentFunctionState(self) orelse return;
     if (ast.isDiscardName(name)) return;
     if (state.fn_signatures.get(name) != null) return;

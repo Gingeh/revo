@@ -195,14 +195,14 @@ pub const specs: []const api.FnSpec = &.{
 };
 
 test "math library" {
-    try testing.top_number("math.abs(-5)", 5);
-    try testing.top_number("math.abs(5)", 5);
-    try testing.top_number("math.floor(3.7)", 3);
-    try testing.top_number("math.ceil(3.2)", 4);
-    try testing.top_number("math.sqrt(4)", 2);
-    try testing.top_number("math.pow(2, 3)", 8);
-    try testing.top_number("math.min(1, 2, 3)", 1);
-    try testing.top_number("math.max(1, 2, 3)", 3);
+    try testing.topNumber("math.abs(-5)", 5);
+    try testing.topNumber("math.abs(5)", 5);
+    try testing.topNumber("math.floor(3.7)", 3);
+    try testing.topNumber("math.ceil(3.2)", 4);
+    try testing.topNumber("math.sqrt(4)", 2);
+    try testing.topNumber("math.pow(2, 3)", 8);
+    try testing.topNumber("math.min(1, 2, 3)", 1);
+    try testing.topNumber("math.max(1, 2, 3)", 3);
 }
 
 // .number is guaranteed by type sig

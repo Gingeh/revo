@@ -109,6 +109,7 @@ export fn revo_wasm_init() bool {
         .alloc = wasm_alloc,
         .io = stub_io,
         .argv = &.{},
+        .diag_alloc = wasm_alloc,
     }) catch {
         wasm_alloc.destroy(vm);
         return false;

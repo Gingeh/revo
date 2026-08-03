@@ -1,3 +1,4 @@
+// zlint-disable line-length -- yeah
 const std = @import("std");
 
 const revo = @import("revo");
@@ -125,7 +126,7 @@ pub const Compiler = struct {
     ir_builder: ir.IrBuilder,
     value_stack: std.ArrayList(*ir.IrInst),
     // register cache for upvalue loads, cleared per-block in compileBlock
-    upvalue_cache: std.AutoHashMap(usize, usize) = undefined,
+    upvalue_cache: std.AutoHashMap(usize, usize),
     type_aliases: std.StringHashMap(types.TypeInfo),
     type_annotations: ?*const std.AutoHashMap(*const Node, types.TypeInfo) = null,
     pending_prototypes: std.ArrayList(revo.PrototypeID),
@@ -223,7 +224,14 @@ pub const Compiler = struct {
         return self.value_stack.pop() orelse error.OutOfMemory;
     }
 
-    pub fn record(self: *Compiler, opcode: Opcode, ops: []const ir.IrValue, push_res: bool, result_reg: Register, op_arg: Operand) !*ir.IrInst {
+    pub fn record(
+        self: *Compiler,
+        opcode: Opcode,
+        ops: []const ir.IrValue,
+        push_res: bool,
+        result_reg: Register,
+        op_arg: Operand,
+    ) !*ir.IrInst {
         const inst = try self.alloc.create(ir.IrInst);
         inst.* = .{ .opcode = opcode, .operands = try self.alloc.dupe(ir.IrValue, ops) };
         try self.ir_builder.instructions.append(self.alloc, inst);
@@ -234,7 +242,14 @@ pub const Compiler = struct {
         return inst;
     }
 
-    pub fn recordStackOp(self: *Compiler, opcode: Opcode, pop_n: usize, push_n: usize, result_reg: Register, op_arg: Operand) !void {
+    pub fn recordStackOp(
+        self: *Compiler,
+        opcode: Opcode,
+        pop_n: usize,
+        push_n: usize,
+        result_reg: Register,
+        op_arg: Operand,
+    ) !void {
         var ops = try self.alloc.alloc(ir.IrValue, pop_n);
         defer self.alloc.free(ops);
         var i = pop_n;
@@ -244,7 +259,12 @@ pub const Compiler = struct {
         }
         _ = try self.record(opcode, ops, false, result_reg, op_arg);
         var p: usize = 0;
-        while (p < push_n) : (p += 1) try self.value_stack.append(self.alloc, self.ir_builder.instructions.items[self.ir_builder.instructions.items.len - 1]);
+        while (p < push_n) : (p += 1) {
+            try self.value_stack.append(
+                self.alloc,
+                self.ir_builder.instructions.items[self.ir_builder.instructions.items.len - 1],
+            );
+        }
     }
 
     pub fn recordLoad(self: *Compiler, opcode: Opcode, result_reg: Register, op_arg: Operand) !void {
@@ -261,7 +281,8 @@ pub const Compiler = struct {
     }
 
     pub fn lowerToVerifyBytecode(self: *Compiler) ![]Instruction {
-        var out = try std.ArrayList(Instruction).initCapacity(self.alloc, self.ir_builder.instructions.items.len);
+        var out = try std.ArrayList(Instruction)
+            .initCapacity(self.alloc, self.ir_builder.instructions.items.len);
         defer out.deinit(self.alloc);
         for (self.ir_builder.instructions.items) |inst| try ir.lowerInst(self.alloc, &out, inst);
         return try out.toOwnedSlice(self.alloc);
@@ -543,7 +564,7 @@ pub const Compiler = struct {
             .string => |s| try self.@"const"(try self.vm.ownDataString(s)),
             .multiline_string => |s| try self.@"const"(try self.vm.ownDataString(s)),
             .hash => |name| try self.@"const"(Data.new.atom(try self.vm.internAtom(name))),
-            .nil => try self.@"const"(Data.new.atom(revo.core_atoms.nil.atom_id())),
+            .nil => try self.@"const"(Data.new.atom(revo.core_atoms.nil.atomId())),
             .ident => |name| {
                 if (state_mod.resolveLocal(self, name)) |slot| {
                     try self.emit(.load_local, slot);
@@ -795,7 +816,7 @@ pub const Compiler = struct {
 
                 state_mod.reserveLocalSlots(self);
 
-                try self.emit(.load_global, revo.core_atoms.import.atom_id());
+                try self.emit(.load_global, revo.core_atoms.import.atomId());
                 try self.@"const"(try self.vm.ownDataString(is.path));
 
                 try self.emit(.call, 1);

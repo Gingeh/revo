@@ -285,7 +285,7 @@ pub fn @"try"(args: []const Data, vm: *VM) !NativeResult {
     return switch (tag.tag()) {
         .atom => blk: {
             const atom = tag.asAtom().?;
-            const ok_id = revo.core_atoms.atom_id(.ok);
+            const ok_id = revo.core_atoms.atomId(.ok);
             if (atom != ok_id) return root.panic_(&[1]Data{table.array.items[1]}, vm);
             break :blk .{ .ok = table.array.items[1] };
         },
@@ -507,7 +507,7 @@ fn rawset(args: []const Data, vm: *VM) !NativeResult {
 }
 
 test "table library" {
-    try testing.top_number("len({1, 2, 3})", 3);
+    try testing.topNumber("len({1, 2, 3})", 3);
 }
 
 /// > table + other: table -> table
@@ -716,12 +716,12 @@ fn dataEq(a: Data, b: Data) bool {
 }
 
 test "table methods" {
-    try testing.top_number("{1, 2, 3}:first()", 1);
-    try testing.top_number("{1, 2, 3}:last()", 3);
-    try testing.top_true("{1, 2, 3}:contains?(2)");
-    try testing.top_false("{1, 2, 3}:contains?(5)");
-    try testing.top_number("{1, 2, 3}:index_of(2)", 1);
-    try testing.top_number("{1, 2, 3}:sum()", 6);
+    try testing.topNumber("{1, 2, 3}:first()", 1);
+    try testing.topNumber("{1, 2, 3}:last()", 3);
+    try testing.topTrue("{1, 2, 3}:contains?(2)");
+    try testing.topFalse("{1, 2, 3}:contains?(5)");
+    try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
+    try testing.topNumber("{1, 2, 3}:sum()", 6);
 }
 
 const std = @import("std");

@@ -1,3 +1,4 @@
+// zlint-disable line-length -- yeah
 //! local peephole pass over ir, runs after dce.dceIr
 //!
 //! `fold.foldIr` folds constant expressions and `dce.dceIr` drops dead
@@ -660,7 +661,7 @@ fn testRuntime() revo.Runtime {
     return .{
         .alloc = std.testing.allocator,
         .io = std.testing.io,
-        .diag_alloc = undefined,
+        .diag_alloc = std.testing.allocator,
         .diag_arena = null,
     };
 }
@@ -695,25 +696,25 @@ test "peephole: add zero folds away" {
 }
 
 test "peephole regressions" {
-    try t.top_number("fn f(x) do x + 0 end\nf(3)", 3);
-    try t.top_number("fn f(x) do 0 + x end\nf(3)", 3);
-    try t.top_number("fn f(x) do x + 1 end\nf(3)", 4);
-    try t.top_number("fn f(x) do 1 + x end\nf(3)", 4);
-    try t.top_number("fn f(x) do x * 1 end\nf(3)", 3);
-    try t.top_number("fn f(x) do 1 * x end\nf(3)", 3);
-    try t.top_number("fn f(x) do x * 2 end\nf(3)", 6);
-    try t.top_number("fn f(x) do x - 0 end\nf(3)", 3);
-    try t.top_number("fn f(x) do x / 1 end\nf(3)", 3);
-    try t.top_number("fn f(x) do x // 1 end\nf(3)", 3);
-    try t.top_number("fn f(x) do x - 1 end\nf(3)", 2);
-    try t.top_number("fn f(x) do 0 - x end\nf(3)", -3);
-    try t.top_number("fn f(x) do x * 0 end\nf(3)", 0);
-    try t.top_number("fn f(x) do 0 * x end\nf(3)", 0);
-    try t.top_string("fn f(x) do x * 1 end\nf(\"ab\")", "ab");
+    try t.topNumber("fn f(x) do x + 0 end\nf(3)", 3);
+    try t.topNumber("fn f(x) do 0 + x end\nf(3)", 3);
+    try t.topNumber("fn f(x) do x + 1 end\nf(3)", 4);
+    try t.topNumber("fn f(x) do 1 + x end\nf(3)", 4);
+    try t.topNumber("fn f(x) do x * 1 end\nf(3)", 3);
+    try t.topNumber("fn f(x) do 1 * x end\nf(3)", 3);
+    try t.topNumber("fn f(x) do x * 2 end\nf(3)", 6);
+    try t.topNumber("fn f(x) do x - 0 end\nf(3)", 3);
+    try t.topNumber("fn f(x) do x / 1 end\nf(3)", 3);
+    try t.topNumber("fn f(x) do x // 1 end\nf(3)", 3);
+    try t.topNumber("fn f(x) do x - 1 end\nf(3)", 2);
+    try t.topNumber("fn f(x) do 0 - x end\nf(3)", -3);
+    try t.topNumber("fn f(x) do x * 0 end\nf(3)", 0);
+    try t.topNumber("fn f(x) do 0 * x end\nf(3)", 0);
+    try t.topString("fn f(x) do x * 1 end\nf(\"ab\")", "ab");
 
     // the folded result is consumed by a later expression, so the peephole
     // must keep the dataflow (via the register) intact
-    try t.top_number(
+    try t.topNumber(
         \\fn f(x) do
         \\  let y = x + 0
         \\  y * 2

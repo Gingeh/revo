@@ -48,7 +48,13 @@ pub fn compare(vm: *VM, lh: Data, rh: Data) std.math.Order {
     return .gt;
 }
 
-pub inline fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
+pub inline fn evalCachedFast(
+    slots: []Data,
+    base: usize,
+    vm: *VM,
+    instr: Instruction,
+    comptime op: Opcode,
+) VM.EvalError!void {
     const lhs = VM.regRead(slots, base, instr.b);
     const rhs = VM.regRead(slots, base, instr.c);
 

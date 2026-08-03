@@ -384,29 +384,29 @@ pub fn wrapSocket(vm: *VM, entry_ptr: *SocketEntry, is_server: bool) !Data {
     const sock_table = try vm.tables.create();
     var table = try vm.tables.get(sock_table);
 
-    try table.putRawAtom(revo.core_atoms.__is_server.atom_id(), Data.new.boolean(is_server), vm);
+    try table.putRawAtom(revo.core_atoms.__is_server.atomId(), Data.new.boolean(is_server), vm);
 
-    try table.putRawAtom(revo.core_atoms.__entry_ptr.atom_id(), Data.new.num(@intFromPtr(entry_ptr)), vm);
+    try table.putRawAtom(revo.core_atoms.__entry_ptr.atomId(), Data.new.num(@intFromPtr(entry_ptr)), vm);
 
     if (is_server) {
         const port = switch (entry_ptr.*) {
             .server => |s| s.socket.address.getPort(),
             .stream => 0,
         };
-        try table.putRawAtom(revo.core_atoms.port.atom_id(), Data.new.num(port), vm);
+        try table.putRawAtom(revo.core_atoms.port.atomId(), Data.new.num(port), vm);
     }
 
     // the socket module as mt __index so methods resolve
     const metatable = try vm.tables.create();
     var mt = try vm.tables.get(metatable);
-    const socket_module_data = vm.globals.get(revo.core_atoms.socket.atom_id()) orelse
+    const socket_module_data = vm.globals.get(revo.core_atoms.socket.atomId()) orelse
         return error.SocketModuleNotFound;
 
     const socket_module = try vm.tables.get(socket_module_data.asTable().?);
     const close_fn = socket_module.getRaw(try vm.dataAtom("close"), vm) orelse
         return error.SocketModuleNotFound;
 
-    try mt.putRawAtom(revo.core_atoms.__index.atom_id(), socket_module_data, vm);
+    try mt.putRawAtom(revo.core_atoms.__index.atomId(), socket_module_data, vm);
 
     const mt_array = [_]Data{ Data.new.table(sock_table), Data.new.table(metatable) };
     const set_result = try meta.set_metatable_(&mt_array, vm);
@@ -422,7 +422,7 @@ pub fn wrapSocket(vm: *VM, entry_ptr: *SocketEntry, is_server: bool) !Data {
 
 fn isServer(socket_data: Data, vm: *VM) !bool {
     const table = try vm.tables.get(socket_data.asTable().?);
-    const d = table.getRawAtom(revo.core_atoms.__is_server.atom_id(), vm) orelse
+    const d = table.getRawAtom(revo.core_atoms.__is_server.atomId(), vm) orelse
         return error.InvalidSocket;
     return !revo.isFalse(d);
 }
@@ -430,7 +430,7 @@ fn isServer(socket_data: Data, vm: *VM) !bool {
 /// ret always live ptr or SocketClosed
 fn getEntryPtr(socket_data: Data, vm: *VM) !*SocketEntry {
     const table = try vm.tables.get(socket_data.asTable().?);
-    const d = table.getRawAtom(revo.core_atoms.__entry_ptr.atom_id(), vm) orelse
+    const d = table.getRawAtom(revo.core_atoms.__entry_ptr.atomId(), vm) orelse
         return error.InvalidSocket;
     const addr: usize = @intFromFloat(d.asNum().?);
     if (addr == 0) return error.SocketClosed;
@@ -456,7 +456,7 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
 
     // zeroise so double close is nop rather than use-after-free
     var tbl = try vm.tables.get(socket_data.asTable().?);
-    try tbl.putRawAtom(revo.core_atoms.__entry_ptr.atom_id(), Data.new.num(0), vm);
+    try tbl.putRawAtom(revo.core_atoms.__entry_ptr.atomId(), Data.new.num(0), vm);
     vm.unregisterFinalizer(socket_data.asTable().?);
 }
 
@@ -663,27 +663,27 @@ fn parseRecvOptions(opts_data: Data, vm: *VM) !RecvWaitToken {
     var token: RecvWaitToken = .{};
     const opts = try vm.tables.get(opts_data.asTable().?);
 
-    if (opts.getRawAtom(revo.core_atoms.max_bytes.atom_id(), vm)) |max_d| {
+    if (opts.getRawAtom(revo.core_atoms.max_bytes.atomId(), vm)) |max_d| {
         if (!max_d.isNumber()) return error.TypeError;
         token.max_bytes = @as(usize, @intFromFloat(max_d.asNum().?));
     }
     if (token.max_bytes == 0) token.max_bytes = 1;
 
-    if (opts.getRawAtom(revo.core_atoms.delimiter.atom_id(), vm)) |delim_d| {
+    if (opts.getRawAtom(revo.core_atoms.delimiter.atomId(), vm)) |delim_d| {
         if (!delim_d.isString()) return error.TypeError;
         const s = vm.stringValue(delim_d.asString().?);
         if (s.len == 0) return error.TypeError;
         token.delimiter = s[0];
     }
 
-    if (opts.getRawAtom(revo.core_atoms.mode.atom_id(), vm)) |mode_d| {
+    if (opts.getRawAtom(revo.core_atoms.mode.atomId(), vm)) |mode_d| {
         if (!mode_d.isAtom()) return error.TypeError;
         const a = mode_d.asAtom().?;
-        if (a == revo.core_atoms.read_some.atom_id()) {
+        if (a == revo.core_atoms.read_some.atomId()) {
             token.mode = .read_some;
-        } else if (a == revo.core_atoms.read_all.atom_id()) {
+        } else if (a == revo.core_atoms.read_all.atomId()) {
             token.mode = .read_all;
-        } else if (a == revo.core_atoms.read_line.atom_id()) {
+        } else if (a == revo.core_atoms.read_line.atomId()) {
             token.mode = .read_line;
         } else {
             return error.TypeError;

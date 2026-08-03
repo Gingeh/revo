@@ -22,7 +22,7 @@ pub fn get_metatable_(args: []const Data, vm: *VM) !NativeResult {
 ///     set_metatable(t, mt)
 pub fn set_metatable_(args: []const Data, vm: *VM) !NativeResult {
     const mt = if (args[1].asAtom()) |a|
-        if (a == revo.core_atoms.atom_id(.nil)) null else return .errType(1, "nil atom or table", "atom")
+        if (a == revo.core_atoms.atomId(.nil)) null else return .errType(1, "nil atom or table", "atom")
     else if (args[1].asTable()) |id|
         id
     else
@@ -36,7 +36,7 @@ fn check_field(name: []const u8, table: *revo.table.Table, vm: *VM) !bool {
 }
 
 test "all lens" {
-    try testing.top_number("len({ 1, 2, 3, 8 }) + len(\"asdf\")", 8);
+    try testing.topNumber("len({ 1, 2, 3, 8 }) + len(\"asdf\")", 8);
 }
 
 const revo = @import("../root.zig");

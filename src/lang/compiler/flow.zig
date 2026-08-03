@@ -233,7 +233,7 @@ pub fn compileFor(
     defer loop.deinit();
 
     // wrap expression with to_iter
-    try self.emit(.load_global, revo.core_atoms.to_iter.atom_id());
+    try self.emit(.load_global, revo.core_atoms.to_iter.atomId());
     try self.compile(iter, true);
     try self.emit(.call, 1);
     const it_slot: LocalSlot = @intCast(self.active_registers - 1);
@@ -267,7 +267,7 @@ pub fn compileFor(
     try self.emit(.call, 0);
     // check for :done
     try self.regDupe();
-    try self.@"const"(Data.new.atom(revo.core_atoms.done.atom_id()));
+    try self.@"const"(Data.new.atom(revo.core_atoms.done.atomId()));
     try self.emit(.eq, 0);
     const end_jump = try self.jump(.jump_if_true);
 
@@ -544,14 +544,14 @@ pub fn compilePatternChecks(
         .ident => {}, // always matches
         .tuple_pattern => |items| {
             // type check, then length, then each element
-            try self.emit(.load_global, revo.core_atoms.type.atom_id());
+            try self.emit(.load_global, revo.core_atoms.type.atomId());
             try emitStorageLoad(self, subject);
             try self.emit(.call, 1);
-            try self.@"const"(Data.new.atom(revo.core_atoms.tuple.atom_id()));
+            try self.@"const"(Data.new.atom(revo.core_atoms.tuple.atomId()));
             try self.emit(.eq, 0);
             try fail_jumps.append(self.alloc, try self.jump(.jump_if_false));
 
-            try self.emit(.load_global, revo.core_atoms.len.atom_id());
+            try self.emit(.load_global, revo.core_atoms.len.atomId());
             try emitStorageLoad(self, subject);
             try self.emit(.call, 1);
             try self.@"const"(Data.new.num(items.len));
@@ -662,7 +662,8 @@ pub fn compileIf(
 fn conditionTypeHint(condition: *const Node) ?TypeHint {
     return switch (condition.expr) {
         .call => |call| blk: {
-            if (call.args.len != 1 or call.callee.expr != .ident or !std.mem.endsWith(u8, call.callee.expr.ident, "?")) break :blk null;
+            if (call.args.len != 1 or call.callee.expr != .ident or
+                !std.mem.endsWith(u8, call.callee.expr.ident, "?")) break :blk null;
             if (call.args[0].expr != .ident) break :blk null;
 
             const type_info = if (std.mem.eql(u8, call.callee.expr.ident, "number?"))
@@ -681,7 +682,11 @@ fn conditionTypeHint(condition: *const Node) ?TypeHint {
         },
         .binary => |b| blk: {
             if (b.op != .eq) break :blk null;
-            const left = typeCompareHint(b.left, b.right) orelse typeCompareHint(b.right, b.left) orelse break :blk null;
+            const left = typeCompareHint(b.left, b.right) orelse typeCompareHint(
+                b.right,
+                b.left,
+            ) orelse break :blk null;
+
             break :blk left;
         },
         else => null,
@@ -818,7 +823,12 @@ fn findLoopFrame(self: *Compiler, label: ?[]const u8) !?*state.LoopFrame {
 
 pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, label: ?[]const u8) !void {
     const frame = try findLoopFrame(self, label) orelse {
-        const msg = if (label) |lbl| try std.fmt.allocPrint(self.alloc, "no matching label for break/{s}", .{lbl}) else "break is only valid inside loop";
+        const msg = if (label) |lbl| try std.fmt.allocPrint(
+            self.alloc,
+            "no matching label for break/{s}",
+            .{lbl},
+        ) else "break is only valid inside loop";
+
         return self.fail(.UnsupportedSyntax, expr, msg);
     };
 
@@ -834,7 +844,12 @@ pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, lab
 pub fn compileContinue(self: *Compiler, expr: *const Node, value: ?*const Node, label: ?[]const u8) !void {
     _ = value;
     const frame = try findLoopFrame(self, label) orelse {
-        const msg = if (label) |lbl| try std.fmt.allocPrint(self.alloc, "no matching label for continue/{s}", .{lbl}) else "continue is only valid inside loop";
+        const msg = if (label) |lbl| try std.fmt.allocPrint(
+            self.alloc,
+            "no matching label for continue/{s}",
+            .{lbl},
+        ) else "continue is only valid inside loop";
+
         return self.fail(.UnsupportedSyntax, expr, msg);
     };
 

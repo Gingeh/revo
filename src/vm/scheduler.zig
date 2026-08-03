@@ -33,11 +33,11 @@ pub const ChannelState = struct {
     pub fn init(alloc: std.mem.Allocator, cap: usize) !ChannelState {
         var self = ChannelState{
             .cap = cap,
-            .queue = undefined,
+            .queue = .empty,
             .queue_head = 0,
             .queue_count = 0,
-            .send_waiters = undefined,
-            .recv_waiters = undefined,
+            .send_waiters = .empty,
+            .recv_waiters = .empty,
         };
         const queue_cap = if (cap == 0) 1 else cap;
         self.queue = try std.ArrayList(Data).initCapacity(alloc, queue_cap);
@@ -204,27 +204,27 @@ free_fibers: std.ArrayList(FiberID),
 /// init with a 64-slot runq
 pub fn init(alloc: std.mem.Allocator) !@This() {
     const ring_cap = 64;
+    const fiber_arena = try alloc.create(std.heap.ArenaAllocator);
+    fiber_arena.* = std.heap.ArenaAllocator.init(alloc);
+    errdefer {
+        fiber_arena.deinit();
+        alloc.destroy(fiber_arena);
+    }
     var self = Scheduler{
         .current_fiber = 0,
         .alloc = alloc,
-        .fiber_arena = undefined,
-        .fibers = undefined,
-        .ring_buf = undefined,
+        .fiber_arena = fiber_arena,
+        .fibers = .empty,
+        .ring_buf = &[_]FiberID{},
         .ring_head = 0,
         .ring_tail = 0,
         .ring_mask = ring_cap - 1,
-        .sleepers = undefined,
-        .io_waiters = undefined,
+        .sleepers = .empty,
+        .io_waiters = .empty,
         .channels = .init(alloc),
         .waiting_cnt = 0,
-        .free_fibers = undefined,
+        .free_fibers = .empty,
     };
-    self.fiber_arena = try alloc.create(std.heap.ArenaAllocator);
-    self.fiber_arena.* = std.heap.ArenaAllocator.init(alloc);
-    errdefer {
-        self.fiber_arena.deinit();
-        alloc.destroy(self.fiber_arena);
-    }
     self.fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1);
     errdefer self.fibers.deinit(alloc);
     self.ring_buf = try alloc.alloc(FiberID, ring_cap);
@@ -288,7 +288,10 @@ pub inline fn enqueueRunnable(self: *@This(), fid: FiberID) !void {
         const old_cap = self.ring_buf.len;
         const new_cap = old_cap * 2;
         const new_buf = try self.alloc.alloc(FiberID, new_cap);
-        const count = if (self.ring_tail >= self.ring_head) self.ring_tail - self.ring_head else self.ring_tail + old_cap - self.ring_head;
+        const count = if (self.ring_tail >= self.ring_head)
+            self.ring_tail - self.ring_head
+        else
+            self.ring_tail + old_cap - self.ring_head;
         if (self.ring_head + count <= old_cap) {
             @memcpy(new_buf[0..count], self.ring_buf[self.ring_head..][0..count]);
         } else {

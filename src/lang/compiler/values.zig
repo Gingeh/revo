@@ -488,8 +488,16 @@ pub fn compileStruct(
                 .default_val = d.default_val,
             });
         }
-        break :blk try self.vm.struct_types.registerType(name, fields.items, std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc));
-    } else try self.vm.struct_types.registerType(name, &.{}, std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc));
+        break :blk try self.vm.struct_types.registerType(
+            name,
+            fields.items,
+            std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc),
+        );
+    } else try self.vm.struct_types.registerType(
+        name,
+        &.{},
+        std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc),
+    );
 
     // bind the .struct_type constant to the struct name
     const slot = try state.reuseOrDeclareLocal(self, name, false);
