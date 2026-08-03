@@ -133,6 +133,9 @@ pub const Compiler = struct {
     declared_globals: std.StringHashMap(void),
     current_proto: revo.PrototypeID = 0,
     fn_depth: usize = 0,
+    // name whose local is currently being initialized; the branch-local slot is
+    // hidden from name resolution so initializers see the outer binding
+    masking_local: ?[]const u8 = null,
 
     pub fn init(
         vm: *VM,

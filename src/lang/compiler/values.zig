@@ -52,7 +52,13 @@ pub fn compileLocalBinding(
             null,
         );
     } else {
+        // hide the binding's own name from its initializer so `x() = x()` and
+        // `let x = x + 1` read the outer binding, not the fresh uninitialized slot
+        const saved_mask = self.masking_local;
+        self.masking_local = name;
+        errdefer self.masking_local = saved_mask;
         try self.compile(value, true);
+        self.masking_local = saved_mask;
     }
 
     state.markLocalInitialized(self, slot);

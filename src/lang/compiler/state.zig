@@ -364,12 +364,33 @@ pub fn resolveLocalVarIn(self: *Compiler, fn_idx: usize, name: []const u8) ?Loca
 
 pub fn resolveLocal(self: *Compiler, name: []const u8) ?LocalSlot {
     if (self.functions.items.len == 0) return null;
+    if (resolveLocalMasked(self, name)) |v| return v.slot;
+    if (self.masking_local != null and std.mem.eql(u8, name, self.masking_local.?)) return null;
     return if (resolveLocalVarIn(self, self.functions.items.len - 1, name)) |v| v.slot else null;
 }
 
 pub fn resolveLocalVar(self: *Compiler, name: []const u8) ?LocalVar {
     if (self.functions.items.len == 0) return null;
+    if (resolveLocalMasked(self, name)) |v| return v;
+    if (self.masking_local != null and std.mem.eql(u8, name, self.masking_local.?)) return null;
     return resolveLocalVarIn(self, self.functions.items.len - 1, name);
+}
+
+/// a name whose own binding is still compiling must not resolve to its fresh
+/// uninitialized slot; the nearest already-initialized local wins, otherwise
+/// the initializer sees the enclosing scope or a global
+fn resolveLocalMasked(self: *Compiler, name: []const u8) ?LocalVar {
+    const mask = self.masking_local orelse return null;
+    if (!std.mem.eql(u8, name, mask)) return null;
+    const fn_state = &self.functions.items[self.functions.items.len - 1];
+    const locals = fn_state.locals.items;
+    var i = locals.len;
+    while (i > 0) {
+        i -= 1;
+        const local = locals[i];
+        if (local.initialized and std.mem.eql(u8, local.name, name)) return local;
+    }
+    return null;
 }
 
 pub fn constTupleIndex(self: *Compiler, index: anytype) ?usize {
