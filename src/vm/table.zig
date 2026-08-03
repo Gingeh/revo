@@ -199,7 +199,7 @@ pub const Table = struct {
 
         fn lookup(self: *const HashPart, key: Data, vm: *revo.VM) ?u32 {
             if (self.buckets.len == 0) return null;
-            const mask = @as(u32, @intCast(self.buckets.len - 1));
+            const mask: u32 = @intCast(self.buckets.len - 1);
             var idx = @as(u32, @truncate(hashKey(key))) & mask;
             const limit: u32 = self.count;
             var probes: u32 = 0;
@@ -226,7 +226,7 @@ pub const Table = struct {
             if (self.buckets.len == 0 or self.count * 100 > self.buckets.len * MAX_LOAD)
                 try self.grow(alloc);
 
-            const mask = @as(u32, @intCast(self.buckets.len - 1));
+            const mask: u32 = @intCast(self.buckets.len - 1);
             var idx = @as(u32, @truncate(hashKey(key))) & mask;
             while (self.buckets[idx].status == .occupied) {
                 if (keyEq(self.buckets[idx].key, key, vm))
@@ -260,7 +260,7 @@ pub const Table = struct {
 
             while (cur != NULL_ID) {
                 const old = &self.buckets[cur];
-                var ni = @as(u32, @truncate(hashKey(old.key) & (new_len - 1)));
+                var ni: u32 = @truncate(hashKey(old.key) & (new_len - 1));
                 while (new_buckets[ni].status == .occupied)
                     ni = (ni + 1) & (new_len - 1);
 
@@ -285,7 +285,7 @@ pub const Table = struct {
 
         fn remove(self: *HashPart, key: Data, vm: *revo.VM) bool {
             const idx = self.lookup(key, vm) orelse return false;
-            const mask = @as(u32, @intCast(self.buckets.len - 1));
+            const mask: u32 = @intCast(self.buckets.len - 1);
 
             // unlink from insertion-order list
             if (self.buckets[idx].prev != NULL_ID) self.buckets[self.buckets[idx].prev].next = self.buckets[idx].next;
@@ -300,7 +300,7 @@ pub const Table = struct {
             var hole = idx;
             var probe = (hole + 1) & mask;
             while (self.buckets[probe].status == .occupied) : (probe = (probe + 1) & mask) {
-                const natural = @as(u32, @truncate(hashKey(self.buckets[probe].key) & mask));
+                const natural: u32 = @truncate(hashKey(self.buckets[probe].key) & mask);
                 const in_range = if (hole < probe)
                     natural > hole and natural <= probe
                 else

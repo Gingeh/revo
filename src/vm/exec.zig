@@ -339,8 +339,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
 
@@ -354,8 +354,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
             const result: i64 = switch (op) {
                 .band_int => li & ri,
                 .bor_int => li | ri,
@@ -373,8 +373,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
             if (ri < 0 or ri > 63) return self.fail(error.ShiftAmountOutOfRange, "shift amount {d} out of range", .{ri});
             const shifted: i64 = switch (op) {
                 .shl_int => @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri))),
@@ -392,8 +392,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
 
@@ -413,7 +413,7 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
         .negate_int => {
             const v = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(v.isNumber());
-            const v_int = @as(i64, @intFromFloat(@as(f64, @bitCast(v.bits))));
+            const v_int: i64 = @intFromFloat(@as(f64, @bitCast(v.bits)));
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -434,8 +434,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
             const result: i64 = switch (op) {
                 .add_int => li + ri,
                 .sub_int => li - ri,
@@ -466,7 +466,7 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const rn = @as(f64, @bitCast(rhs.bits));
+            const rn: f64 = @bitCast(rhs.bits);
             if (rn == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@floor(@as(f64, @bitCast(lhs.bits)) / rn)));
 
@@ -500,8 +500,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
             const lhs_val = regRead(regs, base, instr.b);
             const rhs_val = regRead(regs, base, instr.c);
-            const lhs = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs_val.bits))));
-            const rhs = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs_val.bits))));
+            const lhs: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
+            const rhs: i64 = @intFromFloat(@as(f64, @bitCast(rhs_val.bits)));
 
             const result = switch (op) {
                 .eq_int => lhs == rhs,
@@ -898,9 +898,9 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
             continue :dispatch instr.op;
         },
         .range_loop => {
-            const current = @as(f64, @bitCast((regRead(regs, base, instr.b)).bits));
-            const step = @as(f64, @bitCast((regRead(regs, base, instr.b + 1)).bits));
-            const limit = @as(f64, @bitCast((regRead(regs, base, instr.b + 2)).bits));
+            const current: f64 = @bitCast((regRead(regs, base, instr.b)).bits);
+            const step: f64 = @bitCast((regRead(regs, base, instr.b + 1)).bits);
+            const limit: f64 = @bitCast((regRead(regs, base, instr.b + 2)).bits);
 
             const has_next = (step > 0 and current < limit) or (step < 0 and current > limit);
 
@@ -1004,8 +1004,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
         inline .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm => |op| {
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
-            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs_val.bits))));
-            const ri = @as(i64, @intCast(instr.bx));
+            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
+            const ri: i64 = @intCast(instr.bx);
             const result: i64 = switch (op) {
                 .add_int_imm => li + ri,
                 .sub_int_imm => li - ri,
@@ -1020,8 +1020,8 @@ inline fn execFiberDispatch(self: *VM, alloc: std.mem.Allocator, comptime use_de
         },
         .lt_int_imm => {
             const lhs_val = regRead(regs, base, instr.b);
-            const lhs = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs_val.bits))));
-            const rhs = @as(i64, @intCast(instr.bx));
+            const lhs: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
+            const rhs: i64 = @intCast(instr.bx);
             regWrite(regs, base, instr.a, Data.new.boolean(lhs < rhs));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -1408,13 +1408,13 @@ noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction)
         std.debug.assert(lhs.isNumber());
         std.debug.assert(rhs.isNumber());
     }
-    const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
-    const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+    const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
+    const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
     if (ri >= 0) {
         regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(revo.memory.ipow(li, ri)))));
     } else {
-        const ln = @as(f64, @bitCast(lhs.bits));
-        const rn = @as(f64, @bitCast(rhs.bits));
+        const ln: f64 = @bitCast(lhs.bits);
+        const rn: f64 = @bitCast(rhs.bits);
         const result = std.math.pow(f64, ln, rn);
         if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         regWrite(regs, base, instr.a, Data.new.num(result));
@@ -1429,8 +1429,8 @@ noinline fn execPowFloat(self: *VM, regs: []Data, base: usize, instr: Instructio
         std.debug.assert(lhs.isNumber());
         std.debug.assert(rhs.isNumber());
     }
-    const ln = @as(f64, @bitCast(lhs.bits));
-    const rn = @as(f64, @bitCast(rhs.bits));
+    const ln: f64 = @bitCast(lhs.bits);
+    const rn: f64 = @bitCast(rhs.bits);
     const result = std.math.pow(f64, ln, rn);
     if (std.math.isNan(result)) return self.fail(error.IncompatibleTypes, "cannot exponentiate {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
     regWrite(regs, base, instr.a, Data.new.num(result));

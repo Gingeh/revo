@@ -1,7 +1,6 @@
 const std = @import("std");
 const revo = @import("revo");
 
-const Data = revo.Data;
 const VM = revo.VM;
 const print = revo.vm.print;
 
@@ -140,7 +139,7 @@ const DirectWriter = struct {
     }
 
     fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
-        const self = @as(*DirectWriter, @fieldParentPtr("writer", w));
+        const self: *DirectWriter = @fieldParentPtr("writer", w);
         var total: usize = 0;
 
         // all elements except the last are written once

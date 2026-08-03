@@ -367,7 +367,7 @@ fn mul_f(args: []const Data, vm: *VM) !NativeResult {
     const times = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.dataToString(args[1]));
     if (times < 0) return .errType(1, "positive number", root.dataToString(args[1]));
 
-    const count = @as(usize, @intCast(times));
+    const count: usize = @intCast(times);
     const buf = try vm.runtime.alloc.alloc(u8, str.len * count);
     for (0..count) |i| {
         @memcpy(buf[i * str.len ..][0..str.len], str);

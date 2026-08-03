@@ -402,9 +402,7 @@ pub fn unregisterFinalizer(self: *VM, table_id: mem.TableID) void {
 }
 
 pub fn moduleStamp(self: *VM, path: []const u8) !ModuleStamp {
-    const stat = std.Io.Dir.cwd().statFile(self.runtime.io, path, .{}) catch |err| {
-        return err;
-    };
+    const stat = try std.Io.Dir.cwd().statFile(self.runtime.io, path, .{});
     return .{
         .mtime = @intCast(stat.mtime.toNanoseconds()),
         .size = stat.size,
@@ -2070,5 +2068,4 @@ pub const runImportedModule = module.runImportedModule;
 const Scheduler = @import("scheduler.zig");
 const struct_mod = @import("struct.zig");
 const vm_exec = @import("exec.zig");
-const execFiberUntilDepth = vm_exec.execFiberUntilDepth;
 const vm_gc = @import("gc.zig");

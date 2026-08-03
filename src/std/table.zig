@@ -299,7 +299,7 @@ fn insert(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos = @as(i64, @intFromFloat(pos_num));
+    const pos: i64 = @intFromFloat(pos_num);
     const val = args[2];
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
@@ -321,7 +321,7 @@ fn remove(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos = @as(i64, @intFromFloat(pos_num));
+    const pos: i64 = @intFromFloat(pos_num);
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
     if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", dataToString(args[1]));

@@ -5,8 +5,6 @@
 
 const std = @import("std");
 const mem = std.mem;
-const math = std.math;
-const debug = std.debug;
 
 const Allocator = mem.Allocator;
 

@@ -605,7 +605,7 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
 
     const obj = tbl.getRaw(Data.new.atom(atom_obj), vm) orelse return .okData(revo.Data.new.core(.done));
     const pos_val = tbl.getRaw(Data.new.atom(atom_pos), vm) orelse return .okData(revo.Data.new.core(.done));
-    const pos = @as(usize, @intFromFloat(pos_val.asNum().?));
+    const pos: usize = @intFromFloat(pos_val.asNum().?);
 
     const val: ?Data = switch (obj.tag()) {
         .string => blk: {

@@ -178,8 +178,8 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             if (!std.math.isFinite(raw)) return false;
             if (is_int) {
                 if (@floor(raw) != raw) return false;
-                const min = @as(f64, @floatFromInt(std.math.minInt(i64)));
-                const max = @as(f64, @floatFromInt(std.math.maxInt(i64)));
+                const min: f64 = @floatFromInt(std.math.minInt(i64));
+                const max: f64 = @floatFromInt(std.math.maxInt(i64));
                 if (raw < min or raw > max) return false;
                 try rewriteToConst(self, inst, Data.new.num(@as(i64, @intFromFloat(raw))));
             } else {
@@ -225,8 +225,8 @@ fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {
         const is_int = inst.opcode == .negate_int;
         if (is_int) {
             if (@floor(raw) != raw) return false;
-            const min = @as(f64, @floatFromInt(std.math.minInt(i64)));
-            const max = @as(f64, @floatFromInt(std.math.maxInt(i64)));
+            const min: f64 = @floatFromInt(std.math.minInt(i64));
+            const max: f64 = @floatFromInt(std.math.maxInt(i64));
             if (raw < min or raw > max) return false;
             try rewriteToConst(self, inst, Data.new.num(@as(i64, @intFromFloat(raw))));
         } else {

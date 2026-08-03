@@ -229,7 +229,6 @@ pub const EvalErrorKind = vm.EvalErrorKind;
 pub const EvalFailure = vm.EvalFailure;
 pub const EvalResult = vm.EvalResult;
 
-const diagnostic = @import("./lang/diagnostic.zig");
 pub const lang = @import("./lang/root.zig");
 pub const pretty = @import("./pretty.zig");
 pub const async_backend = @import("./runtime/async_backend.zig");

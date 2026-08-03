@@ -134,7 +134,7 @@ fn allocNode(alloc: std.mem.Allocator, span: ast.Span, expr: ast.Expr) !*Node {
 /// walk AST and pre-load imported modules (best-effort, OOM propagates, others
 /// are deferred to runtime where the import native fn handles them)
 fn preloadImports(vm: *VM, root: *Node, alloc: std.mem.Allocator) !void {
-    var inject_nodes = std.ArrayList(*Node).initCapacity(alloc, 8) catch |err| return err;
+    var inject_nodes = try std.ArrayList(*Node).initCapacity(alloc, 8);
     defer inject_nodes.deinit(alloc);
 
     var visited = std.StringHashMap(void).init(alloc);
@@ -437,13 +437,13 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
             else => revo.pretty.fatal("preload: {s}", .{@errorName(err)}, vm),
         };
 
-    const expand_result = expandWithVmSource(
+    const expand_result = try expandWithVmSource(
         vm,
         arena.allocator(),
         parsed,
         source.name orelse "",
         source.text,
-    ) catch |err| return err;
+    );
 
     const expanded = switch (expand_result) {
         .ok => |ok| ok,

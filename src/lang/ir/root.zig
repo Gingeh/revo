@@ -68,7 +68,7 @@ pub fn valueReg(v: IrValue) Register {
 pub fn maxRegister(insts: []*IrInst) usize {
     var max_reg: usize = 0;
     for (insts) |inst| {
-        const r = @as(usize, inst.result_reg);
+        const r: usize = inst.result_reg;
         if (r + 2 > max_reg) max_reg = r + 2;
     }
     return max_reg;

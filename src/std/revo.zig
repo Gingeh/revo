@@ -95,7 +95,6 @@ test "revo.build compiles source" {
     , "ok");
 }
 
-const std = @import("std");
 
 const revo = @import("../root.zig");
 const testing = revo.lang.testing;

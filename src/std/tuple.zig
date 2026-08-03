@@ -95,7 +95,7 @@ fn add(args: []const Data, vm: *VM) !NativeResult {
 fn mul(args: []const Data, vm: *VM) !NativeResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
     const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1]));
-    const times = @as(i64, @intFromFloat(n));
+    const times: i64 = @intFromFloat(n);
     if (times < 0) return .errType(1, "non-negative number", "negative number");
     const tuple = try vm.tuples.get(tuple_id);
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, tuple.items.len * @as(usize, @intCast(times)));
