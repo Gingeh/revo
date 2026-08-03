@@ -1175,6 +1175,17 @@ fn resolveImportPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]co
         return error.FileNotFound;
     }
 
+    if (vm.module_dir) |dir| {
+        // bare module name should also resolve adjacent to the importing module too
+        if (try tryRealPath(raw_path, dir, io, alloc)) |p| return p;
+        const md_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
+        defer alloc.free(md_ext);
+        if (try tryRealPath(md_ext, dir, io, alloc)) |p| return p;
+        const md_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
+        defer alloc.free(md_init);
+        if (try tryRealPath(md_init, dir, io, alloc)) |p| return p;
+    }
+
     if (vm.project_root.len > 0) {
         if (try tryRealPath(raw_path, vm.project_root, io, alloc)) |p| return p;
         const pr_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});

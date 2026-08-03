@@ -203,6 +203,17 @@ fn resolveModuleFile(vm: *VM, name: []const u8) !?[]const u8 {
         return null;
     }
 
+    if (vm.module_dir) |dir| {
+        // bare module name should also resolve adjacent to the importing module too
+        if (try tryResolve(alloc, io, dir, name)) |p| return p;
+        const md_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{name});
+        defer alloc.free(md_ext);
+        if (try tryResolve(alloc, io, dir, md_ext)) |p| return p;
+        const md_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{name});
+        defer alloc.free(md_init);
+        if (try tryResolve(alloc, io, dir, md_init)) |p| return p;
+    }
+
     if (vm.project_root.len > 0) {
         if (try tryResolve(alloc, io, vm.project_root, name)) |p| return p;
         const pr_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{name});
