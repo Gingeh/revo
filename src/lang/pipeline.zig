@@ -176,103 +176,15 @@ fn walkAndProcessImports(
 }
 
 /// resolve module path matching runtime import resolution
-/// uses vm_path.resolve to be consistent with the runtime `import` native fn
 fn resolveModuleFile(vm: *VM, name: []const u8) !?[]const u8 {
-    const alloc = vm.runtime.alloc;
-    const io = vm.runtime.io;
-
-    const is_relative = name.len > 0 and name[0] == '.';
-
-    // relative paths (./ or ../): only module_dir
-    if (is_relative) {
-        if (vm.module_dir) |dir| {
-            if (try tryResolve(alloc, io, dir, name)) |p| return p;
-            const with_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{name});
-            defer alloc.free(with_ext);
-            if (try tryResolve(alloc, io, dir, with_ext)) |p| return p;
-            const init_path = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{name});
-            defer alloc.free(init_path);
-            if (try tryResolve(alloc, io, dir, init_path)) |p| return p;
-        }
-        return null;
-    }
-
-    // absolute paths
-    if (std.fs.path.isAbsolute(name)) {
-        if (try tryResolvePath(alloc, io, name)) |p| return p;
-        return null;
-    }
-
-    if (vm.module_dir) |dir| {
-        // bare module name should also resolve adjacent to the importing module too
-        if (try tryResolve(alloc, io, dir, name)) |p| return p;
-        const md_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{name});
-        defer alloc.free(md_ext);
-        if (try tryResolve(alloc, io, dir, md_ext)) |p| return p;
-        const md_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{name});
-        defer alloc.free(md_init);
-        if (try tryResolve(alloc, io, dir, md_init)) |p| return p;
-    }
-
-    if (vm.project_root.len > 0) {
-        if (try tryResolve(alloc, io, vm.project_root, name)) |p| return p;
-        const pr_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{name});
-        defer alloc.free(pr_ext);
-        if (try tryResolve(alloc, io, vm.project_root, pr_ext)) |p| return p;
-        const pr_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{name});
-        defer alloc.free(pr_init);
-        if (try tryResolve(alloc, io, vm.project_root, pr_init)) |p| return p;
-    }
-
-    for (vm.package_path.items) |tmpl| {
-        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
-            try std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ tmpl[0..pos], name, tmpl[pos + 1 ..] })
-        else
-            try alloc.dupe(u8, tmpl);
-        defer alloc.free(sub);
-        if (try tryResolvePath(alloc, io, sub)) |p| return p;
-        const with_ext_sub = try std.fmt.allocPrint(alloc, "{s}.rv", .{sub});
-        defer alloc.free(with_ext_sub);
-        if (try tryResolvePath(alloc, io, with_ext_sub)) |p| return p;
-        const init_sub = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{sub});
-        defer alloc.free(init_sub);
-        if (try tryResolvePath(alloc, io, init_sub)) |p| return p;
-    }
-
-    return null;
-}
-
-/// match vm_path.resolve behaviour (no symlink resolution) so preload and runtime
-/// agree on the canonical path
-fn tryResolvePath(alloc: std.mem.Allocator, io: std.Io, path: []const u8) !?[]const u8 {
-    const resolved = std.fs.path.resolve(alloc, &.{path}) catch |err| switch (err) {
-        error.OutOfMemory => |e| return e,
-    };
-    defer alloc.free(resolved);
-    var buf: [4096]u8 = undefined;
-    const n = std.Io.Dir.cwd().realPathFile(io, resolved, &buf) catch |err| switch (err) {
-        error.FileNotFound, error.IsDir => return null,
-        else => |e| return e,
-    };
-    return (try alloc.dupe(u8, buf[0..n]));
-}
-
-fn tryResolve(alloc: std.mem.Allocator, io: std.Io, dir: []const u8, name: []const u8) !?[]const u8 {
-    const joined = try std.fs.path.resolve(alloc, &.{ dir, name });
-    defer alloc.free(joined);
-    var buf: [4096]u8 = undefined;
-    const n = std.Io.Dir.cwd().realPathFile(io, joined, &buf) catch |err| switch (err) {
-        error.FileNotFound, error.IsDir => return null,
-        else => |e| return e,
-    };
-    const resolved = buf[0..n];
-    // realPathFile returns dir path instead of IsDir on macos
-    const stat = std.Io.Dir.cwd().statFile(io, resolved, .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => |e| return e,
-    };
-    if (stat.kind == .directory) return null;
-    return (try alloc.dupe(u8, resolved));
+    return revo.resolveImportFile(
+        vm.runtime.io,
+        vm.runtime.alloc,
+        name,
+        vm.module_dir,
+        vm.project_root,
+        vm.package_path.items,
+    );
 }
 
 /// read, parse, and extract macros/procs from a module for compile-time use

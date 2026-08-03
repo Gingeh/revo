@@ -2,7 +2,6 @@ const std = @import("std");
 
 const revo = @import("../root.zig");
 const mem = revo.memory;
-const vm_path = revo.path_utils;
 const meta = @import("meta.zig");
 
 const Data = mem.Data;
@@ -928,7 +927,7 @@ pub fn cload(args: []const Data, vm: *VM) !NativeResult {
     const string_id = args[0].asString().?;
     const path = vm.stringValue(string_id);
 
-    const resolved_path = try revo.path_utils.resolve(path, vm.module_dir, vm.runtime.io, vm.runtime.alloc);
+    const resolved_path = try revo.resolve(path, vm.module_dir, vm.runtime.io, vm.runtime.alloc);
     defer vm.runtime.alloc.free(resolved_path);
 
     const mods = try revo.ffi.loadC(vm, resolved_path);
@@ -1084,11 +1083,15 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
     } } };
     const raw_path_s = vm.stringValue(raw_path);
 
-    const resolved_path = resolveImportPath(raw_path_s, vm.module_dir, vm) catch |err| switch (err) {
-        error.FileNotFound => return NativeResult.other("module not found"),
-        error.OutOfMemory => |e| return e,
-        else => return NativeResult.other("module not found"),
-    };
+    const resolved_path = try revo.resolveImportFile(
+        vm.runtime.io,
+        vm.runtime.alloc,
+        raw_path_s,
+        vm.module_dir,
+        vm.project_root,
+        vm.package_path.items,
+    ) orelse return .other("module not found!");
+
     defer vm.runtime.alloc.free(resolved_path);
     if (std.mem.endsWith(u8, resolved_path, ".so") or std.mem.endsWith(u8, resolved_path, ".dylib")) {
         const mods = try revo.ffi.loadC(vm, resolved_path);
@@ -1146,88 +1149,7 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
 
 fn resolveOsPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]const u8 {
     if (std.mem.eql(u8, raw_path, "/dev/stdin")) return "/dev/stdin";
-    return vm_path.resolve(raw_path, base_dir, vm.runtime.io, vm.runtime.alloc);
-}
-
-fn resolveImportPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]const u8 {
-    const alloc = vm.runtime.alloc;
-    const io = vm.runtime.io;
-
-    const is_relative = raw_path.len > 0 and raw_path[0] == '.';
-
-    // relative paths (./ or ../): only base_dir
-    if (is_relative) {
-        if (base_dir) |dir| {
-            if (try tryRealPath(raw_path, dir, io, alloc)) |p| return p;
-            const with_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
-            defer alloc.free(with_ext);
-            if (try tryRealPath(with_ext, dir, io, alloc)) |p| return p;
-            const init_path = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
-            defer alloc.free(init_path);
-            if (try tryRealPath(init_path, dir, io, alloc)) |p| return p;
-        }
-        return error.FileNotFound;
-    }
-
-    // absolute paths
-    if (std.fs.path.isAbsolute(raw_path)) {
-        if (try tryRealPath(raw_path, null, io, alloc)) |p| return p;
-        return error.FileNotFound;
-    }
-
-    if (vm.module_dir) |dir| {
-        // bare module name should also resolve adjacent to the importing module too
-        if (try tryRealPath(raw_path, dir, io, alloc)) |p| return p;
-        const md_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
-        defer alloc.free(md_ext);
-        if (try tryRealPath(md_ext, dir, io, alloc)) |p| return p;
-        const md_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
-        defer alloc.free(md_init);
-        if (try tryRealPath(md_init, dir, io, alloc)) |p| return p;
-    }
-
-    if (vm.project_root.len > 0) {
-        if (try tryRealPath(raw_path, vm.project_root, io, alloc)) |p| return p;
-        const pr_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
-        defer alloc.free(pr_ext);
-        if (try tryRealPath(pr_ext, vm.project_root, io, alloc)) |p| return p;
-        const pr_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
-        defer alloc.free(pr_init);
-        if (try tryRealPath(pr_init, vm.project_root, io, alloc)) |p| return p;
-    }
-
-    for (vm.package_path.items) |tmpl| {
-        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
-            try std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ tmpl[0..pos], raw_path, tmpl[pos + 1 ..] })
-        else
-            try alloc.dupe(u8, tmpl);
-        defer alloc.free(sub);
-        if (try tryRealPath(sub, null, io, alloc)) |p| return p;
-        const sub_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{sub});
-        defer alloc.free(sub_ext);
-        if (try tryRealPath(sub_ext, null, io, alloc)) |p| return p;
-        const sub_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{sub});
-        defer alloc.free(sub_init);
-        if (try tryRealPath(sub_init, null, io, alloc)) |p| return p;
-    }
-
-    return error.FileNotFound;
-}
-
-fn tryRealPath(raw_path: []const u8, base_dir: ?[]const u8, io: std.Io, alloc: std.mem.Allocator) !?[]u8 {
-    const resolved = try vm_path.resolve(raw_path, base_dir, io, alloc);
-    defer alloc.free(resolved);
-    var buf: [4096]u8 = undefined;
-    const n = std.Io.Dir.cwd().realPathFile(io, resolved, &buf) catch |err| switch (err) {
-        error.FileNotFound, error.IsDir => return null,
-        else => |e| return e,
-    };
-    const stat = std.Io.Dir.cwd().statFile(io, buf[0..n], .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => |e| return e,
-    };
-    if (stat.kind == .directory) return null;
-    return try alloc.dupe(u8, buf[0..n]);
+    return revo.resolve(raw_path, base_dir, vm.runtime.io, vm.runtime.alloc);
 }
 
 fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode) !void {

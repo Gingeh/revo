@@ -149,17 +149,112 @@ pub fn asIndex(n: f64) error{TypeError}!usize {
     return @as(usize, @intFromFloat(n));
 }
 
-pub const path_utils = struct {
-    pub const Error = error{ OutOfMemory, IoError };
+pub fn resolve(raw_path: []const u8, base_dir: ?[]const u8, io: std.Io, alloc: std.mem.Allocator) error{ OutOfMemory, IoError }![]u8 {
+    if (std.fs.path.isAbsolute(raw_path)) return alloc.dupe(u8, raw_path) catch return error.OutOfMemory;
 
-    pub fn resolve(raw_path: []const u8, base_dir: ?[]const u8, io: std.Io, alloc: std.mem.Allocator) Error![]u8 {
-        if (std.fs.path.isAbsolute(raw_path)) return alloc.dupe(u8, raw_path) catch return error.OutOfMemory;
+    const root_dir = std.Io.Dir.cwd().realPathFileAlloc(io, base_dir orelse ".", alloc) catch return error.IoError;
+    defer alloc.free(root_dir);
+    return std.fs.path.resolve(alloc, &.{ root_dir, raw_path }) catch return error.OutOfMemory;
+}
 
-        const root_dir = std.Io.Dir.cwd().realPathFileAlloc(io, base_dir orelse ".", alloc) catch return error.IoError;
-        defer alloc.free(root_dir);
-        return std.fs.path.resolve(alloc, &.{ root_dir, raw_path }) catch return error.OutOfMemory;
+/// resolve an import path the same way compile-time preload and the runtime
+/// `import` native agree on the canonical file; null when nothing matches
+pub fn resolveImportFile(
+    io: std.Io,
+    alloc: std.mem.Allocator,
+    raw_path: []const u8,
+    module_dir: ?[]const u8,
+    project_root: []const u8,
+    package_path: []const []const u8,
+) !?[]const u8 {
+    // relative paths (./ or ../): only the importing module's directory
+    if (raw_path.len > 0 and raw_path[0] == '.') {
+        if (module_dir) |dir| {
+            if (try probeImportFile(io, alloc, dir, raw_path)) |p| return p;
+            const with_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
+            defer alloc.free(with_ext);
+            if (try probeImportFile(io, alloc, dir, with_ext)) |p| return p;
+            const init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
+            defer alloc.free(init);
+            if (try probeImportFile(io, alloc, dir, init)) |p| return p;
+        }
+        return null;
     }
-};
+
+    // absolute paths
+    if (std.fs.path.isAbsolute(raw_path)) {
+        return probeImportFile(io, alloc, null, raw_path);
+    }
+
+    // bare module names resolve adjacent to the importing module, then the
+    // project root, then package paths
+    if (module_dir) |dir| {
+        if (try probeImportFile(io, alloc, dir, raw_path)) |p| return p;
+        const with_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
+        defer alloc.free(with_ext);
+        if (try probeImportFile(io, alloc, dir, with_ext)) |p| return p;
+        const init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
+        defer alloc.free(init);
+        if (try probeImportFile(io, alloc, dir, init)) |p| return p;
+    }
+
+    if (project_root.len > 0) {
+        if (try probeImportFile(io, alloc, project_root, raw_path)) |p| return p;
+        const pr_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{raw_path});
+        defer alloc.free(pr_ext);
+        if (try probeImportFile(io, alloc, project_root, pr_ext)) |p| return p;
+        const pr_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{raw_path});
+        defer alloc.free(pr_init);
+        if (try probeImportFile(io, alloc, project_root, pr_init)) |p| return p;
+    }
+
+    for (package_path) |tmpl| {
+        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
+            try std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ tmpl[0..pos], raw_path, tmpl[pos + 1 ..] })
+        else
+            try alloc.dupe(u8, tmpl);
+        defer alloc.free(sub);
+        if (try probeImportFile(io, alloc, null, sub)) |p| return p;
+        const sub_ext = try std.fmt.allocPrint(alloc, "{s}.rv", .{sub});
+        defer alloc.free(sub_ext);
+        if (try probeImportFile(io, alloc, null, sub_ext)) |p| return p;
+        const sub_init = try std.fmt.allocPrint(alloc, "{s}/init.rv", .{sub});
+        defer alloc.free(sub_init);
+        if (try probeImportFile(io, alloc, null, sub_init)) |p| return p;
+    }
+
+    return null;
+}
+
+/// does dir/name exist as a regular file? returns its canonical path if so
+fn probeImportFile(
+    io: std.Io,
+    alloc: std.mem.Allocator,
+    dir: ?[]const u8,
+    name: []const u8,
+) !?[]const u8 {
+    const joined = if (dir) |d|
+        std.fs.path.resolve(alloc, &.{ d, name }) catch |err| switch (err) {
+            error.OutOfMemory => |e| return e,
+        }
+    else
+        std.fs.path.resolve(alloc, &.{name}) catch |err| switch (err) {
+            error.OutOfMemory => |e| return e,
+        };
+    defer alloc.free(joined);
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = std.Io.Dir.cwd().realPathFile(io, joined, &buf) catch |err| switch (err) {
+        error.FileNotFound, error.IsDir => return null,
+        else => |e| return e,
+    };
+    // realPathFile returns the dir path instead of IsDir on macos
+    const stat = std.Io.Dir.cwd().statFile(io, buf[0..n], .{}) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => |e| return e,
+    };
+    if (stat.kind == .directory) return null;
+    return try alloc.dupe(u8, buf[0..n]);
+}
 
 /// guaranteed IDs
 pub const core_atoms = vm.core_atoms;
