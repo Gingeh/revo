@@ -43,6 +43,8 @@ const Features = packed struct {
     isocline: bool = false,
     lsp: bool = false,
     regex: bool = false,
+    mimalloc: bool = false,
+    zig_backend: bool = false,
 
     fn isFull(self: Features) bool {
         const info = @typeInfo(Features).@"struct";
@@ -192,15 +194,9 @@ pub fn build(b: *Build) !void {
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
-    const mimalloc_enabled = !is_freestanding and (b.option(
-        bool,
-        "mimalloc",
-        "use mimalloc allocator",
-    ) orelse true);
-
-    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex") orelse
+    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, zig_backend") orelse
         // isocline needs libc, lsp is untested on freestanding
-        if (is_freestanding) "" else "isocline,lsp,regex";
+        if (is_freestanding) "" else "isocline,lsp,regex,mimalloc";
 
     const test_filters = b.option(
         []const []const u8,
@@ -212,6 +208,8 @@ pub fn build(b: *Build) !void {
     const mvzr_dep = b.dependency("mvzr", .{});
 
     const features = getFeatures(features_str);
+
+    const mimalloc_enabled = !is_freestanding and features.mimalloc;
 
     var git_exit_code: u8 = 0; // ignored, but it's a required argument
     const git_output = b.runAllowFail(
@@ -300,9 +298,9 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = effective_optimize,
         .link_libc = !is_freestanding,
-        .imports = &.{
+        .imports = if (features.lsp) &.{
             .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
-        },
+        } else &.{},
     });
     const exe_mod = b.createModule(.{
         .root_source_file = b.path(if (is_freestanding) "src/main_wasm.zig" else "src/main.zig"),
@@ -392,8 +390,15 @@ pub fn build(b: *Build) !void {
         const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
         const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod.? });
 
+        if (features.zig_backend) {
+            lib.use_llvm = false;
+            lib.use_lld = false;
+        }
+
         if (optimize == .Debug) exe.lto = .none;
         exe.rdynamic = true;
+        if (features.zig_backend) exe.use_llvm = false;
+        if (features.zig_backend) exe.use_lld = false;
         if (builtin.os.tag == .linux and with_glibc) {
             exe.use_llvm = true;
             exe.use_lld = true;
