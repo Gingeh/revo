@@ -872,31 +872,56 @@ inline fn execFiberDispatch(
         },
         .call => {
             self.callRegister(instr) catch |e| switch (e) {
-                error.Parked => break :dispatch,
+                error.Parked => {
+                    if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                        continue :dispatch instr.op;
+                    }
+                    break :dispatch;
+                },
                 else => return self.evalFailure(e),
             };
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
 
-            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) break :dispatch;
+            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) {
+                if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                    continue :dispatch instr.op;
+                }
+                break :dispatch;
+            }
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .call_field => {
             execCallField(self, regs, base, instr) catch |e| switch (e) {
-                error.Parked => break :dispatch,
+                error.Parked => {
+                    if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                        continue :dispatch instr.op;
+                    }
+                    break :dispatch;
+                },
                 else => return self.evalFailure(e),
             };
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
 
-            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) break :dispatch;
+            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) {
+                if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                    continue :dispatch instr.op;
+                }
+                break :dispatch;
+            }
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .ret => {
             self.returnRegister(instr) catch |e| return self.evalFailure(e);
-            if (fiber.frames.items.len == 0) break :dispatch;
+            if (fiber.frames.items.len == 0) {
+                if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                    continue :dispatch instr.op;
+                }
+                break :dispatch;
+            }
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
 
@@ -932,13 +957,30 @@ inline fn execFiberDispatch(
                 self.sched.parkCurrentWithResult(.{ .join = target_id }, base + instr.a);
             }
 
-            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) break :dispatch;
+            if (if (comptime use_depth) fiber.frames.items.len <= target_depth else !fiber.running) {
+                if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                    continue :dispatch instr.op;
+                }
+                break :dispatch;
+            }
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .yield => {
             self.sched.setFiberState(self.sched.current_fiber, .ready);
             fiber.running = false;
+            if (comptime use_depth) break :dispatch;
+            if (self.sched.ring_head == self.sched.ring_tail) {
+                // nothing else runnable
+                // keep running in place instead of a round trip through runq
+                fiber.running = true;
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            }
+            try self.sched.enqueueRunnable(self.sched.current_fiber);
+            if (switchOrStop(self, false, &fiber, &regs, &base, &instr)) {
+                continue :dispatch instr.op;
+            }
             break :dispatch;
         },
         .halt => {
@@ -947,6 +989,9 @@ inline fn execFiberDispatch(
             try self.push(result);
             fiber.running = false;
             self.sched.setFiberState(self.sched.current_fiber, .dead);
+            if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
+                continue :dispatch instr.op;
+            }
             break :dispatch;
         },
         .range_init => {
@@ -1111,6 +1156,24 @@ inline fn fetchNext(fiber: *VM.Fiber, instr: *Instruction) bool {
     instr.* = fiber.program[fiber.pc];
     fiber.pc += 1;
     return true;
+}
+
+inline fn switchOrStop(
+    self: *VM,
+    comptime use_depth: bool,
+    fiber: **VM.Fiber,
+    regs: *[]Data,
+    base: *usize,
+    instr: *Instruction,
+) bool {
+    if (comptime use_depth) return false;
+    if (self.sched.switchNext()) {
+        fiber.* = self.currentFiber();
+        base.* = fiber.*.top_base;
+        regs.* = fiber.*.registers[0..fiber.*.registers_len];
+        return fetchNext(fiber.*, instr);
+    }
+    return false;
 }
 
 //

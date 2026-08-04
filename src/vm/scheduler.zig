@@ -322,6 +322,19 @@ pub inline fn dequeueRunnable(self: *@This()) ?FiberID {
     return fid;
 }
 
+/// used by dispatcher to switch fibers inplace instead of unwinding run loop
+pub inline fn switchNext(self: *@This()) bool {
+    while (self.dequeueRunnable()) |fid| {
+        const fiber = &self.fibers.items[fid];
+        if (fiber.state == .dead) continue;
+        self.current_fiber = fid;
+        self.setFiberState(fid, .running);
+        fiber.running = true;
+        return true;
+    }
+    return false;
+}
+
 /// mark a fiber as dead and wake all its waiters
 pub fn finishFiber(self: *@This(), fid: FiberID, result: Data) !void {
     var fiber = &self.fibers.items[fid];
