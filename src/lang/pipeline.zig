@@ -445,9 +445,11 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         &type_annotations,
         .{ .ptr = &pipeline_resolver, .resolveFn = PipelineResolver.resolve },
     )) |semantic_err| {
+        // the original report is arena-owned inside semantic.analyze; copy it
+        // out and take ownership of the source text (deinitError frees it)
         var copied = try semantic_err.semantic.report.copy(vm.runtime.diag_alloc);
-        copied.source_name = source.name;
-        copied.source = source.text;
+        if (source.name) |name| copied.source_name = try vm.runtime.diag_alloc.dupe(u8, name);
+        copied.source = try vm.runtime.diag_alloc.dupe(u8, source.text);
         deinitError(vm.runtime.alloc, semantic_err);
         return .{ .err = .{ .semantic = .{ .kind = semantic_err.semantic.kind, .report = copied } } };
     }

@@ -327,7 +327,7 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
             return fmt(buf, "r{d}, r{d}, :{s}", .{ a, b, name });
         },
         .slice => return fmt(buf, "r{d}, r{d}, r{d}, r{d}, r{d}", .{ a, b, b + 1, b + 2, b + 3 }),
-        .struct_new => return fmt(buf, "r{d}, type#{d}", .{ a, bx }),
+        .struct_init => return fmt(buf, "r{d}, r{d}, type#{d}", .{ a, b, bx }),
         .struct_set_method => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }),
         .struct_get_offset => return fmt(buf, "r{d}, r{d}, off#{d}", .{ a, b, bx }),
         .struct_set_offset => return fmt(buf, "r{d}, off#{d}, r{d}", .{ a, bx, c }),

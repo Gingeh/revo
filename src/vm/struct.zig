@@ -10,7 +10,6 @@ pub const StructTypeID = usize;
 
 pub const StructField = struct {
     name_atom: memory.AtomID,
-    type_atom: ?memory.AtomID = null,
     default_val: ?Data = null,
 };
 

@@ -133,7 +133,10 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
         .load_global, .load_stdlib_global, .load_upval, .closure => bc = .{ .op = op, .a = r, .bx = bxi },
         .load_local => bc = .{ .op = op, .a = r, .b = @intCast(bx) },
         .table_new => bc = .{ .op = op, .a = r },
-        .struct_new => bc = .{ .op = op, .a = r, .bx = bxi },
+        .struct_init => {
+            const b = if (inst.operands.len >= 1) valueReg(inst.operands[0]) else r;
+            bc = .{ .op = op, .a = r, .b = b, .bx = bxi };
+        },
         .load_nil => bc = .{ .op = op, .a = r },
         .load_small_int => bc = .{ .op = op, .a = r, .bx = bxi },
         .load_const => bc = .{ .op = op, .a = r, .bx = bxi },

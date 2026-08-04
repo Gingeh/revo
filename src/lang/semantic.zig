@@ -91,6 +91,7 @@ const SemanticChecker = struct {
     scopes: std.ArrayList(Scope),
     type_aliases: std.StringHashMap(types_mod.TypeInfo),
     struct_layouts: std.StringHashMap([]const struct_layout.FieldDef),
+    struct_optional_fields: std.StringHashMap(std.StringHashMap(void)),
     fn_sigs: std.ArrayList(*FnSig),
     return_types: std.ArrayList(types_mod.TypeInfo),
     type_map: ?*std.StringHashMap(types_mod.TypeInfo),
@@ -117,6 +118,7 @@ const SemanticChecker = struct {
             .scopes = try .initCapacity(alloc, 4),
             .type_aliases = .init(alloc),
             .struct_layouts = .init(alloc),
+            .struct_optional_fields = .init(alloc),
             .fn_sigs = try .initCapacity(alloc, 4),
             .return_types = try .initCapacity(alloc, 4),
             .type_map = type_map,
@@ -625,6 +627,7 @@ const SemanticChecker = struct {
         _ = span;
         var seen = std.StringHashMap(void).init(self.alloc);
         var fields = try std.ArrayList(struct_layout.FieldDef).initCapacity(self.alloc, def.items.len);
+        var optional = std.StringHashMap(void).init(self.alloc);
 
         for (def.items) |item| switch (item) {
             .field => |field| {
@@ -637,6 +640,7 @@ const SemanticChecker = struct {
                     continue;
                 }
                 try seen.put(field.name, {});
+                if (field.default_value) |_| try optional.put(field.name, {});
                 const field_type: types_mod.TypeInfo = if (field.type_name) |tn|
                     try type_parser.evalTypeExpr(self, tn)
                 else if (field.default_value) |dflt|
@@ -659,6 +663,7 @@ const SemanticChecker = struct {
 
         const slice = try fields.toOwnedSlice(self.alloc);
         try self.struct_layouts.put(def.name, slice);
+        try self.struct_optional_fields.put(def.name, optional);
         try self.declare(def.name, .{ .struct_type = def.name });
         return .{ .struct_type = def.name };
     }
@@ -934,7 +939,6 @@ const SemanticChecker = struct {
     }
 
     fn analyzeCall(self: *SemanticChecker, call: anytype, span: ast.Span) !types_mod.TypeInfo {
-        _ = span;
         if (call.callee.expr == .field) {
             _ = try self.analyzeNode(call.callee.expr.field.object);
         }
@@ -946,13 +950,25 @@ const SemanticChecker = struct {
                 for (call.args) |arg| _ = try self.analyzeNode(arg);
                 return .any;
             };
-            if (call.args.len > 0 and call.args[0].expr == .table) {
+            const optional_fields = self.struct_optional_fields.get(struct_name);
+            var provided = std.StringHashMap(void).init(self.alloc);
+            var dynamic_entries = false;
+            if (call.args.len == 1 and call.args[0].expr == .table) {
                 const table_entries = call.args[0].expr.table;
                 for (table_entries) |entry| {
-                    const key = entry.key orelse continue;
-                    if (key.expr != .ident) continue;
+                    const key = entry.key orelse {
+                        dynamic_entries = true;
+                        continue;
+                    };
+                    if (key.expr != .ident) {
+                        dynamic_entries = true;
+                        continue;
+                    }
+                    var found = false;
                     for (layout) |fd| {
                         if (!std.mem.eql(u8, fd.name, key.expr.ident)) continue;
+                        found = true;
+                        try provided.put(fd.name, {});
                         if (fd.field_type == .any) break;
                         const actual = types_mod.inferExprType(self, entry.value);
                         if (!types_mod.canCoerce(actual, fd.field_type)) {
@@ -968,6 +984,30 @@ const SemanticChecker = struct {
                         }
                         break;
                     }
+                    if (!found) {
+                        try self.appendError(
+                            try std.fmt.allocPrint(self.alloc, "unknown field `{s}` for struct `{s}`", .{
+                                key.expr.ident, struct_name,
+                            }),
+                            key.span,
+                            "unknown field",
+                        );
+                    }
+                }
+            }
+            if ((call.args.len == 0 or (call.args.len == 1 and call.args[0].expr == .table)) and !dynamic_entries) {
+                for (layout) |fd| {
+                    if (optional_fields) |opts| {
+                        if (opts.contains(fd.name)) continue;
+                    }
+                    if (provided.contains(fd.name)) continue;
+                    try self.appendError(
+                        try std.fmt.allocPrint(self.alloc, "missing field `{s}` for struct `{s}`", .{
+                            fd.name, struct_name,
+                        }),
+                        span,
+                        "missing field",
+                    );
                 }
             }
             for (call.args) |arg| _ = try self.analyzeNode(arg);

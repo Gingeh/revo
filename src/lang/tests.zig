@@ -1606,21 +1606,6 @@ test "compile time span for struct constructor type error points at constructor 
     , .ParseError);
 }
 
-test "runtime span for struct field assignment type error points at assignment" {
-    try t.expectRuntimeFailure(
-        \\ struct User {
-        \\     age: number = 0
-        \\ }
-        \\ let user = User {}
-        \\ user.age = "old"
-    ,
-        .TypeError,
-        5,
-        2,
-        "field `age` on `User` wants number, got string",
-    );
-}
-
 test "runtime report includes tuple index detail" {
     try t.expectRuntimeFailure(
         \\ const f = fn() (1,)
@@ -1895,13 +1880,6 @@ test "struct fields are mutable" {
         \\ let user = User {}
         \\ user.name = "bea"
     , .Panic, "unknown field `name` for struct `User`");
-    try t.expectRuntimeFailureWithMessage(
-        \\ struct User {
-        \\     age: number = 0,
-        \\ }
-        \\ let user = User {}
-        \\ user.age = "old"
-    , .TypeError, "field `age` on `User` wants number, got string");
     try t.topNumber(
         \\ struct User {
         \\     name: string,
@@ -1945,26 +1923,74 @@ test "defaulted struct fields fill in missing values" {
     , 15);
 }
 
+test "struct field types are checked at compile time" {
+    try t.topNumber(
+        \\ struct Inner { v: number }
+        \\ struct User {
+        \\     name: string,
+        \\     tag: atom,
+        \\     fn_ty: function,
+        \\     tbl: table,
+        \\     tup: tuple,
+        \\     inner: Inner,
+        \\ }
+        \\ const u = User { name = "a", tag = :ok, fn_ty = fn() 1, tbl = {}, tup = (1, 2), inner = Inner { v = 3 } }
+        \\ u.inner.v
+    , 3);
+    try t.expectCompileError(
+        \\ struct User { name: string }
+        \\ User { name = :ok }
+    , .ParseError);
+    try t.expectCompileError(
+        \\ struct User { fn_ty: function }
+        \\ User { fn_ty = 1 }
+    , .ParseError);
+    try t.expectCompileError(
+        \\ struct User { tbl: table }
+        \\ User { tbl = (1, 2) }
+    , .ParseError);
+    try t.expectCompileError(
+        \\ struct Inner { v: number }
+        \\ struct User { inner: Inner }
+        \\ User { inner = 42 }
+    , .ParseError);
+}
+
 test "structs reject bad inputs" {
-    try t.expectRuntimeFailureWithMessage(
+    try t.expectCompileError(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
         \\ }
         \\ User()
-    , .Panic, "missing field `name` for struct `User`");
-    try t.expectRuntimeFailureWithMessage(
+    , .ParseError);
+    try t.expectCompileError(
         \\ struct User {
         \\     name: string,
         \\     age: number = 0,
         \\ }
         \\ User { age = 12 }
+    , .ParseError);
+    try t.expectCompileError(
+        \\ struct User {
+        \\     name: string
+        \\ }
+        \\ User { name = "ana", age = 12 }
+    , .ParseError);
+    try t.expectRuntimeFailureWithMessage(
+        \\ struct User {
+        \\     name: string,
+        \\     age: number = 0,
+        \\ }
+        \\ let t = { age = 12 }
+        \\ User(t)
     , .Panic, "missing field `name` for struct `User`");
     try t.expectRuntimeFailureWithMessage(
         \\ struct User {
         \\     name: string
         \\ }
-        \\ User { name = "ana", age = 12 }
+        \\ let t = { name = "ana", age = 12 }
+        \\ User(t)
     , .Panic, "unknown field `age` for struct `User`");
     try t.expectCompileError(
         \\ struct User {

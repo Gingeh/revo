@@ -486,15 +486,8 @@ pub fn compileStruct(
         var fields = try std.ArrayList(revo.vm.struct_mod.StructField).initCapacity(self.alloc, field_slice.len);
         defer fields.deinit(self.alloc);
         for (field_slice) |d| {
-            const type_atom: ?revo.AtomID = if (d.type_name) |tn|
-                try self.vm.internAtom(tn)
-            else if (d.field_type != .any)
-                try self.vm.internAtom(types_mod.typeName(d.field_type))
-            else
-                null;
             try fields.append(self.alloc, .{
                 .name_atom = try self.vm.internAtom(d.name),
-                .type_atom = type_atom,
                 .default_val = d.default_val,
             });
         }

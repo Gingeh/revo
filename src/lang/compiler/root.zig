@@ -396,7 +396,7 @@ pub const Compiler = struct {
                 result_reg = try toRegister(d - 1);
                 try self.recordStackOp(op, 1, 1, result_reg, op_arg);
             },
-            .load_global, .load_stdlib_global, .load_local, .load_upval, .closure, .table_new, .struct_new, .load_nil, .load_small_int, .load_const => {
+            .load_global, .load_stdlib_global, .load_local, .load_upval, .closure, .table_new, .load_nil, .load_small_int, .load_const => {
                 result_reg = try toRegister(d);
                 d += 1;
                 try self.recordStackOp(op, 0, 1, result_reg, op_arg);
@@ -470,7 +470,7 @@ pub const Compiler = struct {
                 d -= 2;
                 try self.recordStackOp(op, 3, 0, result_reg, 0);
             },
-            .table_get_atom, .tuple_get_const, .struct_get_offset => {
+            .table_get_atom, .tuple_get_const, .struct_get_offset, .struct_init => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 try self.recordStackOp(op, 1, 1, result_reg, op_arg);
@@ -966,6 +966,7 @@ pub const Compiler = struct {
                 try self.emit(.call_field, @intCast(argc));
             },
             .ident => |fn_name| {
+                if (try self.tryCompileStructInit(call)) return;
                 const reordered_args = try validateCallArgs(
                     self,
                     fn_name,
@@ -1018,6 +1019,36 @@ pub const Compiler = struct {
                 );
             },
         }
+    }
+
+    fn tryCompileStructInit(
+        self: *Compiler,
+        call: anytype,
+    ) InternalLowerError!bool {
+        if (call.implicit_self or call.type_args.len > 0) return false;
+        const callee_type = type_check.inferExprType(self, call.callee);
+        if (callee_type != .struct_type) return false;
+        const type_id = self.vm.struct_types.findTypeByName(
+            callee_type.struct_type,
+        ) orelse return false;
+
+        if (call.args.len > 1) {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "struct `{s}` expects at most 1 init table, got {d}",
+                .{ callee_type.struct_type, call.args.len },
+            );
+            return self.fail(.CompileError, call.callee, msg);
+        }
+        if (call.args.len == 1) {
+            try self.compile(call.args[0], true);
+        } else {
+            try self.@"const"(
+                Data.new.core(.undef),
+            );
+        }
+        try self.emit(.struct_init, @intCast(type_id));
+        return true;
     }
 
     fn tryCompileBoundMethodCall(

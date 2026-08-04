@@ -733,15 +733,12 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        .struct_new => {
+        .struct_init => {
             const type_id: revo.StructTypeID = instr.bx;
-            const desc = self.struct_types.getType(type_id) orelse
-                return self.fail(error.Panic, "invalid struct type", .{});
-            const instance_id = try self.struct_instances.create(type_id, desc.fields.len);
-            const instance = self.structGetInstance(instance_id) catch return self.evalFailure(error.Panic);
-            for (desc.fields, 0..) |f, i| {
-                if (f.default_val) |dv| instance.fields[i] = dv;
-            }
+            const instance_id = self.structInitInstance(
+                type_id,
+                regRead(regs, base, instr.b),
+            ) catch |e| return self.evalFailure(e);
             regWrite(regs, base, instr.a, Data.new.structVal(instance_id));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;

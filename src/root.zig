@@ -269,7 +269,6 @@ pub fn printBuildError(gpa: std.mem.Allocator, source_info: lang.Source, err: la
     defer buf.deinit();
     lang.renderError(gpa, &buf.writer, source_info, err) catch {};
     std.debug.print("{s}", .{buf.written()});
-    lang.deinitError(gpa, err);
 }
 
 pub fn printEvalError(gpa: std.mem.Allocator, source: []const u8, failure: EvalFailure) void {

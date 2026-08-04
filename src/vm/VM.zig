@@ -1622,15 +1622,11 @@ pub fn callRegister(
     );
 }
 
-fn callStructConstructor(
+pub fn structInitInstance(
     self: *VM,
     type_id: revo.StructTypeID,
-    instr: Instruction,
-    base: usize,
-    callee_slot: usize,
-    argc: usize,
-) EvalError!void {
-    const fiber = self.currentFiber();
+    init_data: Data,
+) EvalError!revo.StructInstanceID {
     const desc = self.struct_types.getType(type_id) orelse {
         try self.setRuntimeMessage("invalid struct type");
         return error.Panic;
@@ -1647,27 +1643,25 @@ fn callStructConstructor(
             instance.fields[i] = dv;
     }
 
-    if (argc > 1) {
+    // undef means "no init table"
+    // anything else must be a table
+    const is_no_table = if (init_data.asAtom()) |atom|
+        atom == revo.core_atoms.undef.atomId()
+    else
+        false;
+    const init_id = init_data.asTable();
+    if (init_id == null and !is_no_table) {
         try self.setRuntimeMessageFmt(
-            "struct `{s}` expects at most 1 init table, got {}",
-            .{ desc.name, argc },
+            "struct `{s}` expects an init table, got {s}",
+            .{
+                desc.name,
+                revo.std_lib.typeof(init_data),
+            },
         );
         return error.TypeError;
     }
-
-    if (argc == 1) {
-        const init_data = fiber.registers[callee_slot + 1];
-        const init_id = init_data.asTable() orelse {
-            try self.setRuntimeMessageFmt(
-                "struct `{s}` expects an init table, got {s}",
-                .{
-                    desc.name,
-                    revo.std_lib.typeof(init_data),
-                },
-            );
-            return error.TypeError;
-        };
-        const init_table = try self.tables.get(init_id);
+    if (init_id) |init_table_id| {
+        const init_table = try self.tables.get(init_table_id);
         for (desc.fields, 0..) |f, i| {
             if (init_table.getRaw(
                 Data.new.atom(f.name_atom),
@@ -1711,50 +1705,47 @@ fn callStructConstructor(
             );
             return error.Panic;
         }
-        if (f.type_atom) |expected_atom| {
-            const val = instance.fields[i];
-            if (!self.structFieldValueMatches(
-                expected_atom,
-                val,
-            )) {
-                try self.setRuntimeMessageFmt(
-                    "field `{s}` on `{s}` wants {s}, got {s}",
-                    .{
-                        self.atomName(f.name_atom),
-                        desc.name,
-                        self.atomName(expected_atom),
-                        revo.std_lib.typeof(val),
-                    },
-                );
-                return error.TypeError;
-            }
-        }
     }
+
+    return instance_id;
+}
+
+fn callStructConstructor(
+    self: *VM,
+    type_id: revo.StructTypeID,
+    instr: Instruction,
+    base: usize,
+    callee_slot: usize,
+    argc: usize,
+) EvalError!void {
+    const fiber = self.currentFiber();
+
+    if (argc > 1) {
+        const desc = self.struct_types.getType(type_id) orelse {
+            try self.setRuntimeMessage("invalid struct type");
+            return error.Panic;
+        };
+        try self.setRuntimeMessageFmt(
+            "struct `{s}` expects at most 1 init table, got {}",
+            .{ desc.name, argc },
+        );
+        return error.TypeError;
+    }
+
+    const init_data: Data = if (argc == 1)
+        fiber.registers[callee_slot + 1]
+    else
+        revo.Data.new.core(.undef);
+
+    const instance_id = try self.structInitInstance(type_id, init_data);
 
     try self.ensureAbsoluteSlot(base + instr.c);
     try self.writeRegisterFast(base, instr.c, Data.new.structVal(instance_id));
 }
 
-fn structFieldValueMatches(
-    _: *VM,
-    expected_atom: revo.memory.AtomID,
-    value: Data,
-) bool {
-    if (expected_atom == revo.core_atoms.bool.atomId()) {
-        const true_id = revo.core_atoms.atomId(.true);
-        const false_id = revo.core_atoms.atomId(.false);
-        return if (value.asAtom()) |v|
-            v == true_id or v == false_id
-        else
-            false;
-    }
-    for (&[_]revo.core_atoms{ .num, .number, .int, .integer, .float }) |at| {
-        if (expected_atom == @intFromEnum(at))
-            return value.isNumber();
-    }
-    // some amount of work is done at compile-time to ignore complex types
-    return true;
-}
+
+
+
 
 pub fn setStructField(
     self: *VM,
@@ -1789,23 +1780,6 @@ pub fn setStructField(
         self.structCacheInsert(instance.type_id, field_atom, false, @intCast(i), Data.new.nil());
         break :blk i;
     };
-    if (desc.fields[idx].type_atom) |expected_atom| {
-        if (!self.structFieldValueMatches(
-            expected_atom,
-            value,
-        )) {
-            try self.setRuntimeMessageFmt(
-                "field `{s}` on `{s}` wants {s}, got {s}",
-                .{
-                    self.atomName(field_atom),
-                    desc.name,
-                    self.atomName(expected_atom),
-                    revo.std_lib.typeof(value),
-                },
-            );
-            return error.TypeError;
-        }
-    }
     instance.fields[idx] = value;
     return true;
 }

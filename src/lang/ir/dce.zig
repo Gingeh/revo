@@ -34,7 +34,7 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         // zig fmt: off
         .jump, .yield,
         .load_global, .load_stdlib_global, .load_local, .load_upval,
-        .closure, .table_new, .struct_new, .load_nil, .load_small_int,
+        .closure, .table_new, .load_nil, .load_small_int,
         .load_const => return 0,
 
         .move => {
@@ -79,7 +79,7 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
 
         // the object register comes from the operand, not the result register:
         // a peephole may point the read at an earlier live load of the object
-        .table_get_atom, .struct_get_offset => {
+        .table_get_atom, .struct_get_offset, .struct_init => {
             if (inst.operands.len >= 1) {
                 out[0] = ir.valueReg(inst.operands[0]);
             } else out[0] = r;
@@ -183,7 +183,7 @@ fn isSideEffect(op: Opcode) bool {
         // zig fmt: off
         .store_global, .store_global_const, .store_local, .bind_local,
         .store_upval, .table_set, .table_set_atom, .struct_set_method,
-        .struct_set_offset, .call, .call_field, .spawn,
+        .struct_set_offset, .struct_init, .call, .call_field, .spawn,
         .join, .yield, .ret, .halt,
         .range_init, .unwrap_result
         // zig fmt: on
