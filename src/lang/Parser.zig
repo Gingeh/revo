@@ -1123,7 +1123,15 @@ fn parseQuasiquote(self: *Parser, token: Token) anyerror!*Node {
         }
     }
 
-    const inner = try lang.parseSource(self.alloc, modified.items);
+    // parse tmpl with origin at backtick token so inner node
+    // spans land in real src coords
+    // `%x` -> `__qq_N` rewrites shift
+    // byte offsets after first splice, so those are approx
+    const inner = try parseTokens(self.alloc, try lexer.lexAt(self.alloc, modified.items, .{
+        .offset = token.start + 1,
+        .line = token.line,
+        .column = token.column + 1,
+    }));
     return self.allocExpr(token.span(), .{ .quasiquote = .{
         .inner = inner,
         .splices = try splices.toOwnedSlice(self.alloc),
@@ -1862,51 +1870,39 @@ fn parseInterpolatedString(self: *Parser, token: Token) anyerror!*Node {
     }
 
     var literal_start: usize = 0;
-    var i: usize = 0;
-    while (i < token.text.len) {
-        if (token.text[i] == '\\') {
-            i += @min(@as(usize, 2), token.text.len - i);
-            continue;
-        }
-        if (token.text[i] == '{' and i + 1 < token.text.len and token.text[i + 1] == '{') {
-            try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
-            try format.append(self.alloc, '{');
-            i += 2;
-            literal_start = i;
-            continue;
-        }
-        if (token.text[i] == '}' and i + 1 < token.text.len and token.text[i + 1] == '}') {
-            try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
-            try format.append(self.alloc, '}');
-            i += 2;
-            literal_start = i;
-            continue;
-        }
-        if (token.text[i] != '{') {
-            i += 1;
-            continue;
-        }
-
-        const end = interpolationEnd(token.text, i) orelse {
+    // the lexer records every real interpolation `{` with its decoded index
+    // and source position; literal braces (`{{`, `\{`) never get an entry
+    //
+    // nested braces inside a body do, so skip opens already inside a span
+    for (token.interp_opens) |open| {
+        if (open.idx < literal_start) continue;
+        const end = interpolationEnd(token.text, open.idx) orelse {
             try self.recordError(.UnexpectedToken, "unterminated string interpolation", token.span());
             return self.allocExpr(token.span(), .{ .string = token.text });
         };
-        try appendFormatLiteral(&format, self.alloc, token.text[literal_start..i]);
+        try appendFormatLiteral(&format, self.alloc, token.text[literal_start..open.idx]);
 
-        var body = std.mem.trim(u8, token.text[i + 1 .. end], " \t\r\n");
+        var body = token.text[open.idx + 1 .. end];
         var mode: InterpolationMode = .display;
-        if (body.len >= 2) {
-            if (interpolationMode(body[body.len - 2 ..])) |found| {
+        const trailing = std.mem.trimEnd(u8, body, " \t\r\n");
+        if (trailing.len >= 2) {
+            if (interpolationMode(trailing[trailing.len - 2 ..])) |found| {
                 mode = found;
-                body = std.mem.trim(u8, body[0 .. body.len - 2], " \t\r\n");
+                body = body[0 .. trailing.len - 2];
             }
         }
-        if (body.len == 0) {
+        if (std.mem.trim(u8, body, " \t\r\n").len == 0) {
             try self.recordError(.UnexpectedToken, "empty string interpolation", token.span());
             return self.allocExpr(token.span(), .{ .string = token.text });
         }
 
-        const embedded_tokens = try lexer.lex(self.alloc, body);
+        // lex the body as a fragment anchored at the `{`; tokens come out
+        // with real source positions, so node spans need no rebasing
+        const embedded_tokens = try lexer.lexAt(self.alloc, body, .{
+            .offset = open.offset + 1,
+            .line = open.line,
+            .column = open.column + 1,
+        });
         const value = try parseTokens(self.alloc, embedded_tokens);
         try args.append(self.alloc, value);
         try format.appendSlice(self.alloc, switch (mode) {
@@ -1914,8 +1910,7 @@ fn parseInterpolatedString(self: *Parser, token: Token) anyerror!*Node {
             .debug => "%?",
             .pretty => "%p",
         });
-        i = end + 1;
-        literal_start = i;
+        literal_start = end + 1;
     }
 
     try appendFormatLiteral(&format, self.alloc, token.text[literal_start..]);
@@ -2038,6 +2033,77 @@ test "parses string interpolation as fmt calls" {
     try testing.expectPrinted("\"hello {name}\"", "(call fmt \"hello %v\" name)");
     try testing.expectPrinted("\"{value:?} {value:p}\"", "(call fmt \"%? %p\" value value)");
     try testing.expectPrinted("\"literal {{brace}}\"", "\"literal {brace}\"");
+}
+
+test "interpolation value nodes carry real source spans" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "print \"hi {name}\"");
+    const root = try parseTokens(alloc, tokens);
+    const value = root.expr.call.args[0].expr.call.args[1];
+    try std.testing.expectEqual(@as(u32, 1), value.span.line);
+    try std.testing.expectEqual(@as(u32, 12), value.span.column);
+    try std.testing.expectEqual(@as(usize, 11), value.span.start);
+    try std.testing.expectEqual(@as(usize, 15), value.span.end);
+}
+
+test "interpolation spans survive multiline dedent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src =
+        \\print """
+        \\  {a}
+        \\  {b}"""
+    ;
+    const tokens = try lexer.lex(alloc, src);
+    const root = try parseTokens(alloc, tokens);
+    const call = root.expr.call.args[0].expr.call;
+    try std.testing.expectEqual(@as(usize, 3), call.args.len);
+    const a = call.args[1];
+    const b = call.args[2];
+    try std.testing.expectEqual(@as(u32, 2), a.span.line);
+    try std.testing.expectEqual(@as(u32, 4), a.span.column);
+    try std.testing.expectEqual(@as(usize, 13), a.span.start);
+    try std.testing.expectEqual(@as(usize, 14), a.span.end);
+    try std.testing.expectEqual(@as(u32, 3), b.span.line);
+    try std.testing.expectEqual(@as(u32, 4), b.span.column);
+    try std.testing.expectEqual(@as(usize, 19), b.span.start);
+    try std.testing.expectEqual(@as(usize, 20), b.span.end);
+}
+
+test "interpolation spans survive nested strings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "print \"a { \\\"b {c}\\\" } d\"");
+    const root = try parseTokens(alloc, tokens);
+    const outer = root.expr.call.args[0].expr.call;
+    const inner = outer.args[1].expr.call;
+    const c = inner.args[1];
+    try std.testing.expectEqual(@as(u32, 1), c.span.line);
+    try std.testing.expectEqual(@as(u32, 16), c.span.column);
+    try std.testing.expectEqual(@as(usize, 15), c.span.start);
+    try std.testing.expectEqual(@as(usize, 16), c.span.end);
+}
+
+test "quasiquote inner nodes carry template spans" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "let q = `a + b`");
+    const root = try parseTokens(alloc, tokens);
+    const qq = root.expr.decl.inner.expr.binding.value.expr.quasiquote;
+    const inner = qq.inner;
+    try std.testing.expectEqual(@as(u32, 1), inner.span.line);
+    try std.testing.expectEqual(@as(u32, 10), inner.span.column);
+    try std.testing.expectEqual(@as(usize, 9), inner.span.start);
+    try std.testing.expectEqual(@as(usize, 14), inner.span.end);
 }
 
 test "parses @doc annotation on function declaration" {

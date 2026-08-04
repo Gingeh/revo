@@ -186,10 +186,24 @@ pub const TokenType = enum {
     });
 };
 
+pub const InterpOpen = struct {
+    offset: usize,
+    line: u32,
+    column: u32,
+    idx: usize,
+};
+
+/// absolute src pos please
+pub const Origin = struct {
+    offset: usize = 0,
+    line: u32 = 1,
+    column: u32 = 1,
+};
+
 pub const Token = struct {
     type: TokenType,
     text: []const u8,
-    interp_opens: []const usize = &.{},
+    interp_opens: []const InterpOpen = &.{},
     line: u32,
     column: u32,
     start: usize,
@@ -281,7 +295,15 @@ pub fn identIsFunction(text: []const u8, pos: usize) bool {
 
 // tokenize source into a flat array (errors kill to death)
 pub fn lex(allocator: std.mem.Allocator, source: []const u8) ![]Token {
+    return lexAt(allocator, source, .{});
+}
+
+/// like lex but positions are offset by `origin`
+pub fn lexAt(allocator: std.mem.Allocator, source: []const u8, origin: Origin) ![]Token {
     var lexer = Lexer.init(source, allocator);
+    lexer.base_offset = origin.offset;
+    lexer.line = origin.line;
+    lexer.column = origin.column;
     var tokens = try std.ArrayList(Token).initCapacity(allocator, 32);
     errdefer tokens.deinit(allocator);
 
@@ -296,7 +318,15 @@ pub fn lex(allocator: std.mem.Allocator, source: []const u8) ![]Token {
 
 // tokenize with error recovery (returns LexResult intsead of crashing)
 pub fn lexReport(allocator: std.mem.Allocator, source: []const u8) !LexResult {
+    return lexReportAt(allocator, source, .{});
+}
+
+/// like lexReport but positions are offset by `origin`
+pub fn lexReportAt(allocator: std.mem.Allocator, source: []const u8, origin: Origin) !LexResult {
     var lexer = Lexer.init(source, allocator);
+    lexer.base_offset = origin.offset;
+    lexer.line = origin.line;
+    lexer.column = origin.column;
     var tokens = try std.ArrayList(Token).initCapacity(allocator, 32);
     errdefer tokens.deinit(allocator);
 
@@ -321,6 +351,7 @@ const Lexer = @This();
 source: []const u8,
 alloc: std.mem.Allocator,
 pos: usize = 0, // byte offset in source
+base_offset: usize = 0, // added to emitted start/end for fragments
 line: u32 = 1,
 column: u32 = 1,
 line_start: bool = true, // at start of line (for indent-sensitive tokens)
@@ -453,11 +484,11 @@ fn lexFailure(self: *const Lexer, err: anyerror) LexError {
 
 fn currentSpan(self: *const Lexer) ast.Span {
     if (self.pos == 0) {
-        return .{ .start = 0, .end = 0, .line = self.line, .column = self.column };
+        return .{ .start = self.base_offset, .end = self.base_offset, .line = self.line, .column = self.column };
     }
 
-    const start = self.pos - 1;
-    return .{ .start = start, .end = self.pos, .line = self.line, .column = self.column -| 1 };
+    const start = self.pos - 1 + self.base_offset;
+    return .{ .start = start, .end = self.pos + self.base_offset, .line = self.line, .column = self.column -| 1 };
 }
 
 fn atEnd(self: *Lexer) bool {
@@ -579,11 +610,14 @@ fn lexNumber(self: *Lexer, start: usize, line: u32, column: u32) Token {
 }
 
 fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
-    self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
+    self.pending_error_span = .{ .start = start + self.base_offset, .end = start + 1 + self.base_offset, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
-    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 2);
+    var interp_opens = try std.ArrayList(InterpOpen).initCapacity(self.alloc, 2);
     defer interp_opens.deinit(self.alloc);
+    // decoded `"` (from \" escapes) opens a nested string; braces inside it
+    // are literal, matching interpolationEnd's quote handling
+    var quote: u8 = 0;
     while (!self.atEnd()) {
         const c = self.advance();
         if (c == '\\') {
@@ -595,6 +629,7 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
                     while (self.pos < offset) _ = self.advance();
                     var enc: [4]u8 = undefined;
                     const n = std.unicode.utf8Encode(lit, &enc) catch return error.UnterminatedString;
+                    if (lit == '"') quote = if (quote == 0) '"' else 0;
                     try buf.appendSlice(self.alloc, enc[0..n]);
                 },
                 .failure => {
@@ -615,9 +650,13 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
                 .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
-                .start = start,
-                .end = self.pos,
+                .start = start + self.base_offset,
+                .end = self.pos + self.base_offset,
             };
+        }
+        if (quote != 0) {
+            try buf.append(self.alloc, c);
+            continue;
         }
         if (c == '{') {
             if (!self.atEnd() and self.peek() == '{') {
@@ -625,7 +664,12 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
                 _ = self.advance();
                 continue;
             }
-            try interp_opens.append(self.alloc, self.pos - 1);
+            try interp_opens.append(self.alloc, .{
+                .offset = self.pos - 1 + self.base_offset,
+                .line = self.line,
+                .column = self.column - 1,
+                .idx = buf.items.len,
+            });
         } else if (c == '}') {
             if (!self.atEnd() and self.peek() == '}') {
                 try buf.append(self.alloc, '}');
@@ -640,14 +684,14 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
 
 fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
     self.pending_error_span = .{
-        .start = start,
-        .end = start + 1,
+        .start = start + self.base_offset,
+        .end = start + 1 + self.base_offset,
         .line = line,
         .column = column,
     };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
-    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 0);
+    var interp_opens = try std.ArrayList(InterpOpen).initCapacity(self.alloc, 0);
     defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
@@ -660,8 +704,8 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Toke
                 .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
-                .start = start,
-                .end = self.pos,
+                .start = start + self.base_offset,
+                .end = self.pos + self.base_offset,
             };
         }
         try buf.append(self.alloc, c);
@@ -670,11 +714,14 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Toke
 }
 
 fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
-    self.pending_error_span = .{ .start = start, .end = start + 3, .line = line, .column = column };
+    self.pending_error_span = .{ .start = start + self.base_offset, .end = start + 3 + self.base_offset, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 64);
     defer buf.deinit(self.alloc);
-    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 2);
+    var interp_opens = try std.ArrayList(InterpOpen).initCapacity(self.alloc, 2);
     defer interp_opens.deinit(self.alloc);
+    // decoded `"` (from \" escapes) opens a nested string; braces inside it
+    // are literal, matching interpolationEnd's quote handling
+    var quote: u8 = 0;
     while (!self.atEnd()) {
         if (self.peek() == '"' and self.peekN(1) == '"' and self.peekN(2) == '"') {
             _ = self.advance();
@@ -682,7 +729,15 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             _ = self.advance();
             const raw = try buf.toOwnedSlice(self.alloc);
             self.pending_error_span = null;
-            const text = try dedentMultiline(self.alloc, raw);
+            const dedent = try dedentMultiline(self.alloc, raw);
+            const text = dedent.text;
+            if (dedent.dedented) {
+                // dedent shifts decoded positions: initial \n plus strip per line
+                for (interp_opens.items) |*open| {
+                    const nl_before = std.mem.count(u8, raw[0..open.idx], "\n");
+                    open.idx -|= nl_before * dedent.strip + 1;
+                }
+            }
             self.alloc.free(raw);
             return .{
                 .type = .multiline_string,
@@ -690,18 +745,47 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
                 .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
-                .start = start,
-                .end = self.pos,
+                .start = start + self.base_offset,
+                .end = self.pos + self.base_offset,
             };
         }
         const c = self.advance();
+        if (c == '\\') {
+            if (self.atEnd()) return error.UnterminatedString;
+            const from = self.pos - 1;
+            var offset = from;
+            switch (std.zig.string_literal.parseEscapeSequence(self.source, &offset)) {
+                .success => |lit| {
+                    while (self.pos < offset) _ = self.advance();
+                    var enc: [4]u8 = undefined;
+                    const n = std.unicode.utf8Encode(lit, &enc) catch return error.UnterminatedString;
+                    if (lit == '"') quote = if (quote == 0) '"' else 0;
+                    try buf.appendSlice(self.alloc, enc[0..n]);
+                },
+                .failure => {
+                    try buf.append(self.alloc, '\\');
+                    _ = self.advance();
+                    try buf.append(self.alloc, self.source[self.pos - 1]);
+                },
+            }
+            continue;
+        }
+        if (quote != 0) {
+            try buf.append(self.alloc, c);
+            continue;
+        }
         if (c == '{') {
             if (!self.atEnd() and self.peek() == '{') {
                 try buf.append(self.alloc, '{');
                 _ = self.advance();
                 continue;
             }
-            try interp_opens.append(self.alloc, self.pos - 1);
+            try interp_opens.append(self.alloc, .{
+                .offset = self.pos - 1 + self.base_offset,
+                .line = self.line,
+                .column = self.column - 1,
+                .idx = buf.items.len,
+            });
         } else if (c == '}') {
             if (!self.atEnd() and self.peek() == '}') {
                 try buf.append(self.alloc, '}');
@@ -714,8 +798,8 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
     return error.UnterminatedString;
 }
 
-fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) ![]u8 {
-    if (text.len == 0 or text[0] != '\n') return alloc.dupe(u8, text);
+fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) !struct { text: []u8, strip: usize, dedented: bool } {
+    if (text.len == 0 or text[0] != '\n') return .{ .text = try alloc.dupe(u8, text), .strip = 0, .dedented = false };
 
     const body = text[1..];
     var lines = try std.ArrayList([]const u8).initCapacity(alloc, 8);
@@ -764,14 +848,14 @@ fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) ![]u8 {
         try buf.appendSlice(alloc, line);
     }
 
-    return buf.toOwnedSlice(alloc);
+    return .{ .text = try buf.toOwnedSlice(alloc), .strip = strip, .dedented = true };
 }
 
 fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
-    self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
+    self.pending_error_span = .{ .start = start + self.base_offset, .end = start + 1 + self.base_offset, .line = line, .column = column };
     var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
     defer buf.deinit(self.alloc);
-    var interp_opens = try std.ArrayList(usize).initCapacity(self.alloc, 0);
+    var interp_opens = try std.ArrayList(InterpOpen).initCapacity(self.alloc, 0);
     defer interp_opens.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
@@ -809,8 +893,8 @@ fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token 
                 .interp_opens = try interp_opens.toOwnedSlice(self.alloc),
                 .line = line,
                 .column = column,
-                .start = start,
-                .end = self.pos,
+                .start = start + self.base_offset,
+                .end = self.pos + self.base_offset,
             };
         }
         try buf.append(self.alloc, c);
@@ -827,8 +911,8 @@ fn lexIdent(self: *Lexer, start: usize, line: u32, column: u32) Token {
         .text = text,
         .line = line,
         .column = column,
-        .start = start,
-        .end = self.pos,
+        .start = start + self.base_offset,
+        .end = self.pos + self.base_offset,
     };
 }
 
@@ -840,8 +924,8 @@ fn lexAtIdent(self: *Lexer, start: usize, line: u32, column: u32) Token {
         .text = text,
         .line = line,
         .column = column,
-        .start = start,
-        .end = self.pos,
+        .start = start + self.base_offset,
+        .end = self.pos + self.base_offset,
     };
 }
 
@@ -851,8 +935,8 @@ fn makeToken(self: *Lexer, kind: TokenType, start: usize, end: usize, line: u32,
         .text = self.source[start..end],
         .line = line,
         .column = column,
-        .start = start,
-        .end = end,
+        .start = start + self.base_offset,
+        .end = end + self.base_offset,
     };
 }
 
@@ -924,6 +1008,31 @@ test "marks strings containing interpolation" {
         .{ .t = .string, .v = "hello {name}", .interpolation = false },
         .{ .t = .eof, .v = "" },
     });
+}
+
+test "lexAt reports absolute positions for fragments" {
+    const allocator = std.testing.allocator;
+    const tokens = try lexAt(allocator, "\"hi {name}\"", .{ .offset = 40, .line = 3, .column = 5 });
+    defer {
+        for (tokens) |tok| {
+            if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
+                freeTokenStrings(allocator, tok);
+            }
+        }
+        allocator.free(tokens);
+    }
+
+    try std.testing.expectEqual(@as(usize, 40), tokens[0].start);
+    try std.testing.expectEqual(@as(usize, 51), tokens[0].end);
+    try std.testing.expectEqual(@as(u32, 3), tokens[0].line);
+    try std.testing.expectEqual(@as(u32, 5), tokens[0].column);
+    try std.testing.expectEqual(@as(usize, 1), tokens[0].interp_opens.len);
+    const open = tokens[0].interp_opens[0];
+    try std.testing.expectEqual(@as(usize, 44), open.offset);
+    try std.testing.expectEqual(@as(u32, 3), open.line);
+    try std.testing.expectEqual(@as(u32, 9), open.column);
+    try std.testing.expectEqual(@as(usize, 3), open.idx);
+    try std.testing.expectEqual(@as(usize, 51), tokens[1].start);
 }
 
 test "lexes float numbers and range without conflict" {

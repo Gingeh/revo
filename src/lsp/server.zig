@@ -682,31 +682,28 @@ fn emitInterpolatedStringTokens(
     if (inner_start >= inner_end) return;
 
     var literal_start: usize = inner_start;
-    var open_idx: usize = 0;
 
-    while (open_idx < tok.interp_opens.len) {
-        const open = tok.interp_opens[open_idx];
-        open_idx += 1;
-
-        if (open < literal_start) continue;
+    for (tok.interp_opens) |open| {
+        // the lexer also records nested braces inside an earlier body; skip
+        if (open.offset < literal_start) continue;
 
         // emit literal string part before this {
-        if (open > literal_start) {
-            emitSemanticToken(data, prev_line, prev_col, literal_start, open, tc(.string), source);
+        if (open.offset > literal_start) {
+            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset, tc(.string), source);
         }
 
         // emit { as operator
-        emitSemanticToken(data, prev_line, prev_col, open, open + 1, tc(.operator), source);
+        emitSemanticToken(data, prev_line, prev_col, open.offset, open.offset + 1, tc(.operator), source);
 
         // find matching }
-        const close = interpEnd(source, open, inner_end) orelse {
-            literal_start = open + 1;
+        const close = interpEnd(source, open.offset, inner_end) orelse {
+            literal_start = open.offset + 1;
             continue;
         };
 
         // emit expression body tokens
-        if (close > open + 1) {
-            try emitSubTokens(arena, source, open + 1, close, data, prev_line, prev_col);
+        if (close > open.offset + 1) {
+            try emitSubTokens(arena, source, open, close, data, prev_line, prev_col);
         }
 
         // emit } as operator
@@ -724,14 +721,21 @@ fn emitInterpolatedStringTokens(
 fn emitSubTokens(
     arena: std.mem.Allocator,
     source: []const u8,
-    body_start: usize,
-    body_end: usize,
+    open: lang.InterpOpen,
+    close: usize,
     data: *std.ArrayList(u32),
     prev_line: *u32,
     prev_col: *u32,
 ) !void {
-    const body = source[body_start..body_end];
-    const lexed = lang.lexReport(arena, body) catch return;
+    const body_start = open.offset + 1;
+    const body = source[body_start..close];
+    // lex the body with an origin at the `{` so sub-token offsets come out
+    // absolute in the source already
+    const lexed = lang.lexReportAt(arena, body, .{
+        .offset = body_start,
+        .line = open.line,
+        .column = open.column + 1,
+    }) catch return;
     const sub_tokens = switch (lexed) {
         .ok => |t| t,
         .err => return,
@@ -740,12 +744,10 @@ fn emitSubTokens(
     for (sub_tokens) |st| {
         if (st.type == .eof) break;
         const ctfr = switch (st.type) {
-            .ident => if (lang.identIsFunction(body, st.end)) tc(.function) else tc(.variable),
+            .ident => if (lang.identIsFunction(body, st.end - body_start)) tc(.function) else tc(.variable),
             else => @intFromEnum(st.type.classify() orelse .variable),
         };
-        const start = body_start + st.start;
-        const end = body_start + st.end;
-        emitSemanticToken(data, prev_line, prev_col, start, end, ctfr, source);
+        emitSemanticToken(data, prev_line, prev_col, st.start, st.end, ctfr, source);
     }
 }
 

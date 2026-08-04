@@ -718,7 +718,7 @@ fn renderBoxSpanBlock(
     const top_dashes = @max(@as(usize, 1), first_line.span_col -| display_trim);
     const top_vs = @max(
         @as(usize, 1),
-        (first_line.text.len -| display_trim) - (top_dashes - 1),
+        (first_line.text.len -| display_trim) -| (top_dashes - 1),
     );
     const bottom_dashes = @max(@as(usize, 1), (last_line.span_end -| last_line.span_start) -| display_trim);
     // top edge: box header and caret stem
