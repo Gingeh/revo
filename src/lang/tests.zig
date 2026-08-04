@@ -1860,6 +1860,25 @@ test "structs build struct instances" {
     , "struct");
 }
 
+test "struct methods crash if declared outside struct body" {
+    try t.expectCompileError(
+        \\ struct Counter {
+        \\     n: number,
+        \\ }
+        \\ fn Counter:inc(self) do
+        \\     self.n + 1
+        \\ end
+    , .ParseError);
+    try t.topNumber(
+        \\ struct Counter {
+        \\     n: number,
+        \\     fn inc(self) self.n + 1,
+        \\ }
+        \\ let c = Counter { n = 0 }
+        \\ c:inc()
+    , 1);
+}
+
 test "struct fields are mutable" {
     try t.topNumber(
         \\ struct User {

@@ -890,7 +890,18 @@ const SemanticChecker = struct {
                 }
 
                 const actual_type = try self.analyzeNode(idx.object);
-                if (!types_mod.canCoerce(types_mod.TABLE_GENERIC, actual_type)) {
+                if (actual_type == .struct_type) {
+                    const name_str = actual_type.struct_type;
+                    try self.appendError(
+                        try std.fmt.allocPrint(
+                            self.alloc,
+                            "methods can only be declared inside the definition of `{s}`",
+                            .{name_str},
+                        ),
+                        idx.object.span,
+                        "here",
+                    );
+                } else if (!types_mod.canCoerce(types_mod.TABLE_GENERIC, actual_type)) {
                     const name_str = try actual_type.formatType(self.alloc);
 
                     try self.appendError(
