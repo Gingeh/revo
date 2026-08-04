@@ -900,17 +900,7 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
         .native, .c_function => return closure_id,
     };
 
-    if (closure.upvalues.len == 0) return closure_id;
-
-    const proto = try self.functions.getPrototype(closure.prototype);
-    var shared = true;
-    for (proto.upvalue_specs) |spec| {
-        if (spec.mutable) {
-            shared = false;
-            break;
-        }
-    }
-    if (shared) return closure_id;
+    if (closure.sharable_upvalues) return closure_id;
 
     var detached = try std.ArrayList(root.functions.UpvalueID).initCapacity(
         self.runtime.alloc,
@@ -2005,7 +1995,10 @@ pub inline fn spawnRegister(
         closure.register_count,
     );
 
-    const child_closure_id = try self.detachClosureForFiber(closure_id);
+    const child_closure_id = if (closure.sharable_upvalues)
+        closure_id
+    else
+        try self.detachClosureForFiber(closure_id);
     try child.frames.append(self.runtime.alloc, .{
         .return_addr = @intCast(child.program.len),
         .base = 0,

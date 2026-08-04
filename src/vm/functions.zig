@@ -123,6 +123,8 @@ pub const Closure = struct {
     register_count: RegisterCount,
     name: []const u8,
     upvalues: []UpvalueID,
+    /// true when no captured binding is mutable; spawn shares upvalues instead of detaching
+    sharable_upvalues: bool = false,
 };
 
 pub const Upvalue = struct {
@@ -271,6 +273,13 @@ pub const FunctionPool = struct {
         upvalues: []const UpvalueID,
     ) !mem.FunctionID {
         const proto = try self.getPrototype(prototype_id);
+        var sharable = true;
+        for (proto.upvalue_specs) |spec| {
+            if (spec.mutable) {
+                sharable = false;
+                break;
+            }
+        }
         return self.create(.{ .closure = .{
             .prototype = prototype_id,
             .segment_id = proto.segment_id,
@@ -280,6 +289,7 @@ pub const FunctionPool = struct {
             .register_count = proto.register_count,
             .name = proto.name,
             .upvalues = try self.alloc.dupe(UpvalueID, upvalues),
+            .sharable_upvalues = sharable,
         } });
     }
 
