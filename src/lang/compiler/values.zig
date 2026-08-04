@@ -250,6 +250,10 @@ fn compileAssignSimple(
                 const inferred_type = type_check.inferExprType(self, value);
                 try state.setLocalTypeHint(self, name, inferred_type);
             } else if (try state.resolveUpvalue(self, name)) |slot| {
+                const fn_state = state.currentFunctionState(self) orelse
+                    return self.fail(.CompileError, target, "reassignment to constant!");
+                if (!fn_state.upvalues.items[slot].mutable)
+                    return self.fail(.CompileError, target, "reassignment to constant!");
                 try self.emit(.store_upval, slot);
             } else {
                 if (self.functions.items.len == 1) {

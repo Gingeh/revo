@@ -902,6 +902,16 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
 
     if (closure.upvalues.len == 0) return closure_id;
 
+    const proto = try self.functions.getPrototype(closure.prototype);
+    var shared = true;
+    for (proto.upvalue_specs) |spec| {
+        if (spec.mutable) {
+            shared = false;
+            break;
+        }
+    }
+    if (shared) return closure_id;
+
     var detached = try std.ArrayList(root.functions.UpvalueID).initCapacity(
         self.runtime.alloc,
         closure.upvalues.len,
@@ -1957,6 +1967,11 @@ pub inline fn spawnRegister(
         f.top_base = 0;
         f.open_upvalues.items.len = 0;
         f.waiters.items.len = 0;
+        break :blk fid;
+    } else if (self.sched.free_slots.pop()) |fid| blk: {
+        // buffers were freed at death; re-init the slot
+        const child = try Fiber.init(self.runtime.alloc, fid, child_program, closure.register_count);
+        self.sched.fibers.items[fid] = child;
         break :blk fid;
     } else blk: {
         const fid = self.sched.fibers.items.len;

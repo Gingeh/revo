@@ -101,6 +101,49 @@ pub const SleepWaiter = struct {
     wake_at_ns: u64,
 };
 
+/// min-heap sift helper keyed on wake_at_ns
+fn siftUp(list: *std.ArrayList(SleepWaiter), idx: usize) void {
+    var i = idx;
+    while (i > 0) {
+        const parent = (i - 1) / 2;
+        if (list.items[parent].wake_at_ns <= list.items[i].wake_at_ns) break;
+        std.mem.swap(SleepWaiter, &list.items[parent], &list.items[i]);
+        i = parent;
+    }
+}
+
+/// min-heap sift helper keyed on wake_at_ns
+fn siftDown(list: *std.ArrayList(SleepWaiter), idx: usize) void {
+    var i = idx;
+    while (true) {
+        const left = i * 2 + 1;
+        if (left >= list.items.len) break;
+        const right = left + 1;
+        const smallest = if (right < list.items.len and
+            list.items[right].wake_at_ns < list.items[left].wake_at_ns) right else left;
+        if (list.items[smallest].wake_at_ns >= list.items[i].wake_at_ns) break;
+        std.mem.swap(SleepWaiter, &list.items[i], &list.items[smallest]);
+        i = smallest;
+    }
+}
+
+/// push a sleeper onto the timer heap
+fn pushSleeper(self: *@This(), sleeper: SleepWaiter) !void {
+    try self.sleepers.append(self.alloc, sleeper);
+    siftUp(&self.sleepers, self.sleepers.items.len - 1);
+}
+
+/// pop the earliest sleeper off the timer heap
+fn popSleeper(self: *@This()) ?SleepWaiter {
+    if (self.sleepers.items.len == 0) return null;
+    const top = self.sleepers.items[0];
+    const last = self.sleepers.items.len - 1;
+    self.sleepers.items[0] = self.sleepers.items[last];
+    self.sleepers.items.len = last;
+    if (self.sleepers.items.len > 0) siftDown(&self.sleepers, 0);
+    return top;
+}
+
 pub const IoDispatchResult = struct {
     completed: bool = false,
     woke: bool = false,
@@ -200,6 +243,7 @@ io_waiters: std.ArrayList(WaitEntry),
 channels: std.AutoHashMap(ChannelID, ChannelState),
 waiting_cnt: usize,
 free_fibers: std.ArrayList(FiberID),
+free_slots: std.ArrayList(FiberID),
 
 /// init with a 64-slot runq
 pub fn init(alloc: std.mem.Allocator) !@This() {
@@ -224,6 +268,7 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
         .channels = .init(alloc),
         .waiting_cnt = 0,
         .free_fibers = .empty,
+        .free_slots = .empty,
     };
     self.fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1);
     errdefer self.fibers.deinit(alloc);
@@ -235,6 +280,8 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
     errdefer self.io_waiters.deinit(alloc);
     self.free_fibers = try std.ArrayList(FiberID).initCapacity(alloc, 8);
     errdefer self.free_fibers.deinit(alloc);
+    self.free_slots = try std.ArrayList(FiberID).initCapacity(alloc, 8);
+    errdefer self.free_slots.deinit(alloc);
 
     return self;
 }
@@ -248,6 +295,7 @@ pub fn deinit(self: *@This()) void {
     self.sleepers.deinit(self.alloc);
     self.io_waiters.deinit(self.alloc);
     self.free_fibers.deinit(self.alloc);
+    self.free_slots.deinit(self.alloc);
     var channel_it = self.channels.valueIterator();
     while (channel_it.next()) |channel| channel.deinit(self.alloc);
     self.channels.deinit();
@@ -335,6 +383,12 @@ pub inline fn switchNext(self: *@This()) bool {
     return false;
 }
 
+/// dead fibers kept warm on the free list for reuse; beyond this, buffers
+/// are freed so spawn-heavy programs don't retain a buffer per fiber forever
+const FREE_FIBER_CAP: usize = 256;
+/// buffer-free dead fiber slots kept for id reuse beyond FREE_FIBER_CAP
+const FREE_SLOT_CAP: usize = 1024;
+
 /// mark a fiber as dead and wake all its waiters
 pub fn finishFiber(self: *@This(), fid: FiberID, result: Data) !void {
     var fiber = &self.fibers.items[fid];
@@ -348,37 +402,47 @@ pub fn finishFiber(self: *@This(), fid: FiberID, result: Data) !void {
     fiber.frames.items.len = 0;
     fiber.top_base = 0;
     fiber.open_upvalues.items.len = 0;
-    if (fid != 0) try self.free_fibers.append(self.alloc, fid);
+    if (fid != 0) {
+        if (self.free_fibers.items.len < FREE_FIBER_CAP) {
+            try self.free_fibers.append(self.alloc, fid);
+        } else if (self.free_slots.items.len < FREE_SLOT_CAP) {
+            fiber.deinit(self.alloc);
+            fiber.registers = &.{};
+            fiber.frames = .empty;
+            fiber.open_upvalues = .empty;
+            fiber.waiters = .empty;
+            try self.free_slots.append(self.alloc, fid);
+        } else {
+            // both pools full, keep the slot reusable but drop its buffers
+            fiber.deinit(self.alloc);
+            fiber.registers = &.{};
+            fiber.frames = .empty;
+            fiber.open_upvalues = .empty;
+            fiber.waiters = .empty;
+        }
+    }
 }
 
 /// park current fiber for a duration in ms
 pub fn parkCurrentForSleepMS(self: *@This(), ms: u64, now_ns: u64) !void {
     const wake_at = now_ns + (ms * std.time.ns_per_ms);
-    try self.sleepers.append(self.alloc, .{ .fiber_id = self.current_fiber, .wake_at_ns = wake_at });
+    try self.pushSleeper(.{ .fiber_id = self.current_fiber, .wake_at_ns = wake_at });
     self.parkCurrent(.sleep);
 }
 
 /// wake any fibers whose sleep timer has expired
 pub fn wakeDueSleepers(self: *@This(), now_ns: u64) !void {
-    var i: usize = 0;
-    while (i < self.sleepers.items.len) {
-        const sleeper = self.sleepers.items[i];
-        if (sleeper.wake_at_ns <= now_ns) {
-            _ = self.sleepers.swapRemove(i);
-            try self.wakeFiber(sleeper.fiber_id, null);
-            continue;
-        }
-        i += 1;
+    while (self.sleepers.items.len > 0) {
+        if (self.sleepers.items[0].wake_at_ns > now_ns) break;
+        const sleeper = self.popSleeper() orelse break;
+        try self.wakeFiber(sleeper.fiber_id, null);
     }
 }
 
 // ns until the next sleeper wakes (null if none)
 pub fn nextSleepDelayNs(self: *@This(), now_ns: u64) ?u64 {
     if (self.sleepers.items.len == 0) return null;
-    var min_wake = self.sleepers.items[0].wake_at_ns;
-    for (self.sleepers.items[1..]) |sleeper| {
-        if (sleeper.wake_at_ns < min_wake) min_wake = sleeper.wake_at_ns;
-    }
+    const min_wake = self.sleepers.items[0].wake_at_ns;
     if (min_wake <= now_ns) return 0;
     return min_wake - now_ns;
 }
