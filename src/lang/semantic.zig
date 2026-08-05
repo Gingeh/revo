@@ -41,6 +41,7 @@ pub fn analyze(
     try checker.walkImports(root, module_resolver);
     _ = try checker.visit(root);
     if (type_map) |tm| try reparentTypeMap(tm, alloc);
+    if (type_annotations) |ta| try reparentAnnotations(ta, alloc);
     if (checker.errors.items.len == 0) return null;
 
     const report = try checker.finishReport();
@@ -61,6 +62,21 @@ fn reparentTypeMap(tm: *std.StringHashMap(types_mod.TypeInfo), alloc: std.mem.Al
     tm.clearRetainingCapacity();
     for (keys.items, vals.items) |k, v|
         try tm.put(k, v);
+}
+
+fn reparentAnnotations(ta: *std.AutoHashMap(*const ast.Node, types_mod.TypeInfo), alloc: std.mem.Allocator) !void {
+    var keys = try std.ArrayList(*const ast.Node).initCapacity(alloc, ta.count());
+    defer keys.deinit(alloc);
+    var vals = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, ta.count());
+    defer vals.deinit(alloc);
+    var it = ta.iterator();
+    while (it.next()) |entry| {
+        keys.appendAssumeCapacity(entry.key_ptr.*);
+        vals.appendAssumeCapacity(try types_mod.clone(entry.value_ptr.*, alloc));
+    }
+    ta.clearRetainingCapacity();
+    for (keys.items, vals.items) |k, v|
+        try ta.put(k, v);
 }
 
 const Scope = struct {
@@ -335,6 +351,20 @@ const SemanticChecker = struct {
                     return .{ .function = &sig_ptr.sig };
                 }
             }
+        }
+        // stdlib module function lookup: fs.exists?, file.read, time.now
+        if (object.expr == .ident) {
+            const module_name = object.expr.ident;
+            for (revo.std_lib.api.full_specs) |group| for (group) |spec| {
+                if (!std.mem.eql(u8, spec.name, name)) continue;
+                for (spec.placements) |pl| {
+                    if (pl.kind == .module and pl.module != null and std.mem.eql(u8, pl.module.?, module_name)) {
+                        if (self.makeStdlibSig(spec) catch null) |sig| {
+                            return .{ .function = &sig.sig };
+                        }
+                    }
+                }
+            };
         }
         return .any;
     }
@@ -966,6 +996,12 @@ const SemanticChecker = struct {
         return .any;
     }
 
+    fn specArgAccepts(expected: types_mod.TypeInfo, actual: types_mod.TypeInfo) bool {
+        // spec params say `number` for both int and float values
+        if (expected == .int and actual == .float) return true;
+        return types_mod.canCoerce(actual, expected);
+    }
+
     fn analyzeCall(self: *SemanticChecker, call: anytype, span: ast.Span) !types_mod.TypeInfo {
         if (call.callee.expr == .field) {
             _ = try self.analyzeNode(call.callee.expr.field.object);
@@ -999,7 +1035,7 @@ const SemanticChecker = struct {
                         try provided.put(fd.name, {});
                         if (fd.field_type == .any) break;
                         const actual = types_mod.inferExprType(self, entry.value);
-                        if (!types_mod.canCoerce(actual, fd.field_type)) {
+                        if (!specArgAccepts(fd.field_type, actual)) {
                             const actual_str = try actual.formatType(self.alloc);
                             const expected_str = try fd.field_type.formatType(self.alloc);
                             try self.appendError(
@@ -1123,7 +1159,7 @@ const SemanticChecker = struct {
                     if (call.implicit_self and i == 0) {
                         const actual = types_mod.inferExprType(self, call.callee.expr.field.object);
                         const expected = sig.params[i];
-                        if (!types_mod.canCoerce(actual, expected)) {
+                        if (!specArgAccepts(expected, actual)) {
                             const expected_str = try expected.formatType(self.alloc);
                             const actual_str = try actual.formatType(self.alloc);
                             try self.appendError(
@@ -1147,7 +1183,7 @@ const SemanticChecker = struct {
                                 _ = try self.analyzeNode(arg.expr.assign_expr.value);
                                 const actual = types_mod.inferExprType(self, arg.expr.assign_expr.value);
                                 if (expected == .type_var) continue;
-                                if (!types_mod.canCoerce(actual, expected)) {
+                                if (!specArgAccepts(expected, actual)) {
                                     const expected_str = try expected.formatType(self.alloc);
                                     const actual_str = try actual.formatType(self.alloc);
                                     try self.appendError(
@@ -1169,7 +1205,7 @@ const SemanticChecker = struct {
                         _ = try self.analyzeNode(call.args[pi]);
                         const actual = types_mod.inferExprType(self, call.args[pi]);
                         if (expected == .type_var) continue;
-                        if (!types_mod.canCoerce(actual, expected)) {
+                        if (!specArgAccepts(expected, actual)) {
                             const param_name = if (pi < sig.param_names.len and sig.param_names[pi].len > 0) sig.param_names[pi] else "";
                             const expected_str = try expected.formatType(self.alloc);
                             const actual_str = try actual.formatType(self.alloc);
@@ -1195,7 +1231,7 @@ const SemanticChecker = struct {
                 else
                     try self.analyzeNode(call.args[i - self_offset]);
                 if (expected == .type_var) continue;
-                if (!types_mod.canCoerce(actual, expected)) {
+                if (!specArgAccepts(expected, actual)) {
                     const param_name = if (i < sig.param_names.len and sig.param_names[i].len > 0) sig.param_names[i] else "";
                     const expected_str = try expected.formatType(self.alloc);
                     const actual_str = try actual.formatType(self.alloc);

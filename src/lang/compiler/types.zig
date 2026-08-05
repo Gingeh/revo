@@ -1992,3 +1992,20 @@ test "stdlib sigs untyped call still validates arg count" {
         \\ cwd("nope", "more")
     , .ParseError);
 }
+
+test "stdlib sigs: module field calls resolve to spec sigs" {
+    try t.topAtom("fs.exists?(\"/definitely/not/a/real/path_xyz\")?", "false");
+    try t.topNumber(
+        \\ table.len({1, 2}) + 1
+    , 3);
+    try t.expectCompileError(
+        \\ let b: bool = fs.exists?("/tmp")
+    , .ParseError);
+}
+
+test "stdlib sigs: module result flows through match" {
+    try t.topAtom(
+        \\ let r = fs.exists?("/tmp")
+        \\ match r | (:ok, v) => v | (:err, e) => panic(e)
+    , "true");
+}

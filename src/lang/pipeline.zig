@@ -405,7 +405,12 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     };
 
     var type_annotations = std.AutoHashMap(*const Node, compiler.types.TypeInfo).init(vm.runtime.alloc);
-    defer type_annotations.deinit();
+    defer {
+        var it = type_annotations.iterator();
+        while (it.next()) |entry|
+            compiler.types.deinitType(@constCast(entry.value_ptr), vm.runtime.alloc);
+        type_annotations.deinit();
+    }
 
     var known_globals = try std.ArrayList([]const u8)
         .initCapacity(vm.runtime.alloc, vm.const_globals.count());
