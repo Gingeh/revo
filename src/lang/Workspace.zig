@@ -588,7 +588,7 @@ pub fn hover(
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
             try buf.writer.writeAll("```revo\n");
-            try revo.std_lib.api.renderSignature(&buf.writer, spec);
+            try revo.std_lib.api.renderSignature(&buf.writer, spec.*);
             try buf.writer.writeAll("\n```");
             if (spec.doc.len > 0) {
                 try buf.writer.print("\n\n{s}", .{spec.doc});
@@ -935,7 +935,11 @@ pub fn inspectDetailed(
     }
 
     var type_annotations = std.AutoHashMap(*const lang.Node, lang.types.TypeInfo).init(alloc);
-    defer type_annotations.deinit();
+    defer {
+        var it = type_annotations.iterator();
+        while (it.next()) |entry| lang.types.deinitType(@constCast(entry.value_ptr), alloc);
+        type_annotations.deinit();
+    }
 
     const WorkspaceResolver = struct {
         ws: *Workspace,

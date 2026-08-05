@@ -35,8 +35,8 @@ else
     all_specs ++ [_][]const FnSpec{@import("root.zig").root_specs_os};
 
 /// first match wins
-pub fn find(name: []const u8) ?FnSpec {
-    for (full_specs) |group| for (group) |spec| {
+pub fn find(name: []const u8) ?*const FnSpec {
+    for (full_specs) |group| for (group) |*spec| {
         if (std.mem.eql(u8, spec.name, name)) return spec;
     };
     return null;

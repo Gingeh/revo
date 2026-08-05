@@ -457,23 +457,59 @@ pub fn inferMatchType(ctx: anytype, subject: *const ast.Node, arms: []const ast.
 }
 
 pub fn inferOrelseType(left: TypeInfo, right: TypeInfo) TypeInfo {
-    if (left == .any) return right;
-    if (right == .any) return left;
-    if (left.eql(right)) return left;
+    const unwrapped = if (isResultType(left)) okTypeFrom(left) else left;
+    if (unwrapped == .any) return right;
+    if (right == .any) return unwrapped;
+    if (unwrapped.eql(right)) return unwrapped;
     return .any;
 }
 
-pub fn okTypeFromUnion(ti: TypeInfo) TypeInfo {
-    const variants = switch (ti) {
-        .@"union" => |us| us,
-        else => return .any,
+fn isResultTag(name: []const u8) bool {
+    return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok") or
+        std.mem.eql(u8, name, ":err") or std.mem.eql(u8, name, "err");
+}
+
+fn isOkTag(name: []const u8) bool {
+    return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok");
+}
+
+/// `::ok T | ::err E` unions and `(:ok, T)` / `(:err, E)` tagged tuples —
+/// the shapes `?` and `orelse` unwrap at runtime
+pub fn isResultType(ti: TypeInfo) bool {
+    return switch (ti) {
+        .@"union" => |us| blk: {
+            for (us) |v| {
+                if (isResultTag(v.name)) break :blk true;
+            }
+            break :blk false;
+        },
+        .tuple => |items| items.len >= 1 and items[0] == .atom and blk: {
+            const tag = atomPayload(items[0].atom);
+            break :blk isResultTag(tag);
+        },
+        else => false,
     };
-    for (variants) |v| {
-        if (v.types.len == 1 and (std.mem.eql(u8, v.name, ":ok") or std.mem.eql(u8, v.name, "ok"))) {
-            return v.types[0];
-        }
-    }
-    return .any;
+}
+
+/// unwrap the `:ok` payload from a `::ok T | ::err E` union or a
+/// `(:ok, T)` tagged tuple; mirrors the runtime, which yields only the
+/// first payload element
+pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
+    return switch (ti) {
+        .@"union" => |variants| blk: {
+            for (variants) |v| {
+                if (v.types.len == 1 and isOkTag(v.name)) break :blk v.types[0];
+            }
+            break :blk .any;
+        },
+        .tuple => |items| blk: {
+            if (items.len < 2 or items[0] != .atom) break :blk .any;
+            const tag = atomPayload(items[0].atom);
+            if (!isOkTag(tag)) break :blk .any;
+            break :blk items[1];
+        },
+        else => .any,
+    };
 }
 
 pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.ArrayList(UnionVariant)) !void {
@@ -544,7 +580,10 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .labeled_block => |lb| inferExprType(ctx, lb.body),
         .try_expr => |inner| blk: {
             const it = inferExprType(ctx, inner);
-            break :blk if (it == .@"union") okTypeFromUnion(it) else it;
+            break :blk switch (it) {
+                .@"union", .tuple => okTypeFrom(it),
+                else => it,
+            };
         },
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
         .comp_block => |cb| inferExprType(ctx, cb.expr),
@@ -2008,4 +2047,34 @@ test "stdlib sigs: module result flows through match" {
         \\ let r = fs.exists?("/tmp")
         \\ match r | (:ok, v) => v | (:err, e) => panic(e)
     , "true");
+}
+
+test "stdlib sigs: local binding shadows stdlib module" {
+    // `fs` here is a local table, not the module: no stdlib sig is
+    // applied (no static error) and the missing field fails at runtime
+    try t.expectRuntimeError(
+        \\ let fs = {}
+        \\ fs.exists?("/tmp")
+    , .NotAFunction);
+}
+
+test "stdlib sigs: try unwraps tagged tuples" {
+    try t.topNumber("(:ok, 5)? + 1", 6);
+    try t.topNumber(
+        \\ fn res() (:ok, 5)
+        \\ res()? + 1
+    , 6);
+    try t.topTrue("let b: bool = fs.exists?(\"/tmp\")?");
+}
+
+test "stdlib sigs: orelse unwraps results" {
+    try t.topTrue("fs.exists?(\"/tmp\") orelse :false");
+    try t.topNumber("(:err, \"boom\") orelse 5", 5);
+}
+
+test "stdlib sigs: try rejects non-result unions" {
+    // `?` on it is a lie
+    try t.expectCompileError(
+        \\ "abc":find("b")?
+    , .ParseError);
 }
