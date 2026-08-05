@@ -343,10 +343,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
     try vm.globals.put(try vm.internAtom("argv"), argv_val);
     try vm.stdlib_globals.put(try vm.internAtom("argv"), argv_val);
 
-    const all = if (@import("build_options").regex)
-        api.all_specs ++ [_][]const api.FnSpec{ root_specs_os, regex_specs }
-    else
-        api.all_specs ++ [_][]const api.FnSpec{root_specs_os};
+    const all = api.full_specs;
 
     try api.registerAll(vm, all, mtPrototype);
 

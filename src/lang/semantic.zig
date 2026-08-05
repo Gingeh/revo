@@ -93,6 +93,10 @@ const SemanticChecker = struct {
     struct_layouts: std.StringHashMap([]const struct_layout.FieldDef),
     struct_optional_fields: std.StringHashMap(std.StringHashMap(void)),
     fn_sigs: std.ArrayList(*FnSig),
+    /// function sigs parsed from stdlib specs (globals, methods, module
+    /// fns); used to mark which call sites the compiler can trust an
+    /// annotation for instead of its own inference
+    stdlib_sig_ptrs: std.ArrayList(*const types_mod.FunctionSignature),
     return_types: std.ArrayList(types_mod.TypeInfo),
     type_map: ?*std.StringHashMap(types_mod.TypeInfo),
     type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
@@ -120,6 +124,7 @@ const SemanticChecker = struct {
             .struct_layouts = .init(alloc),
             .struct_optional_fields = .init(alloc),
             .fn_sigs = try .initCapacity(alloc, 4),
+            .stdlib_sig_ptrs = try .initCapacity(alloc, 4),
             .return_types = try .initCapacity(alloc, 4),
             .type_map = type_map,
             .type_annotations = type_annotations,
@@ -138,7 +143,7 @@ const SemanticChecker = struct {
         // prefer specs with global placement for global names
         for (known_globals) |name| {
             const spec = find_global: {
-                for (revo.std_lib.api.all_specs) |group| for (group) |s| {
+                for (revo.std_lib.api.full_specs) |group| for (group) |s| {
                     if (!std.mem.eql(u8, s.name, name)) continue;
                     for (s.placements) |pl| if (pl.kind == .global) break :find_global s;
                 };
@@ -358,6 +363,7 @@ const SemanticChecker = struct {
             },
         };
         try self.fn_sigs.append(self.alloc, sig_ptr);
+        try self.stdlib_sig_ptrs.append(self.alloc, &sig_ptr.sig);
         return sig_ptr;
     }
 
@@ -432,7 +438,29 @@ const SemanticChecker = struct {
             },
             .assign_expr => |assign| try self.analyzeAssign(assign, node.span),
             .return_expr => |val| try self.analyzeReturn(val, node.span),
-            .call => |call| try self.analyzeCall(call, node.span),
+            .call => |call| blk: {
+                const t = try self.analyzeCall(call, node.span);
+                // stdlib and method callees resolve from spec sigs only the
+                // semantic checker knows
+                //
+                // annotate them so compiler can
+                // use return type. source fns stay compiler-inferred so
+                // flow narrowing and generic substitution keep their edge
+                if (self.type_annotations) |map| {
+                    const resolved = if (call.callee.expr == .ident)
+                        self.lookup(call.callee.expr.ident) orelse null
+                    else
+                        types_mod.inferExprType(self, call.callee);
+                    if (resolved) |r| {
+                        if (r == .function and
+                            std.mem.indexOfScalar(*const types_mod.FunctionSignature, self.stdlib_sig_ptrs.items, r.function) != null)
+                        {
+                            map.put(node, t) catch {};
+                        }
+                    }
+                }
+                break :blk t;
+            },
             .if_expr => |v| try self.analyzeIf(v, node.span),
             .ident => |name| try self.analyzeIdent(name, node.span),
             .unary => |u| blk: {

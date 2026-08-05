@@ -1930,3 +1930,65 @@ test "explicit call-site type args id[int](42) resolves return type" {
         \\ id[int](42)
     , 42);
 }
+
+//
+// stdlib signatures flow from the semantic checker through the
+// annotation bridge into the compiler
+//
+
+test "stdlib sigs: method return types reach the compiler" {
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ "abc":len() + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
+test "stdlib sigs: global return types reach the compiler" {
+    // semantic knows read/cwd from root_specs_os; misuse that compiled
+    // against .any now errors before codegen
+    try t.expectCompileError(
+        \\ let x = cwd()
+        \\ let n: int = x
+    , .ParseError);
+    try t.expectCompileError(
+        \\ let x = read({delimiter = :eof})
+        \\ let n: int = x?
+    , .ParseError);
+}
+
+test "stdlib sigs source fn shadows stdlib global" {
+    try t.topNumber(
+        \\ const cwd = fn(x: int) x + 1
+        \\ cwd(41)
+    , 42);
+    try t.expectCompileError(
+        \\ const cwd = fn(x: int) x + 1
+        \\ cwd("nope")
+    , .ParseError);
+}
+
+test "stdlib sigs variadic global keeps accepting extra args" {
+    try t.topString("fmt(\"%v\", 1, 2, 3)", "1");
+    try t.expectCompileError(
+        \\ fmt()
+    , .ParseError);
+}
+
+test "stdlib sigs untyped call still validates arg count" {
+    try t.expectCompileError(
+        \\ cwd("nope", "more")
+    , .ParseError);
+}

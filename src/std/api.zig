@@ -26,10 +26,17 @@ pub const all_specs: []const []const FnSpec = &.{
     @import("rng.zig").specs,
 };
 
-/// look up a function by name across all spec tables.
+/// everything `register_stdlib` installs: all_specs plus the os-bound
+/// globals and the optional regex module. the single composition used by
+/// the runtime registration and the semantic checker alike
+pub const full_specs: []const []const FnSpec = if (@import("build_options").regex)
+    all_specs ++ [_][]const FnSpec{ @import("root.zig").root_specs_os, @import("root.zig").regex_specs }
+else
+    all_specs ++ [_][]const FnSpec{@import("root.zig").root_specs_os};
+
 /// first match wins
 pub fn find(name: []const u8) ?FnSpec {
-    for (all_specs) |group| for (group) |spec| {
+    for (full_specs) |group| for (group) |spec| {
         if (std.mem.eql(u8, spec.name, name)) return spec;
     };
     return null;
