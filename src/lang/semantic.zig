@@ -846,14 +846,7 @@ const SemanticChecker = struct {
             else => return null,
         };
         for (variants) |variant| {
-            if (variant.name.len > 0) {
-                const variant_tag = if (variant.name[0] == ':') variant.name[1..] else variant.name;
-                const pattern_tag = if (tag[0] == ':') tag[1..] else tag;
-                if (std.mem.eql(u8, variant_tag, pattern_tag)) {
-                    return variant.types;
-                }
-            }
-            // unnamed! check if first T is atom
+            // first T is the tag atom; payload is the rest
             if (variant.types.len > 0 and variant.types[0] == .atom) {
                 const variant_tag = types_mod.atomPayload(variant.types[0].atom);
                 const pattern_tag = if (tag[0] == ':') tag[1..] else tag;

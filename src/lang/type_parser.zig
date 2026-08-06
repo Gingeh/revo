@@ -246,14 +246,16 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
             }
             return .any;
         },
-        // "!int" -> union(@[{name=:ok, types=@[int]}, {name=:err, types=@[any]}])
+        // "!int" -> union(@[{name="", types=@[:ok, int]}, {name="", types=@[:err, any]}])
+        // the same shape the literal `(:ok, int) | (:err, any)` produces
         .error_union => |inner| {
             const t = try evalTypeExpr(ctx, inner);
-            const ok_types = try ctx.alloc.dupe(TypeInfo, &.{t});
-            const err_types = try ctx.alloc.dupe(TypeInfo, &.{TypeInfo.any});
-            const ok_var = UnionVariant{ .name = ":ok", .types = ok_types };
-            const err_var = UnionVariant{ .name = ":err", .types = err_types };
-            const variants = try ctx.alloc.dupe(UnionVariant, &.{ ok_var, err_var });
+            const ok_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .atom = ":ok" }, t });
+            const err_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .atom = ":err" }, TypeInfo.any });
+            const variants = try ctx.alloc.dupe(UnionVariant, &.{
+                .{ .name = "", .types = ok_types },
+                .{ .name = "", .types = err_types },
+            });
             return TypeInfo{ .@"union" = variants };
         },
     }

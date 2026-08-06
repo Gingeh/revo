@@ -759,23 +759,20 @@ fn narrowMatchPattern(
 
     for (subject_type.@"union") |variant| {
         const vt = variant.types;
-        if (vt.len == 0) continue;
+        if (vt.len == 0 or vt[0] != .atom) continue;
 
-        if (variant.name.len == 0) {
-            if (vt[0] != .atom) continue;
-            const variant_tag = types_mod.atomPayload(vt[0].atom);
-            const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
-            if (!std.mem.eql(u8, variant_tag, pattern_tag)) continue;
+        const variant_tag = types_mod.atomPayload(vt[0].atom);
+        const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
+        if (!std.mem.eql(u8, variant_tag, pattern_tag)) continue;
 
-            const payload = vt[1..];
-            for (items[1..], 0..) |item, i| {
-                if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
-                    const narrowed = if (i < payload.len) payload[i] else .any;
-                    try state.setLocalTypeHint(self, item.expr.ident, narrowed);
-                }
+        const payload = vt[1..];
+        for (items[1..], 0..) |item, i| {
+            if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
+                const narrowed = if (i < payload.len) payload[i] else .any;
+                try state.setLocalTypeHint(self, item.expr.ident, narrowed);
             }
-            return;
         }
+        return;
     }
 }
 

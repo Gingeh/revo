@@ -94,16 +94,15 @@ pub const TypeInfo = union(enum) {
                 errdefer buf.deinit(alloc);
                 for (variants, 0..) |v, i| {
                     if (i > 0) try buf.appendSlice(alloc, " | ");
-                    if (v.name.len > 0) {
-                        try buf.append(alloc, ':');
-                        try buf.appendSlice(alloc, v.name);
-                    }
+                    const is_tagged = v.types.len >= 2 and v.types[0] == .atom;
+                    if (is_tagged) try buf.append(alloc, '(');
                     for (v.types, 0..) |vt, j| {
-                        if (j > 0 or v.name.len > 0) try buf.append(alloc, ' ');
+                        if (j > 0) try buf.appendSlice(alloc, if (is_tagged) ", " else " ");
                         const formatted = try vt.formatType(alloc);
                         defer alloc.free(formatted);
                         try buf.appendSlice(alloc, formatted);
                     }
+                    if (is_tagged) try buf.append(alloc, ')');
                 }
                 break :blk try buf.toOwnedSlice(alloc);
             },
@@ -332,11 +331,8 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         // fast-path for atom literals vs atom-only variants
         if (from == .atom) {
             for (to.@"union") |variant| {
-                if (variant.name.len == 0 and variant.types.len == 1 and variant.types[0] == .atom) {
+                if (variant.types.len == 1 and variant.types[0] == .atom) {
                     if (std.mem.eql(u8, atomPayload(variant.types[0].atom), atomPayload(from.atom))) return true;
-                }
-                if (variant.name.len != 0 and variant.types.len == 0) {
-                    if (std.mem.eql(u8, atomPayload(variant.name), atomPayload(from.atom))) return true;
                 }
             }
         }
@@ -355,22 +351,6 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
 }
 
 fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
-    if (variant.name.len != 0) {
-        // named (tagged) variant
-        if (variant.types.len == 0) {
-            // atom-only variant accepts plain atoms with matching payload
-            return value == .atom and std.mem.eql(u8, atomPayload(value.atom), atomPayload(variant.name));
-        }
-        if (value != .tuple) return false;
-        if (value.tuple.len != variant.types.len + 1) return false;
-        if (value.tuple[0] != .atom) return false;
-        if (!std.mem.eql(u8, atomPayload(value.tuple[0].atom), atomPayload(variant.name))) return false;
-        for (variant.types, 0..) |expected, i| {
-            if (!canCoerce(value.tuple[i + 1], expected)) return false;
-        }
-        return true;
-    }
-
     if (variant.types.len == 1) return canCoerce(value, variant.types[0]);
     if (value != .tuple) return false;
     if (value.tuple.len != variant.types.len) return false;
@@ -381,22 +361,6 @@ fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
 }
 
 fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
-    if (variant.name.len != 0) {
-        // named variant
-        if (variant.types.len == 0) {
-            // atom-only variant is acceptable by plain atom target
-            return target == .atom and std.mem.eql(u8, atomPayload(target.atom), atomPayload(variant.name));
-        }
-        if (target != .tuple) return false;
-        if (target.tuple.len != variant.types.len + 1) return false;
-        if (target.tuple[0] != .atom) return false;
-        if (!std.mem.eql(u8, atomPayload(target.tuple[0].atom), atomPayload(variant.name))) return false;
-        for (variant.types, 0..) |source, i| {
-            if (!canCoerce(source, target.tuple[i + 1])) return false;
-        }
-        return true;
-    }
-
     if (variant.types.len == 1) return canCoerce(variant.types[0], target);
     if (target != .tuple) return false;
     if (target.tuple.len != variant.types.len) return false;
@@ -473,13 +437,16 @@ fn isOkTag(name: []const u8) bool {
     return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok");
 }
 
-/// `::ok T | ::err E` unions and `(:ok, T)` / `(:err, E)` tagged tuples —
-/// the shapes `?` and `orelse` unwrap at runtime
+/// `(:ok, T) | (:err, any)` unions (both the `!T` sugar and the literal
+/// form) and `(:ok, T)` / `(:err, E)` tagged tuples — the shapes `?` and
+/// `orelse` unwrap at runtime
 pub fn isResultType(ti: TypeInfo) bool {
     return switch (ti) {
         .@"union" => |us| blk: {
             for (us) |v| {
-                if (isResultTag(v.name)) break :blk true;
+                if (v.types.len >= 2 and v.types[0] == .atom and isResultTag(atomPayload(v.types[0].atom))) {
+                    break :blk true;
+                }
             }
             break :blk false;
         },
@@ -491,14 +458,16 @@ pub fn isResultType(ti: TypeInfo) bool {
     };
 }
 
-/// unwrap the `:ok` payload from a `::ok T | ::err E` union or a
+/// unwrap the `:ok` payload from a `(:ok, T) | (:err, any)` union or a
 /// `(:ok, T)` tagged tuple; mirrors the runtime, which yields only the
 /// first payload element
 pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
     return switch (ti) {
         .@"union" => |variants| blk: {
             for (variants) |v| {
-                if (v.types.len == 1 and isOkTag(v.name)) break :blk v.types[0];
+                if (v.types.len >= 2 and v.types[0] == .atom and isOkTag(atomPayload(v.types[0].atom))) {
+                    break :blk v.types[1];
+                }
             }
             break :blk .any;
         },
@@ -1698,6 +1667,32 @@ test "match narrowing enables specialized add_int from union payload" {
     try std.testing.expect(saw_add_int);
 }
 
+test "match narrowing works for call subjects" {
+    // the subject is a call, not an ident: `v` still narrows to the payload
+    // type (from the fn's declared return) and `v + 1` emits add_int
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ type Res = (:ok, int) | (:err, string)
+        \\ fn g() -> Res do (:ok, 42) end
+        \\ match g()
+        \\ | (:ok, v) => v + 1
+        \\ | (:err, _) => 0
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
 test "return type propagation: const binding with annotated fn" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
@@ -2101,4 +2096,39 @@ test "stdlib sigs: try rejects non-result unions" {
     try t.expectCompileError(
         \\ "abc":find("b")?
     , .ParseError);
+}
+
+test "stdlib sigs: match narrows call-subject payloads" {
+    // the subject is a call, not an ident: the payload still narrows to
+    // bool, so the match result is bool (not a result) and `?` is rejected
+    try t.expectCompileError(
+        \\ (match fs.exists?("/tmp")
+        \\ | (:ok, v) => v
+        \\ | (:err, e) => panic(e))?
+    , .ParseError);
+}
+
+test "eu.rv: result types flow end to end" {
+    // every line of the eu.rv table: the result binds as !bool, `?` unwraps
+    // to bool, and the match over it is the :ok payload
+    try t.topTrue(
+        \\ let x: !bool = fs.exists?("/tmp")
+        \\ let b: bool = fs.exists?("/tmp")?
+        \\ let r = fs.exists?("/tmp")
+        \\ match r
+        \\ | (:ok, v) => v
+        \\ | (:err, e) => panic(e)
+    );
+}
+
+test "error-union sugar and the literal form are the same union" {
+    // `!bool` and `(:ok, bool) | (:err, any)` are structurally identical, so
+    // a value typed with one can be bound to a slot typed with the other
+    try t.topTrue(
+        \\ let x: (:ok, bool) | (:err, any) = fs.exists?("/tmp")
+        \\ let y: !bool = x
+        \\ match y
+        \\ | (:ok, v) => v
+        \\ | (:err, e) => panic(e)
+    );
 }
