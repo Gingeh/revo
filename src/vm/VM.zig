@@ -1743,10 +1743,6 @@ fn callStructConstructor(
     try self.writeRegisterFast(base, instr.c, Data.new.structVal(instance_id));
 }
 
-
-
-
-
 pub fn setStructField(
     self: *VM,
     object: Data,

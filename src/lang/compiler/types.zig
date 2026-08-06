@@ -433,35 +433,35 @@ pub fn inferUnaryOp(op: ast.UnOp, T: TypeInfo) TypeInfo {
 }
 
 pub fn inferIfType(then_type: TypeInfo, else_type: ?TypeInfo) TypeInfo {
-    if (else_type) |et| {
-        if (then_type.eql(et)) return then_type;
-        if (then_type == .any) return et;
-        if (et == .any) return then_type;
-        return .any;
-    }
+    if (else_type) |et| return unifyBranchType(then_type, et);
+    return .any;
+}
+
+/// unify a branch type into the running if/orelse/match result:
+/// `never` branches diverge and contribute nothing; a leading `any` is
+/// overwritten by a later concrete type (pattern vars narrow only while
+/// their scope is live, so re-inference after scope pop sees `any`)
+pub fn unifyBranchType(acc: TypeInfo, branch: TypeInfo) TypeInfo {
+    if (branch == .never) return acc;
+    if (acc == .never) return branch;
+    if (acc == .any) return branch;
+    if (branch == .any) return acc;
+    if (acc.eql(branch)) return acc;
     return .any;
 }
 
 pub fn inferMatchType(ctx: anytype, subject: *const ast.Node, arms: []const ast.MatchArm) TypeInfo {
     _ = subject;
-    var result: TypeInfo = .any;
+    var result: TypeInfo = .never;
     for (arms) |arm| {
-        const arm_type = inferExprType(ctx, arm.then);
-        if (result == .any) {
-            result = arm_type;
-        } else if (arm_type != .any) {
-            if (!result.eql(arm_type)) return .any;
-        }
+        result = unifyBranchType(result, inferExprType(ctx, arm.then));
     }
     return result;
 }
 
 pub fn inferOrelseType(left: TypeInfo, right: TypeInfo) TypeInfo {
     const unwrapped = if (isResultType(left)) okTypeFrom(left) else left;
-    if (unwrapped == .any) return right;
-    if (right == .any) return unwrapped;
-    if (unwrapped.eql(right)) return unwrapped;
-    return .any;
+    return unifyBranchType(unwrapped, right);
 }
 
 fn isResultTag(name: []const u8) bool {
@@ -1647,6 +1647,30 @@ test "comp block infers int from literal" {
         if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
+}
+
+test "never collapses in if and orelse inference" {
+    // `panic` is `never`: a branch that diverges contributes no type
+    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferIfType(.never, .{ .int = {} }));
+    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferIfType(.{ .int = {} }, .never));
+    try std.testing.expectEqual(TypeInfo{ .never = {} }, inferIfType(.never, .never));
+    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferOrelseType(.never, .{ .int = {} }));
+    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferOrelseType(.{ .int = {} }, .never));
+    // unknown left stays unknown: the value may be anything or diverge
+    try std.testing.expectEqual(TypeInfo{ .any = {} }, inferOrelseType(.any, .never));
+}
+
+test "never arms don't poison match result type" {
+    // the panic arm is `never`: the match result is the `:ok` payload (int),
+    // so `?` on it is rejected as a non-result (it would pass as `.any`)
+    try t.expectCompileError(
+        \\ type Res = (:ok, int) | (:err, string)
+        \\ let x: Res = (:ok, 42)
+        \\ let r = match x
+        \\ | (:ok, v) => v
+        \\ | (:err, e) => panic(e)
+        \\ r?
+    , .ParseError);
 }
 
 test "match narrowing enables specialized add_int from union payload" {

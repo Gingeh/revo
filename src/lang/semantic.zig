@@ -558,7 +558,7 @@ const SemanticChecker = struct {
             },
             .match_expr => |v| blk: {
                 const subject_type = try self.analyzeNode(v.subject);
-                var unified: types_mod.TypeInfo = .any;
+                var unified: types_mod.TypeInfo = .never;
                 for (v.arms) |arm| {
                     try self.pushScope();
                     for (arm.matchers) |matcher| {
@@ -570,7 +570,7 @@ const SemanticChecker = struct {
                     if (arm.guard) |g| _ = try self.analyzeNode(g);
                     const arm_type = try self.analyzeNode(arm.then);
                     self.popScope();
-                    unified = if (unified == .any) arm_type else if (arm_type == .any) unified else if (unified.eql(arm_type)) unified else .any;
+                    unified = types_mod.unifyBranchType(unified, arm_type);
                 }
                 break :blk unified;
             },
