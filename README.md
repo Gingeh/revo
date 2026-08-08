@@ -38,12 +38,12 @@ end
 let x = "hello"
   |> _:upper()
   |> _:sub(1, 2)
-  |> assert_eq("el")
+  |> assert_eq("EL")
   |> do
     let el = _
-    "h" + el + "lo"
+    "h" ~ el ~ "lo"
   end
-  |> assert_eq("hello")
+  |> assert_eq("hELlo")
 
 # ===============================
 # pattern matching & result types
