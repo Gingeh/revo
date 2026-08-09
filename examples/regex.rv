@@ -1,6 +1,6 @@
 # compile a pattern (get a table back)
 let pat = re.compile("l+")
-print("pat: {pat:p}")
+print("pat: #{pat:p}")
 
 # is_match
 print("is_match(table):", re.is_match(pat, "hello world"))
@@ -12,10 +12,10 @@ print("find(str):", re.find("l+", "hello world"))
 
 # find_all
 for m in re.find_all(pat, "hello world") do
-  print("match: {m.match:p} at {m.start:p} - {m.end:p}")
+  print("match: #{m.match:p} at #{m.start:p} - #{m.end:p}")
 end
 for m in re.find_all("[aeiou]", "hello world") do
-  print("vowel: {m.match:p}")
+  print("vowel: #{m.match:p}")
 end
 
 # no match returns nil

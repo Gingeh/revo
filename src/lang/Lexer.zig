@@ -633,6 +633,15 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
                     try buf.appendSlice(self.alloc, enc[0..n]);
                 },
                 .failure => {
+                    // `\#{` is the escape for a literal `#{`: the backslash is consumed
+                    if (from + 2 < self.source.len and
+                        self.source[from + 1] == '#' and self.source[from + 2] == '{')
+                    {
+                        try buf.appendSlice(self.alloc, "#{");
+                        _ = self.advance();
+                        _ = self.advance();
+                        continue;
+                    }
                     try buf.append(self.alloc, '\\');
                     _ = self.advance();
                     try buf.append(self.alloc, self.source[self.pos - 1]);
@@ -658,24 +667,29 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
             try buf.append(self.alloc, c);
             continue;
         }
+        if (c == '#') {
+            // `#{` opens an interpolation: record the `{` the way a bare `{`
+            // used to be recorded, but keep the `#` out of the decoded text
+            if (!self.atEnd() and self.peek() == '{') {
+                _ = self.advance();
+                try interp_opens.append(self.alloc, .{
+                    .offset = self.pos - 1 + self.base_offset,
+                    .line = self.line,
+                    .column = self.column - 1,
+                    .idx = buf.items.len,
+                });
+                try buf.append(self.alloc, '{');
+                continue;
+            }
+            try buf.append(self.alloc, c);
+            continue;
+        }
         if (c == '{') {
             if (!self.atEnd() and self.peek() == '{') {
                 try buf.append(self.alloc, '{');
                 _ = self.advance();
                 continue;
             }
-            // json idiom: `{"...` — an escaped quote right after the brace
-            // means this brace is literal content, not an interpolation start
-            // if (!self.atEnd() and self.peek() == '\\' and self.peekN(1) == '"') {
-            //     try buf.append(self.alloc, c);
-            //     continue;
-            // }
-            try interp_opens.append(self.alloc, .{
-                .offset = self.pos - 1 + self.base_offset,
-                .line = self.line,
-                .column = self.column - 1,
-                .idx = buf.items.len,
-            });
         } else if (c == '}') {
             if (!self.atEnd() and self.peek() == '}') {
                 try buf.append(self.alloc, '}');
@@ -780,6 +794,15 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
                     try buf.appendSlice(self.alloc, enc[0..n]);
                 },
                 .failure => {
+                    // `\#{` is the escape for a literal `#{`: the backslash is consumed
+                    if (from + 2 < self.source.len and
+                        self.source[from + 1] == '#' and self.source[from + 2] == '{')
+                    {
+                        try buf.appendSlice(self.alloc, "#{");
+                        _ = self.advance();
+                        _ = self.advance();
+                        continue;
+                    }
                     try buf.append(self.alloc, '\\');
                     _ = self.advance();
                     try buf.append(self.alloc, self.source[self.pos - 1]);
@@ -791,24 +814,29 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             try buf.append(self.alloc, c);
             continue;
         }
+        if (c == '#') {
+            // `#{` opens an interpolation: record the `{` the way a bare `{`
+            // used to be recorded, but keep the `#` out of the decoded text
+            if (!self.atEnd() and self.peek() == '{') {
+                _ = self.advance();
+                try interp_opens.append(self.alloc, .{
+                    .offset = self.pos - 1 + self.base_offset,
+                    .line = self.line,
+                    .column = self.column - 1,
+                    .idx = buf.items.len,
+                });
+                try buf.append(self.alloc, '{');
+                continue;
+            }
+            try buf.append(self.alloc, c);
+            continue;
+        }
         if (c == '{') {
             if (!self.atEnd() and self.peek() == '{') {
                 try buf.append(self.alloc, '{');
                 _ = self.advance();
                 continue;
             }
-            // json idiom: `{"...` — an escaped quote right after the brace
-            // means this brace is literal content, not an interpolation start
-            // if (!self.atEnd() and self.peek() == '\\' and self.peekN(1) == '"') {
-            //     try buf.append(self.alloc, c);
-            //     continue;
-            // }
-            try interp_opens.append(self.alloc, .{
-                .offset = self.pos - 1 + self.base_offset,
-                .line = self.line,
-                .column = self.column - 1,
-                .idx = buf.items.len,
-            });
         } else if (c == '}') {
             if (!self.atEnd() and self.peek() == '}') {
                 try buf.append(self.alloc, '}');
@@ -1031,23 +1059,27 @@ test "lexes multiline strings" {
 }
 
 test "marks strings containing interpolation" {
-    try testing.expectTokens("\"hello {name}\"", &.{
+    try testing.expectTokens("\"hello #{name}\"", &.{
         .{ .t = .string, .v = "hello {name}", .interpolation = true },
         .{ .t = .eof, .v = "" },
     });
-    try testing.expectTokens("\"hello \\{name}\"", &.{
-        .{ .t = .string, .v = "hello \\{name}", .interpolation = false },
+    try testing.expectTokens("\"hello \\#{name}\"", &.{
+        .{ .t = .string, .v = "hello #{name}", .interpolation = false },
         .{ .t = .eof, .v = "" },
     });
-    try testing.expectTokens("'hello {name}'", &.{
+    try testing.expectTokens("\"hello {name}\"", &.{
         .{ .t = .string, .v = "hello {name}", .interpolation = false },
+        .{ .t = .eof, .v = "" },
+    });
+    try testing.expectTokens("'hello #{name}'", &.{
+        .{ .t = .string, .v = "hello #{name}", .interpolation = false },
         .{ .t = .eof, .v = "" },
     });
 }
 
 test "lexAt reports absolute positions for fragments" {
     const allocator = std.testing.allocator;
-    const tokens = try lexAt(allocator, "\"hi {name}\"", .{ .offset = 40, .line = 3, .column = 5 });
+    const tokens = try lexAt(allocator, "\"hi #{name}\"", .{ .offset = 40, .line = 3, .column = 5 });
     defer {
         for (tokens) |tok| {
             if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
@@ -1058,16 +1090,16 @@ test "lexAt reports absolute positions for fragments" {
     }
 
     try std.testing.expectEqual(@as(usize, 40), tokens[0].start);
-    try std.testing.expectEqual(@as(usize, 51), tokens[0].end);
+    try std.testing.expectEqual(@as(usize, 52), tokens[0].end);
     try std.testing.expectEqual(@as(u32, 3), tokens[0].line);
     try std.testing.expectEqual(@as(u32, 5), tokens[0].column);
     try std.testing.expectEqual(@as(usize, 1), tokens[0].interp_opens.len);
     const open = tokens[0].interp_opens[0];
-    try std.testing.expectEqual(@as(usize, 44), open.offset);
+    try std.testing.expectEqual(@as(usize, 45), open.offset);
     try std.testing.expectEqual(@as(u32, 3), open.line);
-    try std.testing.expectEqual(@as(u32, 9), open.column);
+    try std.testing.expectEqual(@as(u32, 10), open.column);
     try std.testing.expectEqual(@as(usize, 3), open.idx);
-    try std.testing.expectEqual(@as(usize, 51), tokens[1].start);
+    try std.testing.expectEqual(@as(usize, 52), tokens[1].start);
 }
 
 test "lexes float numbers and range without conflict" {

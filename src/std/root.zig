@@ -23,7 +23,7 @@ pub const root_specs: []const api.FnSpec = &.{
         .ret = "string",
         .doc =
         \\ format string with %v, %d, %?, %p specifiers
-        \\ string literals also support `{expr}`, `{expr:?}`, and `{expr:p}` interpolation
+        \\ string literals also support `#{expr}`, `#{expr:?}`, and `#{expr:p}` interpolation
         ,
         .variadic = true,
         .f = defineVariadic(&[_]TypeSpec{.string}, fmt),

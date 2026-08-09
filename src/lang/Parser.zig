@@ -2057,8 +2057,8 @@ pub const testing = struct {
 };
 
 test "parses string interpolation as fmt calls" {
-    try testing.expectPrinted("\"hello {name}\"", "(call fmt \"hello %v\" name)");
-    try testing.expectPrinted("\"{value:?} {value:p}\"", "(call fmt \"%? %p\" value value)");
+    try testing.expectPrinted("\"hello #{name}\"", "(call fmt \"hello %v\" name)");
+    try testing.expectPrinted("\"#{value:?} #{value:p}\"", "(call fmt \"%? %p\" value value)");
     try testing.expectPrinted("\"literal {{brace}}\"", "\"literal {brace}\"");
 }
 
@@ -2067,13 +2067,13 @@ test "interpolation value nodes carry real source spans" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = try lexer.lex(alloc, "print \"hi {name}\"");
+    const tokens = try lexer.lex(alloc, "print \"hi #{name}\"");
     const root = try parseTokens(alloc, tokens);
     const value = root.expr.call.args[0].expr.call.args[1];
     try std.testing.expectEqual(@as(u32, 1), value.span.line);
-    try std.testing.expectEqual(@as(u32, 12), value.span.column);
-    try std.testing.expectEqual(@as(usize, 11), value.span.start);
-    try std.testing.expectEqual(@as(usize, 15), value.span.end);
+    try std.testing.expectEqual(@as(u32, 13), value.span.column);
+    try std.testing.expectEqual(@as(usize, 12), value.span.start);
+    try std.testing.expectEqual(@as(usize, 16), value.span.end);
 }
 
 test "interpolation spans survive multiline dedent" {
@@ -2083,8 +2083,8 @@ test "interpolation spans survive multiline dedent" {
 
     const src =
         \\print """
-        \\  {a}
-        \\  {b}"""
+        \\  #{a}
+        \\  #{b}"""
     ;
     const tokens = try lexer.lex(alloc, src);
     const root = try parseTokens(alloc, tokens);
@@ -2093,13 +2093,13 @@ test "interpolation spans survive multiline dedent" {
     const a = call.args[1];
     const b = call.args[2];
     try std.testing.expectEqual(@as(u32, 2), a.span.line);
-    try std.testing.expectEqual(@as(u32, 4), a.span.column);
-    try std.testing.expectEqual(@as(usize, 13), a.span.start);
-    try std.testing.expectEqual(@as(usize, 14), a.span.end);
+    try std.testing.expectEqual(@as(u32, 5), a.span.column);
+    try std.testing.expectEqual(@as(usize, 14), a.span.start);
+    try std.testing.expectEqual(@as(usize, 15), a.span.end);
     try std.testing.expectEqual(@as(u32, 3), b.span.line);
-    try std.testing.expectEqual(@as(u32, 4), b.span.column);
-    try std.testing.expectEqual(@as(usize, 19), b.span.start);
-    try std.testing.expectEqual(@as(usize, 20), b.span.end);
+    try std.testing.expectEqual(@as(u32, 5), b.span.column);
+    try std.testing.expectEqual(@as(usize, 21), b.span.start);
+    try std.testing.expectEqual(@as(usize, 22), b.span.end);
 }
 
 test "interpolation spans survive nested strings" {
@@ -2107,15 +2107,15 @@ test "interpolation spans survive nested strings" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = try lexer.lex(alloc, "print \"a { \\\"b {c}\\\" } d\"");
+    const tokens = try lexer.lex(alloc, "print \"a #{ \\\"b #{c}\\\" } d\"");
     const root = try parseTokens(alloc, tokens);
     const outer = root.expr.call.args[0].expr.call;
     const inner = outer.args[1].expr.call;
     const c = inner.args[1];
     try std.testing.expectEqual(@as(u32, 1), c.span.line);
-    try std.testing.expectEqual(@as(u32, 16), c.span.column);
-    try std.testing.expectEqual(@as(usize, 15), c.span.start);
-    try std.testing.expectEqual(@as(usize, 16), c.span.end);
+    try std.testing.expectEqual(@as(u32, 18), c.span.column);
+    try std.testing.expectEqual(@as(usize, 17), c.span.start);
+    try std.testing.expectEqual(@as(usize, 18), c.span.end);
 }
 
 test "quasiquote inner nodes carry template spans" {

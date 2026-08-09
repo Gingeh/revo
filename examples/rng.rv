@@ -1,11 +1,11 @@
 # `rng.rand` returns a random integer in the range [0, upper_bound]
-print("rng.rand(10) = {rng.rand(10)}")
+print("rng.rand(10) = #{rng.rand(10)}")
 
 # `rng.range` returns a random integer in the range [lower_bound, upper_bound]
-print("rng.range(4, 12) = {rng.range(4, 12)}") 
+print("rng.range(4, 12) = #{rng.range(4, 12)}")
 
 # `rng.choice` returns a random element from the given table
-print("rng.choice({{1, 2, 3, hi, :false}}) = {rng.choice({1, 2, 3, 'hi', :false})}") 
+print("rng.choice(#{rng.choice({1, 2, 3, hi, :false})}) = #{rng.choice({1, 2, 3, 'hi', :false})}")
 
 print("\n --- Post `set_seed(2226)` -----")
 rng.set_seed(2226) # allows for statically assigning the seed to be used for random number generation

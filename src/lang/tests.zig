@@ -689,15 +689,15 @@ test "string interpolation uses formatting modes" {
     try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
         \\ const value = set_metatable({}, mt)
-        \\ "value = {value}"
+        \\ "value = #{value}"
     , "value = visible");
     try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
         \\ const value = set_metatable({}, mt)
-        \\ "value = {value:?}"
+        \\ "value = #{value:?}"
     , "value = \"debug\"");
     try t.topString(
-        \\ "100% complete: {42:p}"
+        \\ "100% complete: #{42:p}"
     , "100% complete: \x1b[33m42\x1b[0m");
 }
 

@@ -681,13 +681,13 @@ fn emitInterpolatedStringTokens(
         // the lexer also records nested braces inside an earlier body; skip
         if (open.offset < literal_start) continue;
 
-        // emit literal string part before this {
-        if (open.offset > literal_start) {
-            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset, tc(.string), source, enc);
+        // emit literal string part before this `#{`
+        if (open.offset - 1 > literal_start) {
+            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset - 1, tc(.string), source, enc);
         }
 
-        // emit { as operator
-        emitSemanticToken(data, prev_line, prev_col, open.offset, open.offset + 1, tc(.operator), source, enc);
+        // emit #{ as operator
+        emitSemanticToken(data, prev_line, prev_col, open.offset - 1, open.offset + 1, tc(.operator), source, enc);
 
         // find matching }
         const close = interpEnd(source, open.offset, inner_end) orelse {
