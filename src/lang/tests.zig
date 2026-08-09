@@ -1836,13 +1836,20 @@ test "structs build struct instances" {
         \\ const user = User { name = "ana", age = 12 }
         \\ user.name
     , "ana");
-    try t.topAtom(
+    try t.topType(
         \\ struct User {
         \\     name: string,
         \\ }
         \\ const user = User { name = "ana" }
-        \\ type(user)
-    , "User");
+        \\ typeof(user)
+    , .struct_type);
+    try t.topString(
+        \\ struct User {
+        \\     name: string,
+        \\ }
+        \\ const user = User { name = "ana" }
+        \\ typeof(user) { name = "bob" }.name
+    , "bob");
 }
 
 test "struct methods crash if declared outside struct body" {

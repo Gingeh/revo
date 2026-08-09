@@ -75,8 +75,8 @@ pub const root_specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "any" },
         },
-        .ret = "atom",
-        .doc = "returns type of value as atom (struct values return their type name)",
+        .ret = "atom|type",
+        .doc = "returns type of value as atom; struct values return the type itself, which is callable",
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
@@ -85,8 +85,8 @@ pub const root_specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "any" },
         },
-        .ret = "atom",
-        .doc = "returns type of value as atom: nil, number, string, atom, function, table, tuple, type, foreign, or the struct type name",
+        .ret = "atom|type",
+        .doc = "returns type of value as atom: nil, number, string, atom, function, table, tuple, type, foreign; struct values return the struct type, which is callable",
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
@@ -723,11 +723,16 @@ pub fn typeof(d: Data, vm: *VM) []const u8 {
     };
 }
 
-/// > typeof(arg0: any) -> string
-/// returns type of arg0 as string
+/// > typeof(arg0: any) -> atom|type
+/// returns type of arg0 as atom
 /// possible values: nil, number, string, atom, function, table, tuple,
-/// type, foreign, or the struct type name for struct values
+/// type, foreign; struct values return the struct type itself, which is callable
 pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
+    if (args[0].asStructVal()) |instance_id| {
+        const instance = vm.struct_instances.get(instance_id) catch
+            return .okData(Data.new.atom(try vm.internAtom("struct")));
+        return .okData(Data.new.structType(instance.type_id));
+    }
     return .okData(Data.new.atom(try vm.internAtom(typeof(args[0], vm))));
 }
 
