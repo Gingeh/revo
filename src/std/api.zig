@@ -12,6 +12,7 @@ const NativeFunc = root.NativeFunc;
 
 pub const all_specs: []const []const FnSpec = &.{
     @import("root.zig").root_specs,
+    @import("number.zig").specs,
     @import("string.zig").specs,
     @import("table.zig").specs,
     @import("tuple.zig").specs,

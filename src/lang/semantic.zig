@@ -293,6 +293,7 @@ const SemanticChecker = struct {
         }
         // method lookup for string, tuple, and table
         const target: ?revo.std_lib.TypeSpec = switch (object_type) {
+            .int, .float => .number,
             .string => .string,
             .tuple => .tuple,
             .table => .table,

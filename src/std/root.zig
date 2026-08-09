@@ -90,16 +90,6 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
-        .name = "number",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "value", "string" },
-        },
-        .ret = "!number/string",
-        .doc = "converts string to number",
-        .f = define(&[_]TypeSpec{.any}, number_),
-    },
-    .{
         .name = "expect",
         .placements = &.{api.g},
         .params = &.{
@@ -362,6 +352,7 @@ fn attachMathPi(vm: *revo.VM) !void {
 
 fn mtPrototype(target: TypeSpec, vm: *revo.VM) !Data {
     return switch (target) {
+        .number => Data.new.num(0),
         .string => try vm.ownDataString(""),
         .tuple => Data.new.tuple(std.math.maxInt(usize)),
         .table => Data.new.table(std.math.maxInt(usize)),
@@ -1392,7 +1383,7 @@ test "bullshit: metatable constructors closures and method chaining" {
 
 test "natives register as functions" {
     try testing.topType("len", .function);
-    try testing.topType("number", .function);
+    try testing.topType("number", .table);
     try testing.topType("assert", .function);
     try testing.topTrue("assert(type(len) == :function)");
 }
