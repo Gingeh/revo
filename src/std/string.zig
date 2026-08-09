@@ -150,7 +150,8 @@ pub const specs: []const api.FnSpec = &.{
         .ret = "table",
         .doc =
         \\converts string to table of characters
-        \\"asdf":table() => {"a", "s", "d", "f"}
+        \\
+        \\  "asdf":table() => {"a", "s", "d", "f"}
         ,
         .f = root.define(&.{.string}, to_table),
     },
@@ -163,7 +164,8 @@ pub const specs: []const api.FnSpec = &.{
         .ret = "number",
         .doc =
         \\returns ASCII code of first character
-        \\"a":ascii() => 97
+        \\
+        \\  "a":ascii() => 97
         ,
         .f = root.define(&.{.string}, ascii_f),
     },
@@ -201,31 +203,9 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.define(&.{ .string, .number }, index_f),
         .core_key = revo.core_atoms.__index,
     },
-    .{
-        .name = "add",
-        .placements = &.{api.method("string", .string)},
-        .params = &.{
-            .{ "self", "string" },
-            .{ "other", "string" },
-        },
-        .ret = "string",
-        .doc = "concatenates two strings",
-        .f = root.define(&.{ .string, .string }, add_f),
-    },
-    .{
-        .name = "mul",
-        .placements = &.{api.method("string", .string)},
-        .params = &.{
-            .{ "self", "string" },
-            .{ "n", "number" },
-        },
-        .ret = "string",
-        .doc = "repeats string n times",
-        .f = root.define(&.{ .string, .number }, mul_f),
-    },
     // globals
     .{
-        .name = "string_of",
+        .name = "string_of_ascii",
         .placements = &.{api.g},
         .params = &.{
             .{ "code", "any" },
@@ -237,17 +217,6 @@ pub const specs: []const api.FnSpec = &.{
         \\   string_of({97, 98}) => "ab"
         ,
         .f = root.define(&.{.any}, string_of),
-    },
-    .{
-        .name = "string_join",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "table", "table" },
-            .{ "sep", "string" },
-        },
-        .ret = "string",
-        .doc = "joins table elements into string with separator",
-        .f = root.define(&.{ .table, .string }, join),
     },
     // module-only (not in the metatable)
     .{
