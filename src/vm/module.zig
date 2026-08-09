@@ -51,6 +51,7 @@ fn swapFiberAndRun(
                 .pc = std.math.maxInt(revo.ProgramCounter),
                 .table_id = 0,
                 .version = 0,
+                .gen = 0,
                 .key = revo.Data.new.nil(),
                 .value = revo.Data.new.nil(),
             };
@@ -67,6 +68,7 @@ fn swapFiberAndRun(
     const prev = vm.swapFiber(fiber);
     errdefer {
         var finished = vm.swapFiber(prev);
+        vm.closeUpvalueList(&finished, 0) catch {};
         revo.VM.Fiber.deinit(&finished, vm.runtime.alloc);
     }
     const result = try vm.runReport();
@@ -83,6 +85,9 @@ pub fn runCompiledModuleReport(
     var r = try swapFiberAndRun(vm, source_path, program);
     defer {
         var finished = vm.swapFiber(r.prev);
+        // close upvalues captured by the old fiber before its registers are
+        // freed: globals survive reloads and may hold closures that read them
+        vm.closeUpvalueList(&finished, 0) catch {};
         revo.VM.Fiber.deinit(&finished, vm.runtime.alloc);
     }
     if (r.result == .ok) r.prev.result = vm.currentResult();

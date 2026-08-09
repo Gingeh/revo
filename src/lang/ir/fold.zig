@@ -55,8 +55,11 @@ fn extractConst(self: *Compiler, v: *const ir.IrInst) ?Data {
 }
 
 fn rewriteToConst(self: *Compiler, inst: *ir.IrInst, val: Data) !void {
+    // allocate the replacement first so a failure can't leave inst.operands
+    // pointing at already-freed memory for a later dce/deinit double free
+    const new_ops = try self.alloc.alloc(ir.IrValue, 0);
     self.alloc.free(inst.operands);
-    inst.operands = try self.alloc.alloc(ir.IrValue, 0);
+    inst.operands = new_ops;
 
     if (val.asNum()) |n| {
         if (n >= 0 and n <= 65535 and @trunc(n) == n) {
@@ -162,7 +165,24 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             .sub, .sub_int => ln - rn,
             .mul, .mul_int => ln * rn,
             .div, .div_float => if (rn == 0.0) return false else ln / rn,
-            .mod, .mod_int => if (rn == 0.0) return false else @mod(ln, rn),
+            // mirror the vm's .mod: i32-range integers mod via i64 @mod
+            // (sign of divisor), everything else fmod (sign of dividend)
+            .mod => blk: {
+                if (rn == 0.0) return false;
+                const li = revo.memory.numToI64(ln);
+                const ri = revo.memory.numToI64(rn);
+                if (li != null and ri != null and
+                    li.? >= std.math.minInt(i32) and li.? <= std.math.maxInt(i32) and
+                    ri.? >= std.math.minInt(i32) and ri.? <= std.math.maxInt(i32))
+                    break :blk @floatFromInt(@mod(li.?, ri.?));
+                break :blk @mod(ln, rn);
+            },
+            .mod_int => blk: {
+                if (rn == 0.0) return false;
+                const li = revo.memory.numToI64(ln) orelse return false;
+                const ri = revo.memory.numToI64(rn) orelse return false;
+                break :blk @floatFromInt(@mod(li, ri));
+            },
             .eq, .eq_int => if (ln == rn) 1.0 else 0.0,
             .neq, .neq_int => if (ln != rn) 1.0 else 0.0,
             .lt, .lt_int => if (ln < rn) 1.0 else 0.0,

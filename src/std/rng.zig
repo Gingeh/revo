@@ -8,9 +8,6 @@ const Data = revo.Data;
 const VM = revo.VM;
 const NativeResult = root.NativeResult;
 
-// Possibly change when multi-vm and multi-threading to prevent bad stuff from happening
-var prng: ?std.Random.DefaultPrng = null;
-
 pub const specs: []const api.FnSpec = &.{
     .{
         .name = "set_seed",
@@ -72,36 +69,35 @@ pub const specs: []const api.FnSpec = &.{
 };
 
 pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {
-    const raw_arg = args[0].asNum() orelse return .Err(vm, "err");
-    const new_seed: u64 = @intFromFloat(raw_arg);
+    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0]));
+    const new_seed: u64 = root.numToInt(u64, raw_arg) orelse return .errType(0, "non-negative integer", root.dataToString(args[0]));
 
-    prng = std.Random.DefaultPrng.init(new_seed);
+    vm.runtime.rng_prng = std.Random.DefaultPrng.init(new_seed);
 
     return .okData(Data.new.nil());
 }
 
 pub fn revertSeed(args: []const Data, vm: *VM) !NativeResult {
     _ = args;
-    _ = vm;
 
-    prng = null;
+    vm.runtime.rng_prng = null;
 
     return .okData(Data.new.nil());
 }
 
 pub fn rand(args: []const Data, vm: *VM) !NativeResult {
-    const raw_arg = args[0].asNum() orelse return .Err(vm, "err");
-    const upper_bound: isize = @intFromFloat(raw_arg);
+    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0]));
+    const upper_bound: isize = root.numToInt(isize, raw_arg) orelse return .errType(0, "integer number", root.dataToString(args[0]));
 
     return .okData(Data.new.num(randomNumber(isize, vm, 0, upper_bound)));
 }
 
 pub fn randRange(args: []const Data, vm: *VM) !NativeResult {
-    const raw_lower = args[0].asNum() orelse return .Err(vm, "err");
-    const lower_bound: isize = @intFromFloat(raw_lower);
+    const raw_lower = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0]));
+    const lower_bound: isize = root.numToInt(isize, raw_lower) orelse return .errType(0, "integer number", root.dataToString(args[0]));
 
-    const raw_upper = args[1].asNum() orelse return .Err(vm, "err");
-    const upper_bound: isize = @intFromFloat(raw_upper);
+    const raw_upper = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1]));
+    const upper_bound: isize = root.numToInt(isize, raw_upper) orelse return .errType(1, "integer number", root.dataToString(args[1]));
 
     const result = if (lower_bound < upper_bound)
         randomNumber(isize, vm, lower_bound, upper_bound)
@@ -135,22 +131,17 @@ pub fn choice(args: []const Data, vm: *VM) !NativeResult {
 }
 
 fn randomNumber(comptime T: type, vm: *VM, lowerBound: T, upperBound: T) T {
-    if (prng) |*p| {
-        var random = p.random();
-        return switch (@typeInfo(T)) {
-            .int => random.intRangeAtMost(T, lowerBound, upperBound),
-            .float => random.float(T),
-            else => unreachable,
-        };
+    // seed once on first use so a loop advances a single stream, a
+    // fresh per-call generator seeded from the same-ns timestamp would
+    // return identical values for every call in that nanosecond
+    if (vm.runtime.rng_prng == null) {
+        const time_seed: u64 = @intCast(std.Io.Clock.awake.now(vm.runtime.io).toNanoseconds());
+        vm.runtime.rng_prng = std.Random.DefaultPrng.init(time_seed);
     }
-
-    const time_seed: u64 = @intCast(std.Io.Clock.awake.now(vm.runtime.io).toNanoseconds());
-    var temp_prng = std.Random.DefaultPrng.init(time_seed);
-    var random = temp_prng.random();
+    var random = vm.runtime.rng_prng.?.random();
     return switch (@typeInfo(T)) {
         .int => random.intRangeAtMost(T, lowerBound, upperBound),
-        .float => return random.float(T),
-        // gusic: At the moment `randomNumber` is only ever instantiated with `isize/usize` and f64`.
+        .float => random.float(T),
         else => unreachable,
     };
 }

@@ -48,10 +48,14 @@ const DocVisitor = struct {
         try self.seen.put(key, {});
         errdefer self.alloc.free(name);
         const f = node.expr.fn_expr;
+        const doc = f.doc orelse {
+            self.alloc.free(name);
+            return;
+        };
         try self.items.append(self.alloc, .{
             .name = name,
             .arity = f.params.len,
-            .doc = f.doc.?,
+            .doc = doc,
             .line = f.body.span.line,
         });
     }

@@ -83,15 +83,15 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.define(&.{ .table, .number }, remove),
     },
     .{
-        .name = "concat",
+        .name = "join",
         .placements = &.{ api.mod("table"), api.method("table", .table) },
         .params = &.{
             .{ "self", "table" },
             .{ "delim", "string" },
         },
         .ret = "string",
-        .doc = "concatenates array elements with delimiter",
-        .f = root.define(&.{ .table, .string }, concat),
+        .doc = "joins array elements with delimiter",
+        .f = root.define(&.{ .table, .string }, join),
     },
     .{
         .name = "keys",
@@ -242,16 +242,6 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.define(&.{.table}, unique),
     },
     .{
-        .name = "sum",
-        .placements = &.{ api.mod("table"), api.method("table", .table) },
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "number",
-        .doc = "sums numeric elements",
-        .f = root.define(&.{.table}, sum),
-    },
-    .{
         .name = "len",
         .placements = &.{ api.mod("table"), api.method("table", .table) },
         .params = &.{
@@ -299,7 +289,7 @@ fn insert(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos: i64 = @intFromFloat(pos_num);
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1]));
     const val = args[2];
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
@@ -321,7 +311,7 @@ fn remove(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos: i64 = @intFromFloat(pos_num);
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1]));
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
     if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", dataToString(args[1]));
@@ -343,9 +333,9 @@ fn push(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.table(table_id));
 }
 
-/// > table:concat(delim: string) -> string
-/// concatenates array elements with delimiter
-fn concat(args: []const Data, vm: *VM) !NativeResult {
+/// > table:join(delim: string) -> string
+/// joins array elements with delimiter
+fn join(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const delim_id = args[1].asString() orelse return .errType(1, "string", dataToString(args[1]));
@@ -646,7 +636,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
     const tbl = try vm.tables.get(table_id);
 
     for (tbl.array.items, 0..) |item, i| {
-        if (dataEq(item, search_val)) {
+        if (dataEq(item, search_val, vm)) {
             return .{ .ok = Data.new.num(i) };
         }
     }
@@ -661,7 +651,7 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
     const tbl = try vm.tables.get(table_id);
 
     for (tbl.array.items) |item| {
-        if (dataEq(item, search_val)) {
+        if (dataEq(item, search_val, vm)) {
             return .okBool(true);
         }
     }
@@ -680,7 +670,7 @@ fn unique(args: []const Data, vm: *VM) !NativeResult {
     for (src.array.items) |item| {
         var found = false;
         for (result.array.items) |res| {
-            if (dataEq(item, res)) {
+            if (dataEq(item, res, vm)) {
                 found = true;
                 break;
             }
@@ -694,23 +684,9 @@ fn unique(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = Data.new.table(result_id) };
 }
 
-/// > table:sum() -> number
-/// sums numeric elements
-fn sum(args: []const Data, vm: *VM) !NativeResult {
-    const table_id = args[0].asTable().?;
-    const tbl = try vm.tables.get(table_id);
-
-    var total: f64 = 0;
-    for (tbl.array.items) |item| {
-        if (item.asNum()) |n| total += n;
-    }
-
-    return .{ .ok = Data.new.num(total) };
-}
-
-fn dataEq(a: Data, b: Data) bool {
+fn dataEq(a: Data, b: Data, vm: *VM) bool {
     if (a.asNum()) |an| return if (b.asNum()) |bn| an == bn else false;
-    if (a.asString()) |as| return if (b.asString()) |bs| as == bs else false;
+    if (a.asString()) |as| return if (b.asString()) |bs| std.mem.eql(u8, vm.stringValue(as), vm.stringValue(bs)) else false;
     if (a.asAtom()) |aa| return if (b.asAtom()) |ba| aa == ba else false;
     return false;
 }
@@ -721,7 +697,16 @@ test "table methods" {
     try testing.topTrue("{1, 2, 3}:contains?(2)");
     try testing.topFalse("{1, 2, 3}:contains?(5)");
     try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
-    try testing.topNumber("{1, 2, 3}:sum()", 6);
+    try testing.topNumber("iter.sum({1, 2, 3})", 6);
+}
+
+test "contains? and index_of compare string content, not ids" {
+    try testing.topTrue(
+        \\ "a b c":split(" "):contains?("b")
+    );
+    try testing.topNumber(
+        \\ "a b c":split(" "):index_of("b")
+    , 1);
 }
 
 const std = @import("std");

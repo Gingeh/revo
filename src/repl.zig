@@ -540,6 +540,50 @@ fn initTestEnv(alloc: std.mem.Allocator) !TestEnv {
     return TestEnv{ .vm = vm, .session = session, .out = out };
 }
 
+// a __index metamethod that parks (recv on an empty channel) must land its
+// result in the dispatch instruction's result register after resume, not the
+// synthetic host-call frame's register
+test "repl parked metamethod resumes with correct result" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    try std.testing.expect(try env.session.step(&env.out.writer,
+        \\ const ch = chan()
+        \\ spawn fn() send(ch, 42)
+        \\ const t = set_metatable({}, { __index = fn(_self, k) recv(ch) })
+        \\ t.foo
+    ));
+
+    try std.testing.expect(std.mem.find(u8, env.out.written(), "42") != null);
+}
+
+// closing a socket while a fiber is parked on recv must wake that fiber with
+// an error instead of dispatching on_ready against the freed SocketEntry
+test "repl closing a socket wakes a parked recv with SocketClosed" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    try std.testing.expect(try env.session.step(&env.out.writer,
+        \\ const srv = (net.listen(0))?
+        \\ const port = srv.port
+        \\ const client = (net.connect("127.0.0.1", port))?
+        \\ const results = chan()
+        \\ spawn fn() do
+        \\   const r = client:recv({ mode = :read_some, max_bytes = 1024 })
+        \\   send(results, r)
+        \\ end
+        \\ sleep(50)
+        \\ client:close()
+        \\ recv(results)
+    ));
+
+    try std.testing.expect(std.mem.find(u8, env.out.written(), ":SocketClosed") != null);
+}
+
 test "repl prints results" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

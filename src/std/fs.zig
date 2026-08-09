@@ -306,6 +306,7 @@ fn append_fn(args: []const Data, vm: *VM) !NativeResult {
         }) catch |e| return try NativeResult.Err(vm, mapIOError(e)),
         else => return try NativeResult.Err(vm, mapIOError(err)),
     };
+    defer file.close(vm.runtime.io);
 
     const stat = file.stat(vm.runtime.io) catch |err| {
         return try NativeResult.Err(vm, mapIOError(err));

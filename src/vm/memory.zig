@@ -12,26 +12,35 @@ pub const TupleID = usize;
 pub const StructTypeID = usize;
 pub const StructInstanceID = usize;
 
-// nanbox layout: numbers stored as raw f64; boxed values set BOX_MASK and hold tag+payload
-// canonicalize NaN to CANONICAL_NAN for stable bitwise checks
 pub const Type = enum(u4) {
+    // stored tag nibble is bits 51-48; real values must have bit 51 set
+    // (quiet bit), so boxed types occupy tags 8-15. number = 0 is never
+    // stored in the nibble
     number = 0,
-    string = 1,
-    atom = 2,
-    function = 3,
-    table = 4,
-    tuple = 5,
-    struct_val = 6,
-    struct_type = 7,
-    foreign = 8,
+    string = 8,
+    atom = 9,
+    function = 10,
+    table = 11,
+    tuple = 12,
+    struct_val = 13,
+    struct_type = 14,
+    foreign = 15,
 };
 
 pub const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
-pub const BOX_MASK: u64 = 0x7FF0_0000_0000_0000;
+pub const BOX_MASK: u64 = 0xFFF8_0000_0000_0000; // sign + exponent + quiet bit
+pub const BOX_TAG: u64 = 0x7FF8_0000_0000_0000; // boxed marker: quiet NaN, sign 0
 const TAG_SHIFT: u6 = 48;
 const TAG_MASK: u64 = 0x000F;
-const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
+// number NaN is the sign-1 quiet NaN, so it can't collide with BOX_TAG
+const CANONICAL_NAN: u64 = 0xFFF8_0000_0000_0000;
 
+/// nanbox layout:
+/// numbers stored as raw f64; boxed values hold tag+payload
+/// with the top 13 bits set to BOX_TAG. BOX_TAG is the quiet-NaN pattern
+/// (sign 0, exponent all-ones, quiet bit set), so real doubles ---- finite
+/// numbers, +-inf (quiet bit clear), signaling NaNs, and the canonical NaN
+/// (sign 1) ---- never match the boxed check
 pub const Data = struct {
     bits: u64,
 
@@ -93,15 +102,12 @@ pub const Data = struct {
     inline fn boxed(t: Type, val: usize) Data {
         if (val != std.math.maxInt(usize)) std.debug.assert(val <= PAYLOAD_MASK);
         const pl = @as(u64, @intCast(val)) & PAYLOAD_MASK;
-        return .{ .bits = BOX_MASK | (@as(u64, @intFromEnum(t)) << TAG_SHIFT) | pl };
+        return .{ .bits = BOX_TAG | (@as(u64, @intFromEnum(t)) << TAG_SHIFT) | pl };
     }
 
     pub inline fn tag(self: Data) Type {
-        if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
-        if (self.bits == CANONICAL_NAN) return .number;
-        const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
-        if (raw > @intFromEnum(Type.foreign)) return .number;
-        return @enumFromInt(raw);
+        if ((self.bits & BOX_MASK) != BOX_TAG) return .number;
+        return @enumFromInt((self.bits >> TAG_SHIFT) & TAG_MASK);
     }
 
     pub inline fn is(self: Data, t: Type) bool {
@@ -136,23 +142,19 @@ pub const Data = struct {
     }
 
     pub inline fn asStr(self: Data) ?StringID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.string))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.string))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
 
-    // inline numeric accessors used in hot paths
+    // -- [inline numeric accessors used in hot paths] ------------------------
     // asNum -> ?f64, asNumber -> error-union
-    //
-    // fast path: unboxed bits (ordinary f64s, including +/-inf and -nan)
-    // never match BOX_MASK. only the canonical NaN (tag nibble 8, empty
-    // payload) and boxed values share that pattern, so one compare separates
-    // them from every real number
+
+    /// fast path: unboxed bits (ordinary f64s, including +/-inf, the
+    /// canonical NaN, and signaling NaNs) never match the boxed marker, so
+    /// one compare separates them from every boxed value
     pub inline fn asNum(self: Data) ?f64 {
-        if ((self.bits & BOX_MASK) == BOX_MASK) {
-            if (self.bits != CANONICAL_NAN)
-                return null;
-        }
+        if ((self.bits & BOX_MASK) == BOX_TAG) return null;
         return @bitCast(self.bits);
     }
 
@@ -168,43 +170,44 @@ pub const Data = struct {
         return if (self.isString()) @intCast(self.bits & PAYLOAD_MASK) else null;
     }
 
-    // direct bit checks (matching asStr) so the hot accessors don't pay for
-    // tag()'s canonical-nan and range guards; equivalent by construction:
-    // `tag() == X` holds exactly when boxed and the tag nibble (lol nibble) is X
+    // -- [direct bit checks] -------------------------------------------------
+    // matching asStr so the hot accessors don't pay for
+    // tag()'s dispatch; equivalent by construction: `tag() == X` holds
+    // exactly when the marker matches and the tag nibble is X
     pub inline fn asAtom(self: Data) ?AtomID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.atom))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.atom))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asFunction(self: Data) ?FunctionID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.function))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.function))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asTable(self: Data) ?TableID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.table))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.table))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asTuple(self: Data) ?TupleID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.tuple))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.tuple))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asStructVal(self: Data) ?StructInstanceID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and
+        if ((self.bits & BOX_MASK) == BOX_TAG and
             ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_val))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub inline fn asStructType(self: Data) ?StructTypeID {
-        if ((self.bits & BOX_MASK) == BOX_MASK and
+        if ((self.bits & BOX_MASK) == BOX_TAG and
             ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.struct_type))
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
     pub fn asForeign(self: Data) ?*anyopaque {
-        if ((self.bits & BOX_MASK) == BOX_MASK and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.foreign))
+        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.foreign))
             return @ptrFromInt(@as(usize, @intCast(self.bits & PAYLOAD_MASK)));
         return null;
     }
@@ -235,6 +238,16 @@ pub fn numToI64(n: f64) ?i64 {
     const t: i64 = @intFromFloat(n);
     if (@as(f64, @floatFromInt(t)) != n) return null;
     return t;
+}
+
+/// converts a number to an integer of type T; null when the value is not a
+/// finite integral number representable in T
+pub fn numToInt(comptime T: type, n: f64) ?T {
+    if (!std.math.isFinite(n) or @floor(n) != n) return null;
+    const min: f64 = @floatFromInt(std.math.minInt(T));
+    const max: f64 = @floatFromInt(std.math.maxInt(T));
+    if (n < min or n > max) return null;
+    return @intFromFloat(n);
 }
 
 /// b ** e for non-negative int exponents, wrapping on overflow

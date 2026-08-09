@@ -96,7 +96,7 @@ const RecvWaitToken = struct {
     delimiter: u8 = '\n',
 };
 
-fn setSocketNonBlocking(handle: std.posix.fd_t) !void {
+pub fn setSocketNonBlocking(handle: std.posix.fd_t) !void {
     if (builtin.target.os.tag == .windows) {
         return;
     }
@@ -432,9 +432,24 @@ fn getEntryPtr(socket_data: Data, vm: *VM) !*SocketEntry {
     const table = try vm.tables.get(socket_data.asTable().?);
     const d = table.getRawAtom(revo.core_atoms.__entry_ptr.atomId(), vm) orelse
         return error.InvalidSocket;
-    const addr: usize = @intFromFloat(d.asNum().?);
+    const addr: usize = root.numToInt(usize, d.asNum().?) orelse return error.InvalidSocket;
     if (addr == 0) return error.SocketClosed;
     return @as(*SocketEntry, @ptrFromInt(addr));
+}
+
+/// complete and remove io waiters parked on `fd` before the socket entry and
+/// fd are released, the poll loop would otherwise dispatch on_ready against
+/// the freed SocketEntry (or a reused fd) for any revents the closed fd gets
+fn cancelWaitersFor(vm: *VM, fd: std.posix.fd_t) !void {
+    var idx = vm.sched.io_waiters.items.len;
+    while (idx > 0) {
+        idx -= 1;
+        const waiter = &vm.sched.io_waiters.items[idx];
+        if (waiter.wait_id != @as(u64, @intCast(fd))) continue;
+        _ = try completeWaiter(vm, waiter, .err, revo.Data.new.core(.SocketClosed));
+        const removed = vm.sched.io_waiters.swapRemove(idx);
+        if (removed.on_deinit) |deinit_fn| deinit_fn(vm.runtime.alloc, removed.token);
+    }
 }
 
 /// poison the pointer slot and free the entry, idempotent
@@ -443,6 +458,12 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
         error.SocketClosed => return,
         else => return e,
     };
+
+    const fd: std.posix.fd_t = switch (entry_ptr.*) {
+        .stream => |*s| s.socket.socket.handle,
+        .server => |s| s.socket.handle,
+    };
+    try cancelWaitersFor(vm, fd);
 
     const io = vm.runtime.io;
     switch (entry_ptr.*) {
@@ -464,12 +485,45 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
 /// connects to a remote host and port, returns a socket handle
 fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
     const host = vm.stringValue(args[0].asString().?);
-    const port: u16 = @intFromFloat(args[1].asNum().?);
+    const port: u16 = root.numToInt(u16, args[1].asNum().?) orelse
+        return .errType(1, "port number 0..65535", root.dataToString(args[1]));
 
     const host_to_use = if (std.mem.eql(u8, host, "localhost")) "127.0.0.1" else host;
     const addr = std.Io.net.IpAddress.parseIp4(host_to_use, port) catch |err| {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
     };
+
+    if (revo.has_async_backend) {
+        // encode 4 ip octets + port, the worker builds the sockaddr
+        const ip4 = switch (addr) {
+            .ip4 => |a| a,
+            .ip6 => return try root.resultTuple(vm, .err, try vm.dataAtom("AddressFamilyUnsupported")),
+        };
+        const addr_buf = try vm.runtime.alloc.alloc(u8, 6);
+        addr_buf[0] = ip4.bytes[0];
+        addr_buf[1] = ip4.bytes[1];
+        addr_buf[2] = ip4.bytes[2];
+        addr_buf[3] = ip4.bytes[3];
+        std.mem.writeInt(u16, addr_buf[4..6], ip4.port, .native);
+
+        const job = try vm.runtime.alloc.create(revo.async_backend.AsyncJob);
+        job.* = .{
+            .fiber_id = vm.sched.current_fiber,
+            .kind = revo.async_backend.AsyncJobKind.socket_connect,
+            .handle = -1,
+            .message_id = 0,
+            .offset = 0,
+            .buffer = addr_buf,
+            .max_bytes = 0,
+        };
+        _ = try revo.async_backend_impl.submit(
+            &vm.runtime.async_backend,
+            @ptrCast(vm),
+            job,
+        );
+        vm.sched.parkCurrent(.{ .io = .{ .wait_id = 0 } });
+        return .parked();
+    }
 
     const stream = addr.connect(vm.runtime.io, .{
         .mode = std.Io.net.Socket.Mode.stream,
@@ -492,8 +546,11 @@ fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
 /// > net:listen(port: number [, backlog: number]) -> socket
 /// listens for incoming connections on the given port, returns server socket
 fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
-    const port: u16 = @intFromFloat(args[0].asNum().?);
-    const backlog: u31 = if (args.len > 1) @intFromFloat(args[1].asNum().?) else 128;
+    const port: u16 = root.numToInt(u16, args[0].asNum().?) orelse
+        return .errType(0, "port number 0..65535", root.dataToString(args[0]));
+    const backlog: u31 = if (args.len > 1)
+        root.numToInt(u31, args[1].asNum().?) orelse return .errType(1, "backlog number", root.dataToString(args[1]))
+    else 128;
 
     const addr = std.Io.net.IpAddress.parseIp4("0.0.0.0", port) catch |err| {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));
@@ -665,7 +722,7 @@ fn parseRecvOptions(opts_data: Data, vm: *VM) !RecvWaitToken {
 
     if (opts.getRawAtom(revo.core_atoms.max_bytes.atomId(), vm)) |max_d| {
         if (!max_d.isNumber()) return error.TypeError;
-        token.max_bytes = @as(usize, @intFromFloat(max_d.asNum().?));
+        token.max_bytes = root.numToInt(usize, max_d.asNum().?) orelse return error.TypeError;
     }
     if (token.max_bytes == 0) token.max_bytes = 1;
 

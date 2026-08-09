@@ -10,6 +10,7 @@ const TableEntry = ast.TableEntry;
 const StructItem = ast.StructItem;
 const flow = @import("flow.zig");
 const state = @import("state.zig");
+const ir = @import("../ir/root.zig");
 const toRegister = state.toRegister;
 const type_check = @import("type_check.zig");
 const types_mod = @import("types.zig");
@@ -327,11 +328,19 @@ fn compileAssignSimple(
                 try self.emit(.table_get_atom, key_atom);
                 try addFieldToLocalTableFields(self, index.object, index.key.expr.hash);
             } else {
+                // evaluate object + key once; re-materialize them after the
+                // set so the get doesn't re-evaluate either operand
                 try self.compile(index.key, true);
+                const obj_inst = self.value_stack.items[self.value_stack.items.len - 2];
+                const key_inst = self.value_stack.items[self.value_stack.items.len - 1];
                 try self.compile(value, true);
                 try self.emit(.table_set, 0);
-                try self.compile(index.object, true);
-                try self.compile(index.key, true);
+                // the key still lives in its original register; move it up
+                // first so the obj dupe can claim that slot without losing it
+                const obj_dst = try state.pushRegister(self);
+                const key_dst = try state.pushRegister(self);
+                try moveInstTo(self, key_dst, key_inst);
+                try moveInstTo(self, obj_dst, obj_inst);
                 try self.emit(.table_get, 0);
             }
         },
@@ -344,6 +353,12 @@ fn compileAssignSimple(
             return self.fail(.InvalidAssignmentTarget, target, msg);
         },
     }
+}
+
+// push a move of an earlier stack value into a specific top register
+fn moveInstTo(self: *Compiler, dst: revo.opcode.Register, src: *ir.IrInst) !void {
+    try self.spans.append(self.alloc, self.active_span);
+    _ = try self.record(.move, &.{.{ .inst = src }}, true, dst, 0);
 }
 
 fn addFieldToLocalTableFields(self: *Compiler, object: *const Node, field_name: []const u8) !void {

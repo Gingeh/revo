@@ -386,11 +386,17 @@ fn stdlib() do
   print(inspect(val))
 
   # collection functions
-  const mapped = map((1,2,3), fn(x) x * 2)
+  const mapped = iter.collect(iter.map((1,2,3), fn(x) x * 2))
   print(mapped)
 
-  const filtered = filter((1,2,3), fn(x) x > 1)
+  const filtered = iter.collect(iter.filter((1,2,3), fn(x) x > 1))
   print(filtered)
+
+  const chained = (1,2,3,4)
+    |> iter.map(fn(x) x * x)
+    |> iter.filter(fn(x) x > 5)
+    |> iter.fold(fn(a, b) a + b)
+  print(chained)
 
   const summed = reduce((1,2,3,4), fn(a,b) a + b, 0)
   print(summed)

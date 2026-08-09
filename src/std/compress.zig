@@ -123,6 +123,9 @@ fn resultErr(vm: *VM, message: []const u8) !NativeResult {
     return root.resultTuple(vm, .err, try vm.ownDataString(message));
 }
 
+/// a small compressed input must not be able to balloon into unbounded memory
+const max_decompressed: usize = 512 * 1024 * 1024;
+
 // -- [base64] ----------------------------------------------------------------
 
 fn base64Encode(args: []const Data, vm: *VM) !NativeResult {
@@ -183,11 +186,10 @@ fn flateCompress(input: []const u8, container: flate.Container, alloc: std.mem.A
 
 fn flateDecompress(input: []const u8, container: flate.Container, alloc: std.mem.Allocator) ![]u8 {
     var in = std.Io.Reader.fixed(input);
-    var out = std.Io.Writer.Allocating.init(alloc);
-    defer out.deinit();
     var decompressor = flate.Decompress.init(&in, container, &.{});
-    _ = try decompressor.reader.streamRemaining(&out.writer);
-    return out.toOwnedSlice();
+    // a small compressed input must not be able to balloon into
+    // unbounded memory
+    return try decompressor.reader.allocRemaining(alloc, .limited(max_decompressed));
 }
 
 fn gzipCompress(args: []const Data, vm: *VM) !NativeResult {
@@ -242,48 +244,42 @@ fn inflateDecompress(args: []const Data, vm: *VM) !NativeResult {
 
 fn zstdDecompressFn(args: []const Data, vm: *VM) !NativeResult {
     const input = vm.stringValue(args[0].asString().?);
-    var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer out.deinit();
     var in = std.Io.Reader.fixed(input);
     var stream = zstd.Decompress.init(&in, &.{}, .{});
-    _ = stream.reader.streamRemaining(&out.writer) catch |err| {
+    const result = stream.reader.allocRemaining(vm.runtime.alloc, .limited(max_decompressed)) catch |err| {
         return resultErr(vm, @errorName(err));
     };
-    return root.resultTuple(vm, .ok, try vm.adoptDataString(try out.toOwnedSlice()));
+    return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
 // -- [lzma] ------------------------------------------------------------------
 
 fn lzmaDecompressFn(args: []const Data, vm: *VM) !NativeResult {
     const input = vm.stringValue(args[0].asString().?);
-    var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer out.deinit();
     var in = std.Io.Reader.fixed(input);
     var buf: [8192]u8 = undefined;
-    var stream = lzma.Decompress.initOptions(&in, vm.runtime.alloc, &buf, .{}, std.math.maxInt(usize)) catch |err| {
+    var stream = lzma.Decompress.initOptions(&in, vm.runtime.alloc, &buf, .{}, max_decompressed) catch |err| {
         return resultErr(vm, @errorName(err));
     };
     defer stream.deinit();
-    _ = stream.reader.streamRemaining(&out.writer) catch |err| {
+    const result = stream.reader.allocRemaining(vm.runtime.alloc, .limited(max_decompressed)) catch |err| {
         return resultErr(vm, @errorName(err));
     };
-    return root.resultTuple(vm, .ok, try vm.adoptDataString(try out.toOwnedSlice()));
+    return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
 // -- [xz] --------------------------------------------------------------------
 
 fn xzDecompressFn(args: []const Data, vm: *VM) !NativeResult {
     const input = vm.stringValue(args[0].asString().?);
-    var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer out.deinit();
     var in = std.Io.Reader.fixed(input);
     var buf: [8192]u8 = undefined;
     var stream = xz.Decompress.init(&in, vm.runtime.alloc, &buf) catch |err| {
         return resultErr(vm, @errorName(err));
     };
     defer stream.deinit();
-    _ = stream.reader.streamRemaining(&out.writer) catch |err| {
+    const result = stream.reader.allocRemaining(vm.runtime.alloc, .limited(max_decompressed)) catch |err| {
         return resultErr(vm, @errorName(err));
     };
-    return root.resultTuple(vm, .ok, try vm.adoptDataString(try out.toOwnedSlice()));
+    return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }

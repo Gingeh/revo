@@ -870,9 +870,9 @@ test "unwrap works on tuples immediately" {
 }
 
 test "unwrap panics on bullshit" {
-    try t.expectRuntimeError(
+    try t.expectCompileError(
         \\ unwrap "yo"
-    , .TypeError);
+    , .ParseError);
 }
 
 //
@@ -3841,4 +3841,27 @@ test "import typed function with no type annotations falls through" {
         \\ import "./plain"
         \\ plain.double(21)
     , 42);
+}
+
+test "struct default table is fresh per instance" {
+    // struct field defaults were const values shared by every
+    // instance, so mutating one instance's table leaked into other instances
+    try t.topNumber(
+        \\ struct C { toks: table = {} }
+        \\ const a = C{}
+        \\ a.toks:push(1)
+        \\ a.toks:push(2)
+        \\ const b = C{}
+        \\ b.toks:push(3)
+        \\ a.toks:len()
+    , 2);
+
+    try t.topNumber(
+        \\ struct C { toks: table = {} }
+        \\ const a = C{}
+        \\ a.toks:push(1)
+        \\ const b = C{}
+        \\ b.toks:push(2)
+        \\ b.toks:len() * 100 + a.toks:len()
+    , 101);
 }

@@ -9,24 +9,33 @@ for v in (1, 2, 3) do print(v) end
 for c in "hi" do print(c) end
 # "h" "i"
 
-@doc"counts down from n-1 to 0"
-fn countdown(n) do
-  let cur = n
-  fn() match cur
-  | 0 => :done
-  | _ => cur -= 1
-end
+# lazy arithmetic sequences
+for x in iter.range(5) do print(x) end
+# 0 1 2 3 4
 
-for x in countdown(5) do print(x) end
-# 4 3 2 1 0
+for x in iter.range(1, 6) do print(x) end
+# 1 2 3 4 5
 
-# pipes and transformers
-countdown(10)
+for x in iter.range(0, 10, 3) do print(x) end
+# 0 3 6 9
+
+# pipes and transformers (all lazy, collect to materialize)
+iter.range(10)
   |> iter.filter(fn(x) x % 2 == 0)
   |> iter.collect()
   |> for x in _
      print(x)
-# { 8, 6, 4, 2, 0 }
+# { 0, 2, 4, 6, 8 }
+
+iter.range(1, 11)
+  |> iter.map(fn(x) x * x)
+  |> iter.filter(fn(x) x > 20)
+  |> iter.take(3)
+  |> iter.collect()
+# {25, 36, 49}
+
+iter.range(1, 6) |> iter.fold(fn(a, b) a * b)
+# 120
 
 #
 # custom object with an __iter metamethod
@@ -75,7 +84,7 @@ for x, i in data do print(i, x) end
 # iterator is still just a value
 
 let data2 = {10, 20, 30}
-let iter2 = to_iter(data2)
+let iter2 = iter.to_iter(data2)
 print(iter2())
 print(iter2())
 print(iter2())

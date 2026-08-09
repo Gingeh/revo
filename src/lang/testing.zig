@@ -222,15 +222,12 @@ pub fn expectCompileError(source: []const u8, expected: lang.LowerErrorKind) !vo
             return error.ExpectedCompileFailure;
         },
         .err => |failure| switch (failure) {
-            .lower => |lower| {
-                try std.testing.expectEqual(expected, lower.kind);
+            .lower, .semantic => |err| {
+                try std.testing.expectEqual(expected, err.kind);
                 vm.runtime.resetDiagArena();
             },
             .expand => return error.ExpectedLowerFailure,
             .parse => return error.ExpectedLowerFailure,
-            .semantic => {
-                vm.runtime.resetDiagArena();
-            },
         },
     }
 }

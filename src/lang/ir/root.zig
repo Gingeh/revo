@@ -64,6 +64,23 @@ pub fn valueReg(v: IrValue) Register {
     };
 }
 
+/// the number of contiguous regs starting at `result_reg` that the
+/// instruction touches in its lowering (uni & tuple/call arg blocks)
+/// this is what `maxRegister` adds per instruction: the flat +2 below covers the
+/// fixed-width ops, and the var-length ops (call args, tuple_new items,
+/// slice) contribute their real span
+fn spanFor(i: *IrInst) usize {
+    return switch (i.opcode) {
+        .slice => 4,
+        .call, .spawn => i.op_arg + 1,
+        .call_field => (i.op_arg & ~@as(Operand, 1 << 7)) + 2,
+        .tuple_new => i.op_arg,
+        .table_set, .struct_set_method, .range_init => 3,
+        .table_get, .table_set_atom, .struct_set_offset, .range_loop, .@"and", .@"or" => 2,
+        else => 1,
+    };
+}
+
 /// highest register any instruction touches, plus a 3-wide read/write span
 /// headroom so callers can size buffers to the full register file
 pub fn maxRegister(insts: []*IrInst) usize {
@@ -71,6 +88,8 @@ pub fn maxRegister(insts: []*IrInst) usize {
     for (insts) |inst| {
         const r: usize = inst.result_reg;
         if (r + 2 > max_reg) max_reg = r + 2;
+        const span = spanFor(inst);
+        if (span > 2 and r + span > max_reg) max_reg = r + span;
     }
     return max_reg;
 }

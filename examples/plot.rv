@@ -8,12 +8,8 @@ const colors = {
 	"#D55E00"
 }
 
-fn indexes(table) do
-	let i = -1
-	table:map(fn(elem) do
-		i = i + 1
-		(i, elem)
-	end)
+fn indices(table) do
+	iter.map(table, fn(elem, i) (i, elem))
 end
 
 fn append(table, value) do
@@ -24,7 +20,7 @@ fn transpose(table) do
 	let result = {}
 	const length = table[0]:len()
 	for i in 0..length do
-		result:insert(i, table:map(fn(t) t[i]))
+		result:insert(i, iter.collect(iter.map(table, fn(t) t[i])))
 	end
 	result
 end
@@ -39,12 +35,15 @@ end do
 	if (line != :nil)
 		line
 			|> _:split(",")
-			|> _:map(fn (n) number(n) orelse 0)
+			|> iter.map(fn (n) number(n) orelse 0)
+			|> iter.collect()
 			|> append(data, _)
 end
 
-const (min, max) = data:reduce(
-	fn(acc, row) row:reduce(
+const (min, max) = iter.reduce(
+	data,
+	fn(acc, row) iter.reduce(
+		row,
 		fn(rowacc, num) (
 			math.min(rowacc[0], num),
 			math.max(rowacc[1], num)
@@ -65,16 +64,16 @@ print({
 	"' height='",
 	height + padding * 2,
 	"' version='1.1'>"
-}:concat(""))
+}:join(""))
 
-for series in indexes(transpose(data)) do
+for series in indices(transpose(data)) do
 	const (color, linedata) = series
 	let output = {
 		"	<polyline stroke='",
 		colors[color],
 		"' stroke-width='2.5' fill='none' points='"
-	}:concat("")
-	for entry in indexes(linedata) do
+	}:join("")
+	for entry in indices(linedata) do
 		const (index, point) = entry
 		if (index != 0) (output = output + " ")
 		output = {
@@ -82,7 +81,7 @@ for series in indexes(transpose(data)) do
 			(index / linedata:len() * width + padding),
 			",",
 			(height - (point - min) / (max - min) * height + padding)
-		}:concat("")
+		}:join("")
 	end
 	output = output + "'/>"
 	print(output)

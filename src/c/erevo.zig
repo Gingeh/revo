@@ -11,13 +11,14 @@ pub const ErevoVM = opaque {};
 pub const ErevoProgram = opaque {};
 
 /// c-level type tags matching revo's runtime type system
+/// (values mirror the nanbox stored tags: number is never boxed)
 pub const ErevoType = enum(u64) {
     number = 0,
-    string,
-    atom,
-    function,
-    table,
-    tuple,
+    string = 8,
+    atom = 9,
+    function = 10,
+    table = 11,
+    tuple = 12,
 };
 
 /// a revo value passed across the c boundary (tag + value, 16 bytes)

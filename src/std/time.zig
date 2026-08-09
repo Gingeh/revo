@@ -12,7 +12,7 @@ pub const specs: []const api.FnSpec = &.{
         .placements = &.{api.mod("time")},
         .params = &.{},
         .ret = "number",
-        .doc = "returns current wall-clock time in nanoseconds",
+        .doc = "returns current wall-clock time in nanoseconds since the first call",
         .f = root.define(&.{}, now_ns),
     },
     .{
@@ -28,7 +28,7 @@ pub const specs: []const api.FnSpec = &.{
         .placements = &.{api.mod("time")},
         .params = &.{},
         .ret = "number",
-        .doc = "returns monotonic clock in nanoseconds",
+        .doc = "returns monotonic clock in nanoseconds since the first call",
         .f = root.define(&.{}, monotonic_ns),
     },
     .{
@@ -50,7 +50,8 @@ fn now_ms(_: []const Data, vm: *VM) !NativeResult {
 
 fn now_ns(_: []const Data, vm: *VM) !NativeResult {
     const ts = std.Io.Clock.real.now(vm.runtime.io);
-    return .{ .ok = Data.new.num(ts.toNanoseconds()) };
+    if (vm.runtime.time_wall_base == 0) vm.runtime.time_wall_base = ts.nanoseconds;
+    return .{ .ok = Data.new.num(ts.nanoseconds - vm.runtime.time_wall_base) };
 }
 
 fn monotonic_ms(_: []const Data, vm: *VM) !NativeResult {
@@ -60,7 +61,8 @@ fn monotonic_ms(_: []const Data, vm: *VM) !NativeResult {
 
 fn monotonic_ns(_: []const Data, vm: *VM) !NativeResult {
     const ts = std.Io.Clock.awake.now(vm.runtime.io);
-    return .{ .ok = Data.new.num(ts.toNanoseconds()) };
+    if (vm.runtime.time_mono_base == 0) vm.runtime.time_mono_base = ts.nanoseconds;
+    return .{ .ok = Data.new.num(ts.nanoseconds - vm.runtime.time_mono_base) };
 }
 
 test "time module works probably" {

@@ -236,23 +236,26 @@ const Handler = struct {
         params: T.Definition.Params,
     ) !?T.Definition.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const loc = try h.ws.definition(arena, file_id, ws_pos, .{}) orelse return null;
         const uri = h.file_to_uri.get(loc.file_id) orelse return null;
+        const loc_text = (h.ws.snapshot(loc.file_id) orelse snap).text;
         return T.Definition.Result{ .definition = .{ .location = .{
             .uri = uri,
-            .range = .{ .start = sub1(loc.range.start), .end = sub1(loc.range.end) },
+            .range = .{ .start = wsToClient(loc_text, loc.range.start, h.enc), .end = wsToClient(loc_text, loc.range.end, h.enc) },
         } } };
     }
 
     /// hover info at position
     pub fn @"textDocument/hover"(h: *Handler, arena: std.mem.Allocator, params: T.Hover.Params) !?T.Hover {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const hov = try h.ws.hover(arena, file_id, ws_pos, .{}) orelse return null;
         return T.Hover{
             .contents = .{ .markup_content = .{ .kind = .markdown, .value = hov.text } },
-            .range = .{ .start = sub1(hov.range.start), .end = sub1(hov.range.end) },
+            .range = .{ .start = wsToClient(snap.text, hov.range.start, h.enc), .end = wsToClient(snap.text, hov.range.end, h.enc) },
         };
     }
 
@@ -263,7 +266,8 @@ const Handler = struct {
         params: T.SignatureHelp.Params,
     ) !?T.SignatureHelp {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const sig = try h.ws.signatureHelp(arena, file_id, ws_pos, .{}) orelse return null;
         // sig is arena-allocated; arena cleans up after handler returns
 
@@ -333,7 +337,8 @@ const Handler = struct {
         params: T.reference.Params,
     ) !?[]const T.Location {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const refs = try h.ws.references(arena, file_id, ws_pos, .{});
         defer arena.free(refs);
 
@@ -341,9 +346,10 @@ const Handler = struct {
         var out = try std.ArrayList(T.Location).initCapacity(arena, refs.len);
         for (refs) |ref| {
             const uri = h.file_to_uri.get(ref.file_id) orelse continue;
+            const ref_text = (h.ws.snapshot(ref.file_id) orelse snap).text;
             out.appendAssumeCapacity(.{
                 .uri = uri,
-                .range = .{ .start = sub1(ref.range.start), .end = sub1(ref.range.end) },
+                .range = .{ .start = wsToClient(ref_text, ref.range.start, h.enc), .end = wsToClient(ref_text, ref.range.end, h.enc) },
             });
         }
         const result = try out.toOwnedSlice(arena);
@@ -357,6 +363,7 @@ const Handler = struct {
         params: T.DocumentSymbol.Params,
     ) !?T.DocumentSymbol.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const snap = h.ws.snapshot(file_id) orelse return null;
         const syms = try h.ws.documentSymbols(arena, file_id, .{});
         defer arena.free(syms);
         var list = try std.ArrayList(T.SymbolInformation).initCapacity(arena, syms.len);
@@ -371,7 +378,7 @@ const Handler = struct {
                 },
                 .location = .{
                     .uri = params.textDocument.uri,
-                    .range = .{ .start = sub1(sym.range.start), .end = sub1(sym.range.end) },
+                    .range = .{ .start = wsToClient(snap.text, sym.range.start, h.enc), .end = wsToClient(snap.text, sym.range.end, h.enc) },
                 },
             });
         }
@@ -386,7 +393,7 @@ const Handler = struct {
     ) !?T.completion.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const snap = h.ws.snapshot(file_id) orelse return null;
-        const ws_pos = add1(params.position);
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const cursor_off = positionToOffset(snap.text, ws_pos) orelse return null;
         return @as(
             ?T.completion.Result,
@@ -405,12 +412,13 @@ const Handler = struct {
         var list = try std.ArrayList(T.SymbolInformation).initCapacity(arena, syms.len);
         for (syms) |sym| {
             const uri = h.file_to_uri.get(sym.file_id) orelse continue;
+            const sym_text = (h.ws.snapshot(sym.file_id) orelse continue).text;
             list.appendAssumeCapacity(.{
                 .name = sym.name,
                 .kind = .Variable,
                 .location = .{
                     .uri = uri,
-                    .range = .{ .start = sub1(sym.range.start), .end = sub1(sym.range.end) },
+                    .range = .{ .start = wsToClient(sym_text, sym.range.start, h.enc), .end = wsToClient(sym_text, sym.range.end, h.enc) },
                 },
             });
         }
@@ -439,7 +447,7 @@ const Handler = struct {
                 .lower => |f| f.report,
                 .semantic => |f| f.report,
             };
-            const lsp_diags = try reportToDiags(arena, report);
+            const lsp_diags = try reportToDiags(arena, report, h.enc);
             try h.transport.writeNotification(
                 h.io,
                 arena,
@@ -474,15 +482,17 @@ const Handler = struct {
         params: T.prepare_rename.Params,
     ) !?T.prepare_rename.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const range = try h.ws.prepareRename(arena, file_id, ws_pos, .{}) orelse return null;
-        return T.prepare_rename.Result{ .range = .{ .start = sub1(range.start), .end = sub1(range.end) } };
+        return T.prepare_rename.Result{ .range = .{ .start = wsToClient(snap.text, range.start, h.enc), .end = wsToClient(snap.text, range.end, h.enc) } };
     }
 
     /// rename symbol at position across the workspace
     pub fn @"textDocument/rename"(h: *Handler, arena: std.mem.Allocator, params: T.rename.Params) !?T.WorkspaceEdit {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_pos = add1(params.position);
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const refs = try h.ws.references(arena, file_id, ws_pos, .{});
         defer arena.free(refs);
 
@@ -491,10 +501,11 @@ const Handler = struct {
 
         for (refs) |ref| {
             const uri = h.file_to_uri.get(ref.file_id) orelse continue;
+            const ref_text = (h.ws.snapshot(ref.file_id) orelse snap).text;
             const gop = try file_edits.getOrPut(uri);
             if (!gop.found_existing) gop.value_ptr.* = .empty;
             try gop.value_ptr.append(arena, .{
-                .range = .{ .start = sub1(ref.range.start), .end = sub1(ref.range.end) },
+                .range = .{ .start = wsToClient(ref_text, ref.range.start, h.enc), .end = wsToClient(ref_text, ref.range.end, h.enc) },
                 .newText = params.newName,
             });
         }
@@ -514,14 +525,15 @@ const Handler = struct {
         params: T.InlayHint.Params,
     ) !?[]const T.InlayHint {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
-        const ws_range: Workspace.Range = .{ .start = add1(params.range.start), .end = add1(params.range.end) };
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_range: Workspace.Range = .{ .start = clientToWs(snap.text, params.range.start, h.enc), .end = clientToWs(snap.text, params.range.end, h.enc) };
         const ws_hints = try h.ws.inlayHints(arena, file_id, ws_range, .{});
         defer arena.free(ws_hints);
 
         var out = try std.ArrayList(T.InlayHint).initCapacity(arena, ws_hints.len);
         for (ws_hints) |ws_hint| {
             out.appendAssumeCapacity(.{
-                .position = sub1(ws_hint.position),
+                .position = wsToClient(snap.text, ws_hint.position, h.enc),
                 .label = .{ .string = ws_hint.label },
                 .kind = switch (ws_hint.kind) {
                     .type => T.InlayHint.Kind.Type,
@@ -566,7 +578,7 @@ const Handler = struct {
             if (tok.type == .eof) break;
 
             if (tok.interp_opens.len > 0 and (tok.type == .string or tok.type == .multiline_string)) {
-                try emitInterpolatedStringTokens(arena, source, tok, &data, &prev_line, &prev_col);
+                try emitInterpolatedStringTokens(arena, source, tok, &data, &prev_line, &prev_col, h.enc);
                 continue;
             }
 
@@ -580,20 +592,7 @@ const Handler = struct {
             else
                 ctfr;
 
-            const tok_line = tok.line - 1;
-            const tok_col = tok.column - 1;
-            const delta_line = tok_line - prev_line;
-            const delta_col = if (delta_line > 0) tok_col else tok_col - prev_col;
-            const length = tok.end - tok.start;
-
-            data.appendAssumeCapacity(delta_line);
-            data.appendAssumeCapacity(delta_col);
-            data.appendAssumeCapacity(@intCast(length));
-            data.appendAssumeCapacity(type_idx);
-            data.appendAssumeCapacity(0);
-
-            prev_line = tok_line;
-            prev_col = tok_col;
+            emitSemanticToken(&data, &prev_line, &prev_col, tok.start, tok.end, type_idx, source, h.enc);
         }
 
         return T.semantic_tokens.Result{ .data = try data.toOwnedSlice(arena) };
@@ -645,22 +644,16 @@ fn emitSemanticToken(
     end: usize,
     type_idx: u32,
     source: []const u8,
+    enc: lsp.offsets.Encoding,
 ) void {
-    var line: u32 = 0;
-    var col: u32 = 0;
-    for (source[0..start]) |c| {
-        if (c == '\n') {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
+    const pos = offsetToLspPos(source, start, enc);
+    const line = pos.line;
+    const col = pos.character;
     const dl = line - prev_line.*;
     const dc = if (dl > 0) col else col - prev_col.*;
     data.appendAssumeCapacity(dl);
     data.appendAssumeCapacity(dc);
-    data.appendAssumeCapacity(@intCast(end - start));
+    data.appendAssumeCapacity(@intCast(lsp.offsets.countCodeUnits(source[start..end], enc)));
     data.appendAssumeCapacity(type_idx);
     data.appendAssumeCapacity(0);
     prev_line.* = line;
@@ -674,6 +667,7 @@ fn emitInterpolatedStringTokens(
     data: *std.ArrayList(u32),
     prev_line: *u32,
     prev_col: *u32,
+    enc: lsp.offsets.Encoding,
 ) !void {
     const inner_off: usize = if (tok.type == .multiline_string) 3 else 1;
     const inner_start = tok.start + inner_off;
@@ -689,11 +683,11 @@ fn emitInterpolatedStringTokens(
 
         // emit literal string part before this {
         if (open.offset > literal_start) {
-            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset, tc(.string), source);
+            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset, tc(.string), source, enc);
         }
 
         // emit { as operator
-        emitSemanticToken(data, prev_line, prev_col, open.offset, open.offset + 1, tc(.operator), source);
+        emitSemanticToken(data, prev_line, prev_col, open.offset, open.offset + 1, tc(.operator), source, enc);
 
         // find matching }
         const close = interpEnd(source, open.offset, inner_end) orelse {
@@ -703,18 +697,18 @@ fn emitInterpolatedStringTokens(
 
         // emit expression body tokens
         if (close > open.offset + 1) {
-            try emitSubTokens(arena, source, open, close, data, prev_line, prev_col);
+            try emitSubTokens(arena, source, open, close, data, prev_line, prev_col, enc);
         }
 
         // emit } as operator
-        emitSemanticToken(data, prev_line, prev_col, close, close + 1, tc(.operator), source);
+        emitSemanticToken(data, prev_line, prev_col, close, close + 1, tc(.operator), source, enc);
 
         literal_start = close + 1;
     }
 
     // remaining literal string part
     if (inner_end > literal_start) {
-        emitSemanticToken(data, prev_line, prev_col, literal_start, inner_end, tc(.string), source);
+        emitSemanticToken(data, prev_line, prev_col, literal_start, inner_end, tc(.string), source, enc);
     }
 }
 
@@ -726,6 +720,7 @@ fn emitSubTokens(
     data: *std.ArrayList(u32),
     prev_line: *u32,
     prev_col: *u32,
+    enc: lsp.offsets.Encoding,
 ) !void {
     const body_start = open.offset + 1;
     const body = source[body_start..close];
@@ -747,7 +742,7 @@ fn emitSubTokens(
             .ident => if (lang.identIsFunction(body, st.end - body_start)) tc(.function) else tc(.variable),
             else => @intFromEnum(st.type.classify() orelse .variable),
         };
-        emitSemanticToken(data, prev_line, prev_col, st.start, st.end, ctfr, source);
+        emitSemanticToken(data, prev_line, prev_col, st.start, st.end, ctfr, source, enc);
     }
 }
 
@@ -866,7 +861,7 @@ fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
 }
 
 /// convert a diag report into lsp diag objects
-fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.Diagnostic {
+fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report, enc: lsp.offsets.Encoding) ![]T.Diagnostic {
     const source = report.source orelse "";
     if (report.parts.len == 0) return arena.alloc(T.Diagnostic, 0);
     var out = try std.ArrayList(T.Diagnostic).initCapacity(arena, report.parts.len);
@@ -877,8 +872,8 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
         const sp = part.span;
         out.appendAssumeCapacity(.{
             .range = .{
-                .start = offsetToLspPos(source, sp.span.start),
-                .end = offsetToLspPos(source, sp.span.end),
+                .start = offsetToLspPos(source, sp.span.start, enc),
+                .end = offsetToLspPos(source, sp.span.end, enc),
             },
             .severity = switch (sp.role) {
                 .primary => T.Diagnostic.Severity.Error,
@@ -907,31 +902,27 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
     return out.toOwnedSlice(arena);
 }
 
-/// walk source bytes to compute 0-based line/col from byte offset
-fn offsetToLspPos(text: []const u8, byte_off: usize) T.Position {
-    var line: u32 = 0;
-    var col: u32 = 0;
-    var i: usize = 0;
-
-    while (i < byte_off and i < text.len) : (i += 1) {
-        if (text[i] == '\n') {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    return .{ .line = line, .character = col };
+/// convert a byte offset to 9-based pos in the negotiated encoding
+fn offsetToLspPos(text: []const u8, byte_off: usize, enc: lsp.offsets.Encoding) T.Position {
+    const off = @min(byte_off, text.len);
+    const boundary = if (off < text.len and (text[off] & 0xC0) == 0x80) blk: {
+        var i = off;
+        while (i > 0 and (text[i] & 0xC0) == 0x80) i -= 1;
+        break :blk i;
+    } else off;
+    return lsp.offsets.indexToPosition(text, boundary, enc);
 }
 
-/// lsp (0-based) -> workspace (1-based)
-fn add1(p: T.Position) Workspace.Position {
-    return .{ .line = p.line + 1, .character = p.character + 1 };
+/// client position (0-based, enc units) -> workspace position (1-based, bytes)
+fn clientToWs(text: []const u8, p: T.Position, enc: lsp.offsets.Encoding) Workspace.Position {
+    const byte_pos = lsp.offsets.convertPositionEncoding(text, p, enc, .@"utf-8");
+    return .{ .line = byte_pos.line + 1, .character = byte_pos.character + 1 };
 }
 
-/// workspace (1-based) -> lsp (0-based)
-fn sub1(p: Workspace.Position) T.Position {
-    return .{ .line = p.line - 1, .character = p.character - 1 };
+/// workspace pos (1-based, bytes) -> client position (0-based, enc units)
+fn wsToClient(text: []const u8, p: Workspace.Position, enc: lsp.offsets.Encoding) T.Position {
+    const byte_pos: T.Position = .{ .line = p.line - 1, .character = p.character - 1 };
+    return lsp.offsets.convertPositionEncoding(text, byte_pos, .@"utf-8", enc);
 }
 
 /// convert 1-based workspace position to byte offset

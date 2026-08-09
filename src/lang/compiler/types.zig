@@ -355,6 +355,9 @@ fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
     if (value != .tuple) return false;
     if (value.tuple.len != variant.types.len) return false;
     for (variant.types, value.tuple) |expected, actual| {
+        // numbers are a single runtime type,,,, int/float payloads are
+        // interchangeable inside a tagged union
+        if (numericCompatible(actual, expected)) continue;
         if (!canCoerce(actual, expected)) return false;
     }
     return true;
@@ -365,9 +368,16 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     if (target != .tuple) return false;
     if (target.tuple.len != variant.types.len) return false;
     for (variant.types, target.tuple) |source, expected| {
+        if (numericCompatible(source, expected)) continue;
         if (!canCoerce(source, expected)) return false;
     }
     return true;
+}
+
+/// int and float are the same runtime type,,, inside a tagged union a
+/// payload annotated with either accepts the other
+fn numericCompatible(a: TypeInfo, b: TypeInfo) bool {
+    return (a == .int or a == .float) and (b == .int or b == .float);
 }
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
@@ -438,8 +448,9 @@ fn isOkTag(name: []const u8) bool {
 }
 
 /// `(:ok, T) | (:err, any)` unions (both the `!T` sugar and the literal
-/// form) and `(:ok, T)` / `(:err, E)` tagged tuples — the shapes `?` and
-/// `orelse` unwrap at runtime
+/// form) and `(:ok, T)` / `(:err, E)` tagged tuples
+///
+/// the shapes `?` and `orelse` unwrap at runtime
 pub fn isResultType(ti: TypeInfo) bool {
     return switch (ti) {
         .@"union" => |us| blk: {
@@ -503,10 +514,10 @@ pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(Typ
     .{ "bool", .bool },
     .{ "any", .any },
     .{ "nil", TypeInfo{ .atom = ":nil" } },
-    .{ "tuple", .any }, // no better lpaceholder (empty tuple is unit type)
+    .{ "tuple", TypeInfo{ .tuple = &.{} } }, // empty tuple is the "any tuple" sentinel
     .{ "table", TABLE_GENERIC },
     .{ "function", TypeInfo{ .function = &ANY_FN_SIG } },
-    .{ "atom", .any }, // no better paceholder (empty atom is any atom for display)
+    .{ "atom", TypeInfo{ .atom = "" } }, // empty atom payload is the "any atom" sentinel
     .{ "never", .never },
     .{ "parked", .any },
 });

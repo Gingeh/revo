@@ -42,6 +42,7 @@ pub const ICacheEntry = struct {
     pc: ProgramCounter,
     table_id: mem.TableID,
     version: usize,
+    gen: usize,
     key: Data,
     value: Data,
 };
@@ -171,9 +172,9 @@ module_dir: ?[]const u8,
 project_root: []const u8 = "",
 loading_stack: std.ArrayList([]const u8),
 
-/// matches type enum order
+/// indexed by @intFromEnum(mem.Type); tags are non-contiguous (0, 8-15)
 metatables: [
-    @typeInfo(memory.Type).@"enum".fields.len
+    @as(usize, @intFromEnum(memory.Type.foreign)) + 1
 ]?mem.TableID = @splat(null),
 module_cache: ModuleCache,
 package_path: std.ArrayList([]const u8),
@@ -207,6 +208,7 @@ icache: [2][256]ICacheEntry = @splat(
             .pc = std.math.maxInt(ProgramCounter),
             .table_id = 0,
             .version = 0,
+            .gen = 0,
             .key = Data.new.nil(),
             .value = Data.new.nil(),
         },
@@ -551,13 +553,13 @@ pub inline fn writeRegisterFast(self: *VM, base: usize, reg: opcode.Register, va
 }
 
 // 2-way associative icache lookups. set index = pc ^ table_id (low bits)
-pub inline fn icacheLookup(self: *VM, pc: ProgramCounter, table_id: mem.TableID, version: usize, key: Data) ?Data {
+pub inline fn icacheLookup(self: *VM, pc: ProgramCounter, table_id: mem.TableID, version: usize, gen: usize, key: Data) ?Data {
     const set = (pc ^ table_id) & (self.icache[0].len - 1);
     const w0 = &self.icache[0][set];
-    if (w0.pc == pc and w0.table_id == table_id and w0.version == version and w0.key.bits == key.bits)
+    if (w0.pc == pc and w0.table_id == table_id and w0.version == version and w0.gen == gen and w0.key.bits == key.bits)
         return w0.value;
     const w1 = &self.icache[1][set];
-    if (w1.pc == pc and w1.table_id == table_id and w1.version == version and w1.key.bits == key.bits)
+    if (w1.pc == pc and w1.table_id == table_id and w1.version == version and w1.gen == gen and w1.key.bits == key.bits)
         return w1.value;
     return null;
 }
@@ -567,12 +569,13 @@ pub inline fn icacheInsert(
     pc: ProgramCounter,
     table_id: mem.TableID,
     version: usize,
+    gen: usize,
     key: Data,
     value: Data,
 ) void {
     const set = (pc ^ table_id) & (self.icache[0].len - 1);
     self.icache[1][set] = self.icache[0][set];
-    self.icache[0][set] = .{ .pc = pc, .table_id = table_id, .version = version, .key = key, .value = value };
+    self.icache[0][set] = .{ .pc = pc, .table_id = table_id, .version = version, .gen = gen, .key = key, .value = value };
 }
 
 // direct-mapped struct field/method cache; set index = type_id ^ atom
@@ -860,7 +863,14 @@ pub inline fn captureUpvalue(self: *VM, slot_index: usize) !root.functions.Upval
 }
 
 fn closeUpvalues(self: *VM, from_index: usize) !void {
-    const open = &self.currentFiber().open_upvalues;
+    try self.closeUpvalueList(self.currentFiber(), from_index);
+}
+
+/// close every open upvalue in `fiber`'s list with slot >= from_index,
+/// snapshotting the register value into `closed` so the upvalue no longer
+/// depends on the fiber's register buffer (which may be freed or reused)
+pub fn closeUpvalueList(self: *VM, fiber: *Fiber, from_index: usize) !void {
+    const open = &fiber.open_upvalues;
     while (open.items.len > 0) {
         const last_idx = open.items.len - 1;
         const entry = open.items[last_idx];
@@ -868,7 +878,7 @@ fn closeUpvalues(self: *VM, from_index: usize) !void {
 
         const upvalue = try self.functions.getUpvalue(entry.id);
         if (upvalue.open_index) |slot_index| {
-            upvalue.closed = self.currentFiber().registers[slot_index];
+            upvalue.closed = fiber.registers[slot_index];
             upvalue.open_index = null;
         }
         _ = open.pop();
@@ -929,7 +939,12 @@ pub fn run(self: *VM) !void {
     };
 }
 
-fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const Data) EvalError!Data {
+/// `result_reg` is a register (relative to the caller frame's base) where a
+/// parked callee's eventual result should land. host callers that consume the
+/// value through dispatch instructions (index, concat, call) pass the
+/// instruction's result register so a park mid-callee resumes with the value
+/// in place; callers that discard or consume the result directly pass null.
+pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const Data, result_reg: ?opcode.Register) EvalError!Data {
     self.host_call_depth += 1;
     defer self.host_call_depth -= 1;
 
@@ -966,18 +981,29 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
     const base = fiber.top_base;
     const callee_slot = fiber.registers_len - 1;
 
-    errdefer {
-        fiber.registers_len = initial_slot_len;
-        fiber.pc = initial_pc;
-        self.closeUpvalues(initial_slot_len) catch {};
-        while (fiber.frames.items.len > initial_frame_depth) {
-            _ = fiber.frames.pop();
+    // on error.Parked the fiber suspends mid-callee: frames, registers, and
+    // pc must survive so the io waiter can resume the callee where it
+    // stopped. every other error unwinds back to the caller state.
+    const unwind = struct {
+        fn go(
+            v: *VM,
+            f: *Fiber,
+            slot_len: usize,
+            pc: usize,
+            frame_depth: usize,
+        ) void {
+            f.registers_len = slot_len;
+            f.pc = pc;
+            v.closeUpvalues(slot_len) catch {};
+            while (f.frames.items.len > frame_depth) {
+                _ = f.frames.pop();
+            }
+            f.top_base = if (f.frames.items.len == 0)
+                0
+            else
+                f.frames.items[f.frames.items.len - 1].base;
         }
-        fiber.top_base = if (fiber.frames.items.len == 0)
-            0
-        else
-            fiber.frames.items[fiber.frames.items.len - 1].base;
-    }
+    }.go;
 
     // note: callee already rooted at callee_slot above
     // callee_slot points to where we stored it; args start at callee_slot + 1
@@ -1001,10 +1027,25 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
 
     const argc: opcode.Register = @intCast(argc_usize);
 
-    try self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg });
+    self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg }) catch |e| {
+        if (e == error.Parked) {
+            self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
+            return e;
+        }
+        unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth);
+        return e;
+    };
 
     if (fiber.frames.items.len > caller_frame_depth) {
-        if (try vm_exec.execFiberUntilDepth(self, caller_frame_depth)) |_| return error.Panic;
+        const exec_result = vm_exec.execFiberUntilDepth(self, caller_frame_depth) catch |e| {
+            if (e == error.Parked) {
+                self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
+                return e;
+            }
+            unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth);
+            return e;
+        };
+        if (exec_result) |_| return error.Panic;
     }
 
     const result = fiber.registers[callee_slot];
@@ -1014,7 +1055,21 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
 
 // TODO inline everywhere
 pub inline fn callFunction(self: *VM, callee: Data, args: []const Data) EvalError!Data {
-    return self.callFunctionParts(callee, null, args);
+    return self.callFunctionParts(callee, null, args, null);
+}
+
+/// reroute a parked callee's wake-up or ret to a dispatch result register.
+/// the callee's closure frame (if any) is still on the fiber, so its eventual
+/// ret writes through the frame's result_register; a native callee wrote
+/// parked_result_slot at park time and wakeFiber fills it on completion
+fn rerouteParked(self: *VM, fiber: *Fiber, base: usize, caller_frame_depth: usize, result_reg: ?opcode.Register) void {
+    _ = self;
+    const rr = result_reg orelse return;
+    if (fiber.frames.items.len > caller_frame_depth) {
+        fiber.frames.items[fiber.frames.items.len - 1].result_register = rr;
+    } else {
+        fiber.parked_result_slot = base + rr;
+    }
 }
 
 pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
@@ -1573,6 +1628,7 @@ pub fn callRegister(
                 mm,
                 callee,
                 args,
+                instr.c,
             );
             try self.ensureAbsoluteSlot(base + instr.c);
             try self.writeRegisterFast(
@@ -1622,6 +1678,68 @@ pub fn callRegister(
     );
 }
 
+/// struct field defaults are constants evaluated once at registration, if a
+/// default is a mutable container (table) it would be shared by every
+/// constructed instance, so mutations leak across instances. clone any
+/// containers so each instance gets its own copy, immutable scalars and
+/// strings/tuples pass through unchanged
+fn cloneStructDefault(self: *VM, data: revo.Data, depth: u32) EvalError!revo.Data {
+    if (depth > 32) return data;
+    const alloc = self.runtime.alloc;
+
+    switch (data.tag()) {
+        .table => {
+            // copy the table by value: pool slots are append-only but the
+            // backing ArrayList moves on create(), so no pool pointer may be
+            // held across a nested clone. the internal array/hash buffers are
+            // stable, so a by-value copy stays valid
+            const src = (try self.tables.get(data.asTable().?)).*;
+
+            var items = std.ArrayList(revo.Data).initCapacity(alloc, src.array.items.len) catch
+                return error.OutOfMemory;
+            defer items.deinit(alloc);
+            for (src.array.items) |item|
+                items.append(alloc, try self.cloneStructDefault(item, depth + 1)) catch
+                    return error.OutOfMemory;
+
+            var keys = std.ArrayList(revo.Data).initCapacity(alloc, src.hash.count) catch
+                return error.OutOfMemory;
+            defer keys.deinit(alloc);
+            var vals = std.ArrayList(revo.Data).initCapacity(alloc, src.hash.count) catch
+                return error.OutOfMemory;
+            defer vals.deinit(alloc);
+            var hash_it = src.hash.orderedIterator();
+            while (hash_it.next()) |entry| {
+                keys.append(alloc, entry.key) catch return error.OutOfMemory;
+                vals.append(alloc, try self.cloneStructDefault(entry.val, depth + 1)) catch
+                    return error.OutOfMemory;
+            }
+
+            const new_id = try self.tables.create();
+            const new_t = try self.tables.get(new_id);
+            for (items.items) |item|
+                try new_t.push(item);
+            for (keys.items, vals.items) |k, v|
+                try new_t.putRaw(k, v, self);
+
+            return revo.Data.new.table(new_id);
+        },
+        .struct_val => {
+            const src = (try self.structGetInstance(data.asStructVal().?)).*;
+            const fields = try alloc.alloc(revo.Data, src.fields.len);
+            defer alloc.free(fields);
+            for (src.fields, 0..) |f, i|
+                fields[i] = try self.cloneStructDefault(f, depth + 1);
+
+            const new_id = try self.struct_instances.create(src.type_id, fields.len);
+            const new_inst = try self.structGetInstance(new_id);
+            @memcpy(new_inst.fields, fields);
+            return revo.Data.new.structVal(new_id);
+        },
+        else => return data,
+    }
+}
+
 pub fn structInitInstance(
     self: *VM,
     type_id: revo.StructTypeID,
@@ -1640,7 +1758,7 @@ pub fn structInitInstance(
 
     for (desc.fields, 0..) |f, i| {
         if (f.default_val) |dv|
-            instance.fields[i] = dv;
+            instance.fields[i] = try self.cloneStructDefault(dv, 0);
     }
 
     // undef means "no init table"
@@ -1851,6 +1969,11 @@ pub fn returnRegister(
         fiber.pc >= fiber.program.len)
     {
         const finished_id = self.sched.current_fiber;
+        // close the dying fiber's open upvalues before its register buffer is
+        // dropped or its id reused: closures held by other fibers read the
+        // final value from `closed`, never from a dead fiber's slots
+        if (fiber.open_upvalues.items.len > 0)
+            try self.closeUpvalues(0);
         try self.sched.finishFiber(finished_id, result);
         if (finished_id == 0) {
             fiber.registers_len = 0;

@@ -200,6 +200,12 @@ pub const Compiler = struct {
     }
 
     pub fn finishArtifact(self: *Compiler) !Artifact {
+        // if (self.ir_builder.instructions.items.len < 40) {
+        //     std.debug.print("[RAWFN]\n", .{});
+        //     for (self.ir_builder.instructions.items) |inst| {
+        //         std.debug.print("  op={any} res_r={d} arg={d}\n", .{ inst.opcode, inst.result_reg, inst.op_arg });
+        //     }
+        // }
         try fold.foldIr(self);
         try dce.dceIr(self);
         try peephole.peepholeIr(self);
@@ -669,7 +675,7 @@ pub const Compiler = struct {
                         .mul => if (any_float) .mul else .mul_int,
                         .div => .div_float,
                         .int_div => if (any_float) .div_floor_float else .div_int,
-                        .mod => .mod_int,
+                        .mod => if (any_float) .mod else .mod_int,
                         .pow => if (any_float) .pow_float else .pow_int,
                         .band => if (any_float) .band else .band_int,
                         .bor => if (any_float) .bor else .bor_int,
@@ -1386,6 +1392,14 @@ pub const Compiler = struct {
 
     pub fn compileBlock(self: *Compiler, exprs: []const *Node) InternalLowerError!void {
         if (exprs.len == 0) return self.pushNil();
+        // local slots must not overlap with live temporaries (callee/args of an
+        // enclosing call) when this block is compiled inline as an argument
+        if (self.slot_allocators.items.len > 0) {
+            const idx = self.slot_allocators.items.len - 1;
+            if (self.slot_allocators.items[idx] < self.active_registers) {
+                self.slot_allocators.items[idx] = @intCast(self.active_registers);
+            }
+        }
         var pushed_scope = false;
         if (state_mod.currentFunctionState(self) != null) {
             try state_mod.pushScope(self);

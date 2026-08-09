@@ -64,6 +64,7 @@ pub const TablePool = struct {
             t.hash.deinit(self.alloc);
             t.metatable = null;
             t.ic_version = 0;
+            t.gen +%= 1;
             t.alloc = self.alloc;
             self.marks.unset(id);
             pool.relink(&self.first, &self.last, &self.next, id);
@@ -155,9 +156,30 @@ fn freeTable(t: *Table, alloc: std.mem.Allocator) ?Table {
 }
 
 pub const Table = struct {
-    fn hashKey(key: Data) u64 {
+    /// keys hash by their value semantics, matching keyEq: numbers/atoms by
+    /// bits, strings and tuples by content. strings with the same content but
+    /// different interner ids (e.g. a concatenated key vs a literal) must hash
+    /// alike, otherwise equal keys land in different probe chains and lookup
+    /// misses even though keyEq would match
+    fn hashKey(key: Data, vm: *revo.VM) u64 {
         switch (key.tag()) {
             .number, .atom => return key.bits,
+            .string => {
+                var h = std.hash.Wyhash.init(0);
+                h.update(&[_]u8{@intCast(@intFromEnum(key.tag()))});
+                h.update(vm.stringValue(key.asString().?));
+                return h.final();
+            },
+            .tuple => {
+                const tuple = vm.tuples.get(key.asTuple().?) catch return key.bits;
+                var h = std.hash.Wyhash.init(0);
+                h.update(&[_]u8{@intCast(@intFromEnum(key.tag()))});
+                for (tuple.items) |item| {
+                    const item_hash = hashKey(item, vm);
+                    h.update(std.mem.asBytes(&item_hash));
+                }
+                return h.final();
+            },
             else => {},
         }
         var h = std.hash.Wyhash.init(0);
@@ -203,7 +225,7 @@ pub const Table = struct {
         fn lookup(self: *const HashPart, key: Data, vm: *revo.VM) ?u32 {
             if (self.buckets.len == 0) return null;
             const mask: u32 = @intCast(self.buckets.len - 1);
-            var idx = @as(u32, @truncate(hashKey(key))) & mask;
+            var idx = @as(u32, @truncate(hashKey(key, vm))) & mask;
             const limit: u32 = self.count;
             var probes: u32 = 0;
             while (self.buckets[idx].status == .occupied) {
@@ -227,10 +249,10 @@ pub const Table = struct {
 
         fn getOrPut(self: *HashPart, alloc: std.mem.Allocator, key: Data, vm: *revo.VM) !*Data {
             if (self.buckets.len == 0 or self.count * 100 > self.buckets.len * MAX_LOAD)
-                try self.grow(alloc);
+                try self.grow(alloc, vm);
 
             const mask: u32 = @intCast(self.buckets.len - 1);
-            var idx = @as(u32, @truncate(hashKey(key))) & mask;
+            var idx = @as(u32, @truncate(hashKey(key, vm))) & mask;
             while (self.buckets[idx].status == .occupied) {
                 if (keyEq(self.buckets[idx].key, key, vm))
                     return &self.buckets[idx].val;
@@ -251,7 +273,7 @@ pub const Table = struct {
             return &self.buckets[idx].val;
         }
 
-        fn grow(self: *HashPart, alloc: std.mem.Allocator) !void {
+        fn grow(self: *HashPart, alloc: std.mem.Allocator, vm: *revo.VM) !void {
             const new_len = if (self.buckets.len == 0) @as(u32, INIT_CAP) else @as(
                 u32,
                 @truncate(self.buckets.len * 2),
@@ -266,7 +288,7 @@ pub const Table = struct {
 
             while (cur != NULL_ID) {
                 const old = &self.buckets[cur];
-                var ni: u32 = @truncate(hashKey(old.key) & (new_len - 1));
+                var ni: u32 = @truncate(hashKey(old.key, vm) & (new_len - 1));
                 while (new_buckets[ni].status == .occupied)
                     ni = (ni + 1) & (new_len - 1);
 
@@ -306,7 +328,7 @@ pub const Table = struct {
             var hole = idx;
             var probe = (hole + 1) & mask;
             while (self.buckets[probe].status == .occupied) : (probe = (probe + 1) & mask) {
-                const natural: u32 = @truncate(hashKey(self.buckets[probe].key) & mask);
+                const natural: u32 = @truncate(hashKey(self.buckets[probe].key, vm) & mask);
                 const in_range = if (hole < probe)
                     natural > hole and natural <= probe
                 else
@@ -353,6 +375,10 @@ pub const Table = struct {
     hash: HashPart,
     metatable: ?memory.TableID = null,
     ic_version: usize = 0,
+    // bumped on every slot reuse so icache entries keyed on a freed table id
+    // can't match a new table that recycled the same id (version resets to 0
+    // on reuse, so version alone can't distinguish them)
+    gen: usize = 0,
 
     pub fn init(alloc: std.mem.Allocator) Table {
         return .{
@@ -375,7 +401,7 @@ pub const Table = struct {
             .atom => a.asAtom().? == b.asAtom().?,
             .function => a.asFunction().? == b.asFunction().?,
             .table => a.asTable().? == b.asTable().?,
-            .tuple => a.asTuple().? == b.asTuple().?,
+            .tuple => compare(vm, a, b) == .eq,
             .struct_val => a.asStructVal().? == b.asStructVal().?,
             .struct_type => a.asStructType().? == b.asStructType().?,
             .foreign => a.asForeign().? == b.asForeign().?,
@@ -383,10 +409,10 @@ pub const Table = struct {
     }
 
     fn integerArrayIndex(key: Data) ?usize {
-        // asNum never yields inf/nan (their bit patterns collide with the
-        // box mask), so only the sign and wholeness checks are needed
-        const n = key.asNum() orelse return null;
-        return if (n < 0 or @floor(n) != n) null else @as(usize, @intFromFloat(n));
+        // numToI64 rejects +-inf, nan, and out-of-i64-range values, so only
+        // the sign check is needed
+        const n = memory.numToI64(key.asNum() orelse return null) orelse return null;
+        return if (n < 0) null else @intCast(n);
     }
 
     pub fn put(self: *Table, table_id: memory.TableID, vm: *revo.VM, key: Data, val: Data) !void {
@@ -446,6 +472,23 @@ pub const Table = struct {
 
     pub inline fn getRawAtom(self: *Table, id: memory.AtomID, vm: *revo.VM) ?Data {
         return self.hash.get(Data.new.atom(id), vm);
+    }
+
+    pub const KeyValue = struct {
+        key: Data,
+        value: Data,
+    };
+
+    /// walk keyed (non-integer) entries in insertion order
+    pub fn keyedEntries(self: *const Table, alloc: std.mem.Allocator) ![]KeyValue {
+        var out = try std.ArrayList(KeyValue).initCapacity(alloc, self.hash.count);
+        var cur = self.hash.first;
+        while (cur != NULL_ID) {
+            const bucket = &self.hash.buckets[cur];
+            out.appendAssumeCapacity(.{ .key = bucket.key, .value = bucket.val });
+            cur = bucket.next;
+        }
+        return out.toOwnedSlice(alloc);
     }
 
     pub fn remove(self: *Table, key: Data, vm: *revo.VM) bool {
@@ -740,6 +783,22 @@ test "numeric and string keys are distinct" {
         \\ t["1"] = 200
         \\ t[1] + t["1"]
     , 300);
+}
+
+test "concatenated string keys match literal keys" {
+    try testing.topNumber(
+        \\ const t = {}
+        \\ t["user" ~ 42] = 1
+        \\ t["user42"] + t["user" ~ 42]
+    , 2);
+}
+
+test "tuple keys match by content" {
+    try testing.topNumber(
+        \\ const t = {}
+        \\ t[(1, 2)] = 5
+        \\ t[(1, 2)]
+    , 5);
 }
 
 test "metatable __tostring works on tables" {

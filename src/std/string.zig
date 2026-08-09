@@ -364,7 +364,9 @@ fn lower_f(args: []const Data, vm: *VM) !NativeResult {
 /// repeats string n times
 fn mul_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
-    const times = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.dataToString(args[1]));
+    const times = if (args[1].asNum()) |n|
+        root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1]))
+    else return .errType(1, "number", root.dataToString(args[1]));
     if (times < 0) return .errType(1, "positive number", root.dataToString(args[1]));
 
     const count: usize = @intCast(times);
@@ -512,7 +514,7 @@ fn ascii_f(args: []const Data, vm: *VM) !NativeResult {
 /// string_of({97, 98}) => "ab"
 fn string_of(args: []const Data, vm: *VM) !NativeResult {
     if (args[0].asNum()) |n| {
-        const code: u32 = @intFromFloat(n);
+        const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.dataToString(args[0]));
         if (code > 127) {
             return .other("ASCII code out of range");
         }

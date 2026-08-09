@@ -440,6 +440,10 @@ pub fn dataToString(data: Data) []const u8 {
     return typeof(data);
 }
 
+/// converts a number to an integer of type T; null when the value is not a
+/// finite integral number representable in T
+pub const numToInt = revo.vm.memory.numToInt;
+
 pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !NativeResult {
     const tag_atom = try resultTag(vm, tag);
     const items = [_]Data{
@@ -879,7 +883,7 @@ pub fn assert_eq(args: []const Data, vm: *VM) !NativeResult {
 pub fn print(args: []const Data, vm: *VM) !NativeResult {
     var pbuf: [256]u8 = undefined;
     const stdout_file = if (comptime revo.is_freestanding)
-        std.Io.File{ .handle = {}, .flags = .{ .nonblocking = false } }
+        std.Io.File{ .handle = if (@import("builtin").target.os.tag == .freestanding) @as(void, {}) else @as(std.posix.fd_t, -1), .flags = .{ .nonblocking = false } }
     else
         std.Io.File.stdout();
     var pw = stdout_file.writerStreaming(vm.runtime.io, &pbuf);
@@ -955,23 +959,21 @@ pub fn system_(tbl: []const Data, vm: *VM) !NativeResult {
         .stdout = .pipe,
         .stderr = .pipe,
     });
-    defer _ = proc.wait(vm.runtime.io) catch {};
+    defer proc.kill(vm.runtime.io);
 
-    var stderr_buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer stderr_buf.deinit();
-    var stdout_buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer stdout_buf.deinit();
+    // drain stdout and stderr concurrently: reading one pipe to EOF while the
+    // child blocks writing the other (full pipe buffer) would deadlock
+    var mr_buf: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    multi_reader.init(vm.runtime.alloc, vm.runtime.io, mr_buf.toStreams(), &.{ proc.stdout.?, proc.stderr.? });
+    defer multi_reader.deinit();
 
-    var read_buf: [1024]u8 = undefined;
-    var stdout_reader = (proc.stdout orelse unreachable).reader(vm.runtime.io, &read_buf);
-    _ = try stdout_reader.interface.streamRemaining(&stdout_buf.writer);
+    try multi_reader.fillRemaining(.none);
 
-    var read_buf2: [1024]u8 = undefined;
-    var stderr_reader = (proc.stderr orelse unreachable).reader(vm.runtime.io, &read_buf2);
-    _ = try stderr_reader.interface.streamRemaining(&stderr_buf.writer);
+    _ = try proc.wait(vm.runtime.io);
 
-    const so = try vm.adoptDataString(try stdout_buf.toOwnedSlice());
-    const se = try vm.adoptDataString(try stderr_buf.toOwnedSlice());
+    const so = try vm.adoptDataString(try multi_reader.toOwnedSlice(0));
+    const se = try vm.adoptDataString(try multi_reader.toOwnedSlice(1));
     return .Ok(vm, Data.new.tuple(try vm.tuples.create(&[2]Data{ so, se })));
 }
 
@@ -1028,9 +1030,10 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
     var result = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 128);
     defer result.deinit(vm.runtime.alloc);
 
-    var buf: [1]u8 = undefined;
+    // chunked reads instead of one syscall per byte
+    var buf: [4096]u8 = undefined;
     while (true) {
-        _ = file.readStreaming(vm.runtime.io, &.{buf[0..]}) catch |err| switch (err) {
+        const n = file.readStreaming(vm.runtime.io, &.{buf[0..]}) catch |err| switch (err) {
             error.EndOfStream => {
                 if (result.items.len > 0)
                     return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
@@ -1038,9 +1041,13 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
             },
             else => |e| return e,
         };
-        if (!read_eof and buf[0] == delim)
-            return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
-        try result.append(vm.runtime.alloc, buf[0]);
+        if (!read_eof) {
+            if (std.mem.indexOfScalar(u8, buf[0..n], delim)) |di| {
+                try result.appendSlice(vm.runtime.alloc, buf[0..di]);
+                return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
+            }
+        }
+        try result.appendSlice(vm.runtime.alloc, buf[0..n]);
     }
 }
 
@@ -1166,10 +1173,7 @@ pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
 /// parks fiber instead of blocking
 pub fn sleep(args: []const Data, vm: *VM) !NativeResult {
     const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0]));
-    const ms: u64 = blk: {
-        if (!std.math.isFinite(n) or n < 0 or @floor(n) != n) return .errType(0, "non-negative integer", dataToString(args[0]));
-        break :blk @as(u64, @intFromFloat(n));
-    };
+    const ms: u64 = numToInt(u64, n) orelse return .errType(0, "non-negative integer", dataToString(args[0]));
     try vm.schedParkCurrentForSleepMS(ms);
     return .parked();
 }
@@ -1301,7 +1305,7 @@ test "array methods" {
     try testing.topTrue("{1, 2, 3}:contains?(2)");
     try testing.topFalse("{1, 2, 3}:contains?(5)");
     try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
-    try testing.topNumber("{1, 2, 3}:sum()", 6);
+    try testing.topNumber("iter.sum({1, 2, 3})", 6);
 }
 
 test "array sort" {
@@ -1312,8 +1316,8 @@ test "array sort" {
 
 test "array transform" {
     try testing.topNumber("{1, 2, 3}:reverse():first()", 3);
-    try testing.topNumber("{1, 2, 3}:unique():sum()", 6);
-    try testing.topNumber("{1, 2, 1, 3, 2}:unique():sum()", 6);
+    try testing.topNumber("iter.sum({1, 2, 3}:unique())", 6);
+    try testing.topNumber("iter.sum({1, 2, 1, 3, 2}:unique())", 6);
 }
 
 test "string creation" {
@@ -1329,8 +1333,8 @@ test "string table conversion" {
 }
 
 test "array flatten" {
-    try testing.topNumber("{{1, 2}, {3, 4}}:flatten():sum()", 10);
-    try testing.topNumber("{{1}, {2, 3}, {4}}:flatten():sum()", 10);
+    try testing.topNumber("iter.sum({{1, 2}, {3, 4}}:flatten())", 10);
+    try testing.topNumber("iter.sum({{1}, {2, 3}, {4}}:flatten())", 10);
 }
 
 test "stdlib json time and string modules are exposed" {

@@ -1,0 +1,202 @@
+#+TITLE: using revo within emacs
+#+PROPERTY: HEADER-ARGS+ :tangle no
+
+revo works really well with emacs, just like lisp-ish language does
+
+this file is actually an emacs plugin!
+
+#+BEGIN_SRC emacs-lisp
+  ; you can put
+  (org-babel-load-file "/path/to/Emacs.org")
+                                          ; in your config
+                                          ; or tangle it manually
+
+     ; some blocks from this file will run automatically
+     ; ^^^^
+     ; the ones marked with =:tangle yes=
+#+END_SRC
+
+^ this also means your editor config will be updated with your revo version
+
+* major mode + lsp
+eglot 1.20+ ships all you need for good lsp support. and that's distributed with the emacs you have
+
+however, if you get some lsp features but not the newer ones (like highlighting), you might want to update eglot manually
+
+~<C-c><C-c>~ this code block and try opening a script
+#+BEGIN_SRC emacs-lisp :tangle yes :results none
+  (define-derived-mode revo-mode prog-mode "revo"
+    "majir mode for revo")
+
+  (add-to-list 'auto-mode-alist '("\\.rv\\'" . revo-mode))
+  (add-to-list 'auto-mode-alist '("\\.revo\\'" . revo-mode))
+
+  (with-eval-after-load 'eglot
+    (add-to-list 'eglot-server-programs '(revo-mode . ("revo" "--lsp"))))
+
+  (add-hook 'revo-mode-hook #'eglot-ensure)
+#+END_SRC
+
+* revo-eval commands
+these pipe buffer text to the =revo= cli directly
+
+you also have a repl at =M-x run-revo=. it's bad but it's not my fault, use vterm instead
+
+#+BEGIN_SRC emacs-lisp :tangle yes :results none :eval yes
+  (defun run-revo ()
+    (interactive)
+    (let* ((buf (make-comint "revo" "revo" nil)))
+      (with-current-buffer buf
+        (ansi-color-for-comint-mode-on))
+      (pop-to-buffer buf)))
+
+  (defgroup revo nil
+    "support for revo, the programming language"
+    :group 'languages
+    :prefix "revo-")
+
+  (defcustom revo-executable "revo"
+    "path to the revo binary"
+    :type 'string
+    :group 'revo)
+
+  (defcustom revo-eval-args '("-d")
+    "default cli flags passed to revo when evaluating code"
+    :type '(repeat string)
+    :group 'revo)
+
+  (defun revo--eval-string (code)
+    "pipe #0:code through the revo cli and return its output as a string"
+    (unless (executable-find revo-executable)
+      (user-error "revo executable not found: %s" revo-executable))
+    (with-temp-buffer
+      (insert code)
+      (let ((status (apply #'call-process-region
+                           (point-min) (point-max) revo-executable
+                           t t nil revo-eval-args)))
+        (unless (eq status 0)
+          (message "revo exited with status %s" status)))
+      (buffer-string)))
+
+  (defun revo--eval-and-report (code)
+    "evaluate #0:code via revo and show the result in the echo area"
+    (let ((output (string-trim (revo--eval-string code))))
+      (if (string-empty-p output)
+          (message "revo: (no output)")
+        (message "%s" output))))
+
+  (defun revo-eval-region (start end)
+    "evaluate the region from #0:start to #1:end using revo"
+    (interactive "r")
+    (revo--eval-and-report (buffer-substring-no-properties start end)))
+
+  (defun revo-eval-buffer ()
+    "evaluate the current buffer using revo"
+    (interactive)
+    (revo--eval-and-report (buffer-substring-no-properties (point-min) (point-max))))
+
+
+#+END_SRC
+
+* org mode (literate & interactive programs, like notebooks)
+
+revo works really well with emacs, because every program behaves lisp-ishly and must output something
+
+press ~<C-c><C-c>~ over this block:
+#+BEGIN_SRC emacs-lisp :results none :eval yes
+  (defun org-babel-execute:revo (body params)
+    "execute a block of revo by piping body to the cli"
+    ;; you can put `:args -a -b -c -d` into the code blocks header
+    (let* ((user-args (cdr (assq :args params)))
+           ;; -d for display, -D for debug
+           (args-list (if user-args (split-string user-args) '("-d"))))
+      (with-temp-buffer
+        (insert body)
+        ;; puts the source from temp buffer to revo stdin
+        (apply #'call-process-region (point-min) (point-max) "revo" t t nil args-list)
+        (buffer-string))))
+#+END_SRC
+
+then, you'll forever be able to press ~<C-c><C-c>~ over blocks like these:
+
+#+BEGIN_SRC revo
+"hello world"
+  |> print
+#+END_SRC
+
+#+RESULTS:
+: hello world
+: :ok
+
+and put any args in the header:
+
+- =--bench[n]= for benchmarks and =-D= for debug output
+#+BEGIN_SRC revo :args -D --bench1000
+  let acc = 1
+  for i in ..10000
+  acc += i
+
+  acc
+  # flexing my single-core perf here
+#+END_SRC
+
+#+RESULTS:
+: 49995001
+: +=========================
+: | best    0.060ms / 60000ns
+: | median  0.072ms / 72000ns
+: | p95     0.141ms / 141000ns
+: | worst   0.335ms / 335000ns
+
+- =--dis= for disassembly
+#+BEGIN_SRC revo :args --dis
+print("hello world")
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+; module
+   0  jump               -> L5
+; fn __main
+   1  load_global        r0, :print           ; print
+   2  load_const         r1, "hello world"    ; "hello world"
+   3  call               r0, args=1, -> r0    ; print("hello world")
+   4  ret                r0
+; L5 (from pc 0)
+   5  closure            r0, proto#0 (__main)
+   6  call               r0, args=0, -> r0
+   7  halt               r0
+#+end_example
+
+or integrate it deeper with elisp should you want to.
+
+this one diffs the assembly output for two blocks. pipes are equivalent to normal calls!
+
+
+#+NAME: revo-block-1
+#+BEGIN_SRC revo :args --dis
+  "hello world"
+#+END_SRC
+
+#+RESULTS: revo-block-1
+: hello world
+
+#+NAME: revo-block-2
+#+BEGIN_SRC revo :args --dis
+  "hello revo"
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp :var out1=revo-block-1 out2=revo-block-2 :results output
+  (with-temp-buffer
+    (ignore-errors
+      (call-process "diff" nil t nil
+                    (make-temp-file "r1" nil nil out1)
+                    (make-temp-file "r2" nil nil out2)))
+    (princ (buffer-string)))
+#+END_SRC
+
+#+RESULTS:
+: 4c4
+: <    1  load_const         r0, "hello world"    ; "hello world"
+: ---
+: >    1  load_const         r0, "hello revo"     ; "hello revo"

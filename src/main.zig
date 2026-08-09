@@ -75,6 +75,7 @@ pub fn main(provided_init: std.process.Init) void {
         error.UnknownCommand,
         error.CompilationError,
         error.FileError,
+        => std.process.exit(1),
         error.HelpRequested,
         error.VersionRequested,
         => {},
@@ -82,6 +83,7 @@ pub fn main(provided_init: std.process.Init) void {
             var stderr_buf: [256]u8 = undefined;
             var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
             pretty.printError(&stderr.interface, "{s}", .{@errorName(err)}) catch return;
+            std.process.exit(1);
         },
     };
 }
@@ -165,10 +167,48 @@ fn runMain(init: std.process.Init) !void {
                 printError(init, "reading stdin - {}", .{err});
                 return error.FileError;
             };
-            if (std.mem.endsWith(u8, path, ".rvo")) {
+            if (std.mem.startsWith(u8, source, &revo.bytecode.MAGIC)) {
                 try runBytecode(init, init.gpa, "<stdin>", source, config);
             } else {
                 try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
+            }
+            if (config.inline_code) |code| try runInlineCode(init, init.gpa, code, config);
+            if (!config.interactive) return;
+        } else {
+            const source = std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, std.Io.Limit.unlimited) catch |err| {
+                printError(init, "{s} '{s}'", .{ @errorName(err), path });
+                return error.FileError;
+            };
+
+            if (std.mem.endsWith(u8, path, ".rvo")) {
+                switch (config.mode) {
+                    .run => try runBytecode(init, init.gpa, path, source, config),
+                    .bench => try benchBytecode(init, init.gpa, path, source, config),
+                    .disassemble => {
+                        var vm = try initVM(init, init.gpa, config.argv);
+                        defer vm.deinit();
+                        var deserialized = revo.bytecode.deserialize(&vm, source, init.gpa) catch |err| {
+                            printError(init, "deserializing bytecode - {}", .{err});
+                            return error.CompilationError;
+                        };
+                        defer deserialized.deinit();
+                        try revo.vm.debug.printDisassembly(&vm, .{
+                            .instructions = deserialized.instructions,
+                            .spans = deserialized.spans,
+                        }, "");
+                    },
+                    .compile => {
+                        printError(init, "cannot compile bytecode files", .{});
+                        return error.InvalidArgs;
+                    },
+                    .docs => {
+                        printError(init, "cannot extract docs from bytecode files", .{});
+                        return error.InvalidArgs;
+                    },
+                    .lsp => unreachable,
+                }
+            } else {
+                try handleSource(init, init.gpa, arena, path, source, config);
             }
             if (!config.interactive) return;
         }
@@ -184,7 +224,11 @@ fn runMain(init: std.process.Init) !void {
                 printError(init, "reading stdin - {}", .{err});
                 return error.FileError;
             };
-            try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
+            if (std.mem.startsWith(u8, source, &revo.bytecode.MAGIC)) {
+                try runBytecode(init, init.gpa, "<stdin>", source, config);
+            } else {
+                try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
+            }
             if (!config.interactive and config.inline_code == null) return;
         }
     }
@@ -192,45 +236,6 @@ fn runMain(init: std.process.Init) !void {
     if (config.inline_code) |code| {
         try runInlineCode(init, init.gpa, code, config);
         if (!config.interactive and config.script_path == null) return;
-    }
-
-    if (config.script_path) |path| {
-        const source = std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, std.Io.Limit.unlimited) catch |err| {
-            printError(init, "{s} '{s}'", .{ @errorName(err), path });
-            return error.FileError;
-        };
-
-        if (std.mem.endsWith(u8, path, ".rvo")) {
-            switch (config.mode) {
-                .run => try runBytecode(init, init.gpa, path, source, config),
-                .bench => try benchBytecode(init, init.gpa, path, source, config),
-                .disassemble => {
-                    var vm = try initVM(init, init.gpa, config.argv);
-                    defer vm.deinit();
-                    var deserialized = revo.bytecode.deserialize(&vm, source, init.gpa) catch |err| {
-                        printError(init, "deserializing bytecode - {}", .{err});
-                        return error.CompilationError;
-                    };
-                    defer deserialized.deinit();
-                    try revo.vm.debug.printDisassembly(&vm, .{
-                        .instructions = deserialized.instructions,
-                        .spans = deserialized.spans,
-                    }, "");
-                },
-                .compile => {
-                    printError(init, "cannot compile bytecode files", .{});
-                    return error.InvalidArgs;
-                },
-                .docs => {
-                    printError(init, "cannot extract docs from bytecode files", .{});
-                    return error.InvalidArgs;
-                },
-                .lsp => unreachable,
-            }
-        } else {
-            try handleSource(init, init.gpa, arena, path, source, config);
-        }
-        if (!config.interactive) return;
     }
 
     var vm = try initVM(init, init.gpa, config.argv);

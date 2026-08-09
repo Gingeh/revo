@@ -67,6 +67,19 @@ pub const core_atoms = enum(usize) {
     float,
     number,
     num,
+    // iterator state keys
+    kind,
+    func,
+    up,
+    n,
+    a,
+    b,
+    step,
+    idx,
+    phase,
+    entries,
+    cur,
+    count,
 
     pub const lastFalse = @intFromEnum(@This().false);
 

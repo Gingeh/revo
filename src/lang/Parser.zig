@@ -381,7 +381,7 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
                     const right = if (into_what == .kw_fn)
                         try self.parseFnWithBodyMin(self.advance(), bp + 1)
                     else
-                        try self.parseExpression(bp + 1);
+                        try self.parseExpression(BP.bare_call);
                     left = try self.desugarPipe(left, right);
                     continue;
                 },
@@ -432,8 +432,8 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
                 },
             };
             const is_float = (parsed == .float);
-            if (value > @import("revo").memory.PAYLOAD_MASK)
-                try self.recordError(.InvalidNumber, "number over 2^48 (281474976710655)", token.span());
+            if (!std.math.isFinite(value))
+                try self.recordError(.InvalidNumber, "number literal too large", token.span());
             break :blk self.allocExpr(token.span(), .{ .number = .{ .value = value, .is_float = is_float } });
         },
         .string => if (token.interp_opens.len > 0)
@@ -1903,7 +1903,21 @@ fn parseInterpolatedString(self: *Parser, token: Token) anyerror!*Node {
             .line = open.line,
             .column = open.column + 1,
         });
-        const value = try parseTokens(self.alloc, embedded_tokens);
+        const value: *Node = switch (try parseTokensReport(self.alloc, embedded_tokens)) {
+            .ok => |expr| expr,
+            // fold the fragment's diagnostics into this parse instead of
+            // aborting the whole file: a bad body (e.g. 1e999) must not
+            // discard errors already accumulated elsewhere in the file
+            .err => |failure| blk: {
+                self.had_errors = true;
+                if (self.first_error_kind == null) {
+                    self.first_error_kind = failure.kind;
+                    if (diagnostic.firstError(failure.report)) |msg| self.first_error_message = msg;
+                }
+                try self.errors.appendSlice(self.alloc, failure.report.parts);
+                break :blk try self.allocExpr(token.span(), .{ .string = token.text });
+            },
+        };
         try args.append(self.alloc, value);
         try format.appendSlice(self.alloc, switch (mode) {
             .display => "%v",

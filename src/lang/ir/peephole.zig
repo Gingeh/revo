@@ -598,8 +598,9 @@ fn constInt(self: *Compiler, inst: *const ir.IrInst) ?i64 {
         .load_const => {
             if (inst.op_arg < self.vm.constants.items.len) {
                 if (self.vm.constants.items[inst.op_arg].asNum()) |n| {
-                    const iv: i64 = @intFromFloat(n);
-                    if (@as(f64, @floatFromInt(iv)) == n) return iv;
+                    if (revo.memory.numToI64(n)) |iv| {
+                        if (@as(f64, @floatFromInt(iv)) == n) return iv;
+                    }
                 }
             }
             return null;

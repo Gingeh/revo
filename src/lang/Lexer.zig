@@ -664,6 +664,12 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
                 _ = self.advance();
                 continue;
             }
+            // json idiom: `{"...` — an escaped quote right after the brace
+            // means this brace is literal content, not an interpolation start
+            // if (!self.atEnd() and self.peek() == '\\' and self.peekN(1) == '"') {
+            //     try buf.append(self.alloc, c);
+            //     continue;
+            // }
             try interp_opens.append(self.alloc, .{
                 .offset = self.pos - 1 + self.base_offset,
                 .line = self.line,
@@ -731,11 +737,22 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
             self.pending_error_span = null;
             const dedent = try dedentMultiline(self.alloc, raw);
             const text = dedent.text;
+            defer self.alloc.free(dedent.losses);
             if (dedent.dedented) {
-                // dedent shifts decoded positions: initial \n plus strip per line
+                // dedent shifts decoded positions: the leading \n plus whatever
+                // was actually removed from each line. whitespace-only lines
+                // shorter than the indent lose fewer chars, so count per line
+                // instead of assuming strip every line
+                var nl: usize = 0;
+                var line_end: usize = 1;
+                var removed: usize = 1 + dedent.losses[0];
                 for (interp_opens.items) |*open| {
-                    const nl_before = std.mem.count(u8, raw[0..open.idx], "\n");
-                    open.idx -|= nl_before * dedent.strip + 1;
+                    while (std.mem.indexOfScalar(u8, raw[line_end..open.idx], '\n')) |nl_pos| {
+                        line_end += nl_pos + 1;
+                        nl += 1;
+                        removed += dedent.losses[nl];
+                    }
+                    open.idx -|= removed;
                 }
             }
             self.alloc.free(raw);
@@ -780,6 +797,12 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
                 _ = self.advance();
                 continue;
             }
+            // json idiom: `{"...` — an escaped quote right after the brace
+            // means this brace is literal content, not an interpolation start
+            // if (!self.atEnd() and self.peek() == '\\' and self.peekN(1) == '"') {
+            //     try buf.append(self.alloc, c);
+            //     continue;
+            // }
             try interp_opens.append(self.alloc, .{
                 .offset = self.pos - 1 + self.base_offset,
                 .line = self.line,
@@ -798,8 +821,14 @@ fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token
     return error.UnterminatedString;
 }
 
-fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) !struct { text: []u8, strip: usize, dedented: bool } {
-    if (text.len == 0 or text[0] != '\n') return .{ .text = try alloc.dupe(u8, text), .strip = 0, .dedented = false };
+fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) !struct {
+    text: []u8,
+    /// chars removed from each body line (after the leading \n); lines shorter
+    /// than the indent lose fewer than strip
+    losses: []usize,
+    dedented: bool,
+} {
+    if (text.len == 0 or text[0] != '\n') return .{ .text = try alloc.dupe(u8, text), .losses = &.{}, .dedented = false };
 
     const body = text[1..];
     var lines = try std.ArrayList([]const u8).initCapacity(alloc, 8);
@@ -827,6 +856,12 @@ fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) !struct { text: [
     }
 
     const strip = min_indent orelse 0;
+    // chars removed per line, tracked before editing: whitespace-only lines
+    // shorter than the indent lose fewer than strip
+    const losses = try alloc.alloc(usize, lines.items.len);
+    for (lines.items, 0..) |line, i| {
+        losses[i] = if (line.len > strip) strip else line.len;
+    }
     // dedent each line in place
     for (lines.items) |*line| {
         if (line.len > strip) {
@@ -848,7 +883,7 @@ fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) !struct { text: [
         try buf.appendSlice(alloc, line);
     }
 
-    return .{ .text = try buf.toOwnedSlice(alloc), .strip = strip, .dedented = true };
+    return .{ .text = try buf.toOwnedSlice(alloc), .losses = losses, .dedented = true };
 }
 
 fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token {

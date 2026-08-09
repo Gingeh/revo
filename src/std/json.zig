@@ -58,7 +58,14 @@ fn resultErr(vm: *VM, message: []const u8) !NativeResult {
 
 fn writeJsonValue(data: Data, vm: *VM, writer: *std.Io.Writer) anyerror!void {
     return switch (data.tag()) {
-        .number => return error.UnsupportedJsonValue,
+        .number => blk: {
+            const n = data.asNum().?;
+            if (!std.math.isFinite(n)) return error.UnsupportedJsonValue;
+            if (@trunc(n) == n and @abs(n) < 9.0e18) {
+                break :blk try writer.print("{d}", .{@as(i64, @intFromFloat(n))});
+            }
+            break :blk try writer.print("{d}", .{n});
+        },
         .string => try writeJsonString(writer, vm.stringValue(data.asString().?)),
         .atom => blk: {
             const id = data.asAtom().?;
@@ -93,8 +100,37 @@ fn writeArrayJson(items: []const Data, vm: *VM, writer: *std.Io.Writer) anyerror
 
 fn writeTableJson(id: revo.memory.TableID, vm: *VM, writer: *std.Io.Writer) anyerror!void {
     const table = try vm.tables.get(id);
-    if (table.hash.count != 0) return error.UnsupportedJsonValue;
-    return writeArrayJson(table.array.items, vm, writer);
+    if (table.hash.count == 0) return writeArrayJson(table.array.items, vm, writer);
+
+    // keyed entries encoded as a json object; integer slots become "0".."n-1"
+    // keys so nothing is dropped
+    try writer.writeByte('{');
+    var first = true;
+    for (table.array.items, 0..) |item, idx| {
+        if (!first) try writer.writeByte(',');
+        first = false;
+        var buf: [20]u8 = undefined;
+        const key_str = try std.fmt.bufPrint(&buf, "{d}", .{idx});
+        try writeJsonString(writer, key_str);
+        try writer.writeByte(':');
+        try writeJsonValue(item, vm, writer);
+    }
+
+    const entries = try table.keyedEntries(vm.runtime.alloc);
+    defer vm.runtime.alloc.free(entries);
+    for (entries) |entry| {
+        if (!first) try writer.writeByte(',');
+        first = false;
+        const key_str = switch (entry.key.tag()) {
+            .atom => vm.atomName(entry.key.asAtom().?),
+            .string => vm.stringValue(entry.key.asString().?),
+            else => return error.UnsupportedJsonValue,
+        };
+        try writeJsonString(writer, key_str);
+        try writer.writeByte(':');
+        try writeJsonValue(entry.value, vm, writer);
+    }
+    try writer.writeByte('}');
 }
 
 fn writeJsonString(writer: *std.Io.Writer, str: []const u8) anyerror!void {
@@ -106,7 +142,12 @@ fn writeJsonString(writer: *std.Io.Writer, str: []const u8) anyerror!void {
             '\n' => try writer.writeAll("\\n"),
             '\r' => try writer.writeAll("\\r"),
             '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
+            0x08 => try writer.writeAll("\\b"),
+            0x0c => try writer.writeAll("\\f"),
+            else => if (c < 0x20)
+                try writer.print("\\u{x:0>4}", .{c})
+            else
+                try writer.writeByte(c),
         }
     }
     try writer.writeByte('"');

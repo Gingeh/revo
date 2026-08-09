@@ -1,0 +1,169 @@
+struct Rng {
+  state = 1,
+
+  fn next(self, n: int) do
+    self.state = (self.state * 1103515245 + 12345) % 2147483648
+    self.state % n
+    # |> inspect
+  end,
+}
+test "rng doesnt output 0" do
+  const rng = Rng{state = time.monotonic_ns()}
+  for i in 0..100 do
+    if not rng:next(1000) != 0
+      print("got 0 on ", i) and return (:err, :UhOh)
+  end
+end
+
+const rng = Rng{state = time.monotonic_ns()}
+
+fn pref(a: any, b: any) fmt("%v %v", a, b)
+
+fn one_of(what: any, from: table|string) -> bool do
+  for x in from
+    if x == what return :true
+  :false
+end
+
+const NOWORD = string_of(10)
+
+# TODO: this string should be able to be a doc comment, via @doc"string text which can also be multiline"
+"""
+markov chain
+"""
+struct Chain {
+  state = {},
+  starts = {},
+  sent_starts = {},
+
+  fn add(self, idx: int, val: string) do
+    # missing keys come back as :undef, so we can create the bucket lazily
+    if not self.state[idx]
+      self.state[idx] = {}
+
+    self.state[idx]:push(val)
+  end,
+
+  fn train(self, corpus: string) do
+    # normalize line breaks and split punctuation so the chain sees more shape
+    const all_w =
+      read({path = corpus, delimiter = :eof})?
+        :replace("\r", " ")
+        :replace("\n", " ")
+        :replace("\t", " ")
+        :replace(".", " . ")
+        :replace(",", " , ")
+        :replace("!", " ! ")
+        :replace("?", " ? ")
+        :split(" ")
+
+    let (w1, w2) = (NOWORD, NOWORD)
+    let next_is_start = :true
+
+    for w in all_w do
+      if w == "" do
+        # idk when this happens
+      end else do
+        # keep every seen prefix so take() can jump to a new spot later
+        self.starts:push((w1, w2))
+        if next_is_start do
+          self.sent_starts:push((w1, w2))
+        end
+
+        self:add(pref(w1, w2), w)
+        w1 = w2
+        w2 = w
+        # yeah i know a semicolon doesnt mean a new sentence
+        next_is_start = one_of(w, {".", "!", "?", ";"})
+      end
+    end
+
+    # close the chain with a terminal word so dead ends are real, not silent
+    self.starts:push((w1, w2))
+    if next_is_start do
+      self.sent_starts:push((w1, w2))
+    end
+    self:add(pref(w1, w2), NOWORD)
+  end,
+
+  fn take(self, params: table) -> string do
+    if not (let count: int = params.count)
+      panic("params must contain a count")
+
+    let out = ""
+    # prefer sentence starts so restarts land on real opening shapes
+    const pool = if len(self.sent_starts) > 0 do
+      self.sent_starts
+    end else do
+      self.starts
+    end
+    const start = pool[rng:next(len(pool))]
+    let w1 = start[0]
+    let w2 = start[1]
+    # print(rng:next(len(pool)), start, w1, w2)
+
+    # keep walking until you hit the limit or run out of useful continuations
+    for i in 0..count do
+      match self.state[pref(w1, w2)]
+      | x when not x => do
+        # if the chain has no edge here, jump to another learned prefix
+        const next = pool[rng:next(len(pool))]
+        w1 = next[0]
+        w2 = next[1]
+      end
+      | list when len(list) < 1 => do
+        # empty buckets mean the chain dried out, so restart from a real prefix
+        const next = pool[rng:next(len(pool))]
+        w1 = next[0]
+        w2 = next[1]
+      end
+      | list when len(list) >= 1 => do
+        const n = len(list)
+        const nextword = list[rng:next(n)]
+
+        if nextword == NOWORD do
+          # the sentinel says the sentence ended, so jump instead of stopping
+          const next = pool[rng:next(len(pool))]
+          w1 = next[0]
+          w2 = next[1]
+        end else do
+          if one_of(nextword, ".,!?") do
+            # tight punctuation should stick to the word before it
+            if len(out) > 0 do
+              out = out:trim()
+              out = fmt("%v%v", out, nextword)
+            end else do
+              out = nextword
+            end
+          end else do
+            if len(out) > 0 do
+              out = fmt("%v %v", out, nextword)
+            end else do
+              out = nextword
+            end
+          end
+          w1 = w2
+          w2 = nextword
+        end
+      end
+    end
+
+    # tighten the text after generation so punctuation hugs the word before it
+    out = out:replace(" .", ".")
+    out = out:replace(" ,", ",")
+    out = out:replace(" !", "!")
+    out = out:replace(" ?", "?")
+    out = out:replace("  ", " ")
+    out = out:replace("  ", " ")
+
+    out
+  end
+}
+
+# TODO: state is defaulted and it shouldn't be a compiler error here
+const c = Chain{state = {}, starts = {}, sent_starts = {}}
+c:train("./monty-python.txt")?
+
+print(c:take({count = 500}))
+# TODO: you should be able to do this:
+# let x = Chain.take(c, 50)?

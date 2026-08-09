@@ -19,8 +19,8 @@ pub const Error = error{
 };
 
 pub const MAGIC = [4]u8{ 'R', 'E', 'V', 'O' };
-pub const VERSION_MAJOR: u16 = 0;
-pub const VERSION_MINOR: u16 = 1;
+pub const VERSION_MAJOR: u16 = 1; // 1: nanbox tag values changed (0, 8-15)
+pub const VERSION_MINOR: u16 = 2; // 2: const_local_bits serialized at its real width
 
 /// on-disk
 pub const Header = extern struct {
@@ -148,7 +148,8 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
             try writeIntLE(&buffer, allocator, u8, @intCast(local));
         }
 
-        const bits_len = (proto.const_locals.len + 7) / 8;
+        const bits_len = proto.const_local_bits.len;
+        try writeIntLE(&buffer, allocator, u32, @intCast(bits_len));
         try buffer.appendSlice(allocator, proto.const_local_bits[0..bits_len]);
     }
 
@@ -276,10 +277,10 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
             local.* = (try reader.takeArray(1))[0];
         }
 
-        const bits_len = (cl_count + 7) / 8;
-        const const_local_bits = try allocator.alloc(u8, bits_len);
+        const const_bits_len = std.mem.readInt(u32, try reader.takeArray(4), .little);
+        const const_local_bits = try allocator.alloc(u8, const_bits_len);
         defer allocator.free(const_local_bits);
-        if (bits_len > 0) try reader.readSliceAll(const_local_bits);
+        if (const_bits_len > 0) try reader.readSliceAll(const_local_bits);
 
         // createPrototype takes ownership do NOT free these slices after pls
         _ = try vm.functions.createPrototype(.{

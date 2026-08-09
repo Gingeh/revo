@@ -5,6 +5,7 @@
 const std = @import("std");
 const Data = @import("memory.zig").Data;
 const BOX_MASK = @import("memory.zig").BOX_MASK;
+const BOX_TAG = @import("memory.zig").BOX_TAG;
 const VM = @import("VM.zig");
 const Instruction = @import("opcode.zig").Instruction;
 const Opcode = @import("opcode.zig").Opcode;
@@ -63,10 +64,11 @@ pub inline fn evalCachedFast(
     // for eq/neq: either being unboxed means a number is involved; a boxed
     // non-number bitcasts to a NaN, and NaN != NaN below does the correct
     // false/true result (tags differ). for ordered ops require both unboxed,
-    // which guarantees finite numbers (exponent all-ones = inf/nan overlaps
-    // BOX_MASK), so no NaN branch is needed
+    // which guarantees real doubles (the boxed marker is the quiet-NaN
+    // pattern; all real doubles, including +-inf, differ from it), so no
+    // NaN branch is needed
     if (comptime op == .eq or op == .neq) {
-        if ((lhs.bits & rhs.bits & BOX_MASK) != BOX_MASK) {
+        if ((lhs.bits & rhs.bits & BOX_MASK) != BOX_TAG) {
             const lf: f64 = @bitCast(lhs.bits);
             const rf: f64 = @bitCast(rhs.bits);
             if (lf != lf or rf != rf) {
@@ -78,8 +80,8 @@ pub inline fn evalCachedFast(
             return;
         }
     } else {
-        if ((lhs.bits & BOX_MASK) != BOX_MASK and
-            (rhs.bits & BOX_MASK) != BOX_MASK)
+        if ((lhs.bits & BOX_MASK) != BOX_TAG and
+            (rhs.bits & BOX_MASK) != BOX_TAG)
         {
             const lf: f64 = @bitCast(lhs.bits);
             const rf: f64 = @bitCast(rhs.bits);
@@ -108,7 +110,7 @@ pub inline fn evalCachedFast(
     if (comptime op == .eq or op == .neq) {
         // fast path: boxed values; identical bits = identity = equality
         // strings and tuples are value types, fall through to compare()
-        if ((lhs.bits & BOX_MASK) == BOX_MASK) {
+        if ((lhs.bits & BOX_MASK) == BOX_TAG) {
             const tag = lhs.tag();
             if (tag != .string and tag != .tuple and tag != .number) {
                 const is_eq = lhs.bits == rhs.bits;
@@ -117,7 +119,7 @@ pub inline fn evalCachedFast(
             }
         }
         // fast path: both are numbers; compare raw bits (handles +-0)
-        if ((rhs.bits & BOX_MASK) != BOX_MASK) {
+        if ((rhs.bits & BOX_MASK) != BOX_TAG) {
             const SIGN_MASK: u64 = @as(u64, 1) << 63;
             if (lhs.bits == rhs.bits) {
                 VM.regWrite(slots, base, instr.a, Data.new.boolean(op == .eq));

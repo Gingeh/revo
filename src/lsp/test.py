@@ -192,6 +192,47 @@ async def test_definition(client: LanguageClient):
 
 
 @pytest.mark.asyncio(loop_scope="module")
+async def test_utf16_positions(client: LanguageClient):
+    """positions are measured in the negotiated encoding (utf-16 default);
+    multibyte chars before the cursor must not shift columns"""
+    uri = "file:///test/utf16.rv"
+    # line 2: `print("héllo") x` -> `x` is utf-16 col 15 but byte col 16
+    text = 'print("héllo")\nfn f(a) a\nprint("héllo") f\n'
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(uri=uri, language_id="revo", version=1, text=text),
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=2, character=15),
+            text_document=TextDocumentIdentifier(uri=uri),
+        )
+    )
+    assert result is not None, "hover on f returned None"
+    assert result.contents is not None
+    assert "fn f" in result.contents.value, f"expected fn f hover, got: {result.contents.value}"
+    assert result.range.start.line == 1
+    assert result.range.start.character == 3, (
+        f"definition should be at utf-16 col 3, got {result.range.start.character}"
+    )
+
+    loc = await client.text_document_definition_async(
+        params=DefinitionParams(
+            position=Position(line=2, character=15),
+            text_document=TextDocumentIdentifier(uri=uri),
+        )
+    )
+    assert loc is not None, "definition on f returned None"
+    assert loc.range.start.line == 1
+    assert loc.range.start.character == 3, (
+        f"definition should be at utf-16 col 3, got {loc.range.start.character}"
+    )
+
+
+@pytest.mark.asyncio(loop_scope="module")
 async def test_hover(client: LanguageClient):
     """hover over `x` should return information"""
     result = await client.text_document_hover_async(
@@ -801,7 +842,7 @@ async def test_import_hover_module_name(client: LanguageClient):
         contents = result.contents
         assert contents is not None
         assert "module" in contents.value, f"expected 'module' in hover, got: {contents.value}"
-        assert "fn hi(a: num, b: num) -> num" in contents.value, (
+        assert "fn hi(a: int, b: int) -> int" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )
         assert "const CT: int = 5" in contents.value, (

@@ -11,7 +11,11 @@ pub const FieldLookup = struct {
     from_meta: bool,
 };
 
-pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLookup {
+/// `result_reg`, when set, is where a parking `__index` metamethod's result
+/// should land on resume: the metamethod runs on the fiber and its eventual
+/// ret is rerouted there (see VM.callFunctionParts), so a dispatch
+/// instruction that parks mid-lookup resumes with its result register filled
+pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("opcode.zig").Register) VM.EvalError!?FieldLookup {
     switch (object.tag()) {
         .table => {
             const table_id = object.asTable().?;
@@ -20,12 +24,12 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
                 return .{ .value = value, .from_meta = false };
             }
             if (t.metatable) |mt_id| {
-                if (try resolveViaMetatable(self, object, key, mt_id)) |resolved| {
+                if (try resolveViaMetatable(self, object, key, mt_id, result_reg)) |resolved| {
                     return resolved;
                 }
             }
             const type_mt_id = self.metatables[@intFromEnum(mem.Type.table)] orelse return null;
-            return resolveViaMetatable(self, object, key, type_mt_id);
+            return resolveViaMetatable(self, object, key, type_mt_id, result_reg);
         },
         .tuple => {
             const tuple_id = object.asTuple().?;
@@ -54,14 +58,14 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
             }
 
             if (instance_mt_id) |mt_id| {
-                if (try resolveViaMetatable(self, object, key, mt_id)) |resolved| {
+                if (try resolveViaMetatable(self, object, key, mt_id, result_reg)) |resolved| {
                     return resolved;
                 }
             }
 
             const type_mt_id = self.metatables[@intFromEnum(mem.Type.tuple)] orelse return null;
             if (instance_mt_id != null and instance_mt_id.? == type_mt_id) return null;
-            return resolveViaMetatable(self, object, key, type_mt_id);
+            return resolveViaMetatable(self, object, key, type_mt_id, result_reg);
         },
         .struct_val => {
             const instance_id = object.asStructVal().?;
@@ -100,18 +104,18 @@ pub fn resolveField(self: *VM, object: Data, key: Data) VM.EvalError!?FieldLooku
         },
         else => {
             const mt_id = try self.getMetatableId(object) orelse return null;
-            return resolveViaMetatable(self, object, key, mt_id);
+            return resolveViaMetatable(self, object, key, mt_id, result_reg);
         },
     }
 }
 
-fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID) VM.EvalError!?FieldLookup {
+fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID, result_reg: ?@import("opcode.zig").Register) VM.EvalError!?FieldLookup {
     const mt = try self.tables.get(mt_id);
     if (mt.getRaw(key, self)) |value| {
         return .{ .value = value, .from_meta = true };
     }
     if (mt.getRawAtom(revo.core_atoms.atomId(.__index), self)) |indexer| {
-        return resolveIndex(self, object, key, indexer);
+        return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP, result_reg);
     }
     return null;
 }
@@ -119,21 +123,21 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID) V
 const MAX_TAG_LOOP = 200;
 
 pub fn resolveIndex(self: *VM, object: Data, key: Data, indexer: Data) VM.EvalError!?FieldLookup {
-    return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP);
+    return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP, null);
 }
 
-fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: usize) VM.EvalError!?FieldLookup {
+fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: usize, result_reg: ?@import("opcode.zig").Register) VM.EvalError!?FieldLookup {
     switch (indexer.tag()) {
         .function => {
             const fn_id = indexer.asFunction().?;
             const func = try self.functions.get(fn_id);
             const value = switch (func.*) {
                 .closure => |closure| switch (closure.arity) {
-                    1 => try self.callFunction(indexer, &.{object}),
-                    else => try self.callFunction(indexer, &.{ object, key }),
+                    1 => try self.callFunctionParts(indexer, null, &.{object}, result_reg),
+                    else => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
                 },
-                .native => try self.callFunction(indexer, &.{ object, key }),
-                .c_function => try self.callFunction(indexer, &.{ object, key }),
+                .native => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
+                .c_function => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
             };
             return .{ .value = value, .from_meta = true };
         },
@@ -150,7 +154,7 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
                     return .{ .value = value, .from_meta = true };
                 }
                 if (mt.getRawAtom(revo.core_atoms.atomId(.__index), self)) |next_indexer| {
-                    return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1);
+                    return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1, result_reg);
                 }
             }
             return null;
@@ -166,7 +170,7 @@ pub fn callField(self: *VM, argc: usize) VM.EvalError!void {
     const object_slot = key_slot - 1;
     const object = slots[object_slot];
     const key = slots[key_slot];
-    const lookup = (try resolveField(self, object, key)) orelse {
+    const lookup = (try resolveField(self, object, key, null)) orelse {
         fiber.registers_len = object_slot;
         const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key);
         try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{

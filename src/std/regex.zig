@@ -64,10 +64,7 @@ fn compileFromString(str_val: Data, vm: *VM) !*mvzr.Regex {
     defer vm.runtime.alloc.free(pattern);
     const regex = try vm.runtime.alloc.create(mvzr.Regex);
     errdefer vm.runtime.alloc.destroy(regex);
-    regex.* = mvzr.compile(pattern) orelse {
-        vm.runtime.alloc.destroy(regex);
-        return error.CompileFailed;
-    };
+    regex.* = mvzr.compile(pattern) orelse return error.CompileFailed;
     return regex;
 }
 
@@ -239,7 +236,8 @@ fn nextFn(args: []const Data, vm: *VM) !NativeResult {
 
     const regex: *mvzr.Regex = @ptrCast(@alignCast(ptr_val.asForeign().?));
     const haystack = vm.stringValue(haystack_val.asString().?);
-    const pos: usize = @intFromFloat(pos_val.asNum().?);
+    const pos: usize = root.numToInt(usize, pos_val.asNum().?) orelse
+        return .okData(Data.new.core(.done));
 
     if (pos > haystack.len) return .okData(Data.new.core(.done));
 

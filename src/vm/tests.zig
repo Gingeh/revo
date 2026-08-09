@@ -158,6 +158,37 @@ test "vm channel buffered send then recv" {
     try testing.expectEqual(@as(f64, 7), vm.currentFiber().registers[vm.currentFiber().registers_len - 1].asNum().?);
 }
 
+// a fiber whose registers are freed (repl reload swaps in a fresh fiber and
+// deinits the one that just finished) must have its open upvalues closed
+// first: closures stored in globals survive the reload and read `closed`,
+// never the freed register buffer
+test "vm closes open upvalues before the owning fiber is deinit'd" {
+    var vm = try VM.init(vt_runtime());
+    defer vm.deinit();
+
+    // what module.runCompiledModuleReport does between runs: swap in a fresh
+    // fiber, run it (it captures an open upvalue), then close and deinit it
+    const next = try VM.Fiber.init(vm.runtime.alloc, 0, &.{}, 16);
+    const prev = vm.swapFiber(next);
+
+    vm.mainFiber().registers_len = 4;
+    vm.mainFiber().registers[3] = Data.new.num(42);
+    const uv_id = try vm.captureUpvalue(3);
+    {
+        const uv = try vm.functions.getUpvalue(uv_id);
+        try testing.expectEqual(@as(?usize, 3), uv.open_index);
+        try testing.expectEqual(@as(?usize, 0), uv.owner_fiber_id);
+    }
+
+    var finished = vm.swapFiber(prev);
+    try vm.closeUpvalueList(&finished, 0);
+    VM.Fiber.deinit(&finished, vm.runtime.alloc);
+
+    const uv = try vm.functions.getUpvalue(uv_id);
+    try testing.expectEqual(@as(?usize, null), uv.open_index);
+    try testing.expectEqual(@as(f64, 42), uv.closed.asNum().?);
+}
+
 test "vm gc keeps rooted tables and their children alive" {
     var vm = try VM.init(vt_runtime());
     defer vm.deinit();
@@ -180,6 +211,37 @@ test "vm gc keeps rooted tables and their children alive" {
     try testing.expect(child.isTable());
     try testing.expectEqual(child_id, child.asTable().?);
     _ = try vm.tables.get(child_id);
+}
+
+// an icache entry keyed on a freed table id must not hit for a new table
+// that recycled the id;;; version alone can't distinguish them since both
+// reset to 0 on reuse and bump by the same amount on the first put
+test "vm icache misses on reused table ids" {
+    var vm = try VM.init(vt_runtime());
+    defer vm.deinit();
+
+    const key = try vm.ownDataString("hot");
+
+    const a_id = try vm.tables.create();
+    const a = try vm.tables.get(a_id);
+    try a.put(a_id, &vm, key, Data.new.num(42));
+    const a_version = a.ic_version;
+    vm.icacheInsert(11, a_id, a_version, a.gen, key, Data.new.num(42));
+
+    try testing.expectEqual(@as(f64, 42), vm.icacheLookup(11, a_id, a_version, a.gen, key).?.asNum().?);
+
+    // a is unreachable, GC frees it and the id goes on the reuse list
+    triggerGc(&vm);
+
+    const b_id = try vm.tables.create();
+    try testing.expectEqual(a_id, b_id);
+    const b = try vm.tables.get(b_id);
+    try b.put(b_id, &vm, key, Data.new.num(99));
+    try testing.expectEqual(a_version, b.ic_version);
+
+    // same pc, same id, same version, same key, but a different table
+    // generation. so the stale 42 must not come back
+    try testing.expectEqual(@as(?Data, null), vm.icacheLookup(11, b_id, b.ic_version, b.gen, key));
 }
 
 test "vm gc keeps globals rooted tables alive" {

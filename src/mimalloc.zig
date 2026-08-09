@@ -37,7 +37,7 @@ const MimAllocator = struct {
     ) bool {
         if (new_len > buf.len) {
             const available = mi_usable_size(buf.ptr);
-            if (available > new_len) {
+            if (available >= new_len) {
                 if (mi_expand(buf.ptr, new_len)) |_| {
                     return true;
                 }

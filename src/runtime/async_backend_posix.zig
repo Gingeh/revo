@@ -60,12 +60,34 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
     switch (job.kind) {
         .socket_send => {
             if (job.buffer) |buf| {
-                const rc = std.c.send(job.handle, buf.ptr + job.offset, buf.len - job.offset, 0);
-                if (rc >= 0) {
-                    bytes = @intCast(rc);
-                } else {
-                    status = @as(i32, @intFromEnum(std.posix.errno(rc)));
+                // the worker owns the fd for this job, so it can hold it
+                // blocking and loop until every byte lands or a real error
+                const old_flags = std.c.fcntl(job.handle, std.posix.F.GETFL, @as(c_int, 0));
+                if (old_flags >= 0) {
+                    _ = std.c.fcntl(job.handle, std.posix.F.SETFL, old_flags & ~@as(c_int, @bitCast(std.posix.O{ .NONBLOCK = true })));
                 }
+                var sent: usize = job.offset;
+                while (sent < buf.len) {
+                    const rc = std.c.send(job.handle, buf.ptr + sent, buf.len - sent, 0);
+                    if (rc >= 0) {
+                        sent += @intCast(rc);
+                        if (rc == 0) {
+                            status = -1;
+                            break;
+                        }
+                    } else {
+                        const err = std.posix.errno(rc);
+                        if (err == .INTR) continue;
+                        if (err == .AGAIN) {
+                            _ = std.Thread.yield() catch {};
+                            continue;
+                        }
+                        status = @as(i32, @intFromEnum(err));
+                        break;
+                    }
+                }
+                bytes = sent;
+                if (old_flags >= 0) _ = std.c.fcntl(job.handle, std.posix.F.SETFL, old_flags);
             } else {
                 status = -1;
             }
@@ -100,6 +122,36 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
                     }
                     _ = std.c.fcntl(job.handle, std.posix.F.SETFL, old_flags);
                 }
+            }
+        },
+        .socket_connect => {
+            // buffer holds 6 bytes: 4 ip octets + native port; the worker
+            // creates a blocking socket and connects so a dead host can't
+            // freeze the vm thread
+            if (job.buffer) |buf| {
+                if (buf.len >= 6) {
+                    const sock_fd = std.c.socket(std.c.AF.INET, std.c.SOCK.STREAM, 0);
+                    if (sock_fd < 0) {
+                        status = @as(i32, @intFromEnum(std.posix.errno(sock_fd)));
+                    } else {
+                        const port: u16 = std.mem.readInt(u16, buf[4..6], .native);
+                        var sa: std.posix.sockaddr.in = .{
+                            .port = std.mem.nativeToBig(u16, port),
+                            .addr = std.mem.bigToNative(u32, @as(u32, buf[0]) << 24 | @as(u32, buf[1]) << 16 | @as(u32, buf[2]) << 8 | buf[3]),
+                        };
+                        const rc = std.c.connect(sock_fd, @ptrCast(&sa), @sizeOf(std.posix.sockaddr.in));
+                        if (rc == 0) {
+                            bytes = @intCast(sock_fd);
+                        } else {
+                            status = @as(i32, @intFromEnum(std.posix.errno(rc)));
+                            _ = std.c.close(sock_fd);
+                        }
+                    }
+                } else {
+                    status = -1;
+                }
+            } else {
+                status = -1;
             }
         },
     }
@@ -173,18 +225,52 @@ fn processCompletion(vm: *revo.VM, rec: CompletionRecord) !void {
                 const new_fd: std.posix.fd_t = @intCast(rec.bytes);
                 // wrap and wake with socket entry
                 const new_entry_ptr = try vm.runtime.alloc.create(revo.std_net.SocketEntry);
+                errdefer vm.runtime.alloc.destroy(new_entry_ptr);
+                if (revo.std_net.setSocketNonBlocking(new_fd)) |_| {
+                    new_entry_ptr.* = .{
+                        .stream = .{
+                            .socket = .{
+                                .socket = .{
+                                    .handle = new_fd,
+                                    .address = .{ .ip4 = .{ .bytes = .{ 0, 0, 0, 0 }, .port = 0 } },
+                                },
+                            },
+                            .pending = &.{},
+                        },
+                    };
+                    try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
+                } else |_| {
+                    _ = std.c.close(new_fd);
+                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
+                }
+            } else {
+                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
+            }
+        },
+        .socket_connect => {
+            if (rec.status == 0) {
+                const new_fd: std.posix.fd_t = @intCast(rec.bytes);
+                const new_entry_ptr = try vm.runtime.alloc.create(revo.std_net.SocketEntry);
                 new_entry_ptr.* = .{
                     .stream = .{
-                        .socket = .{ .socket = .{
-                            .handle = new_fd,
-                            .address = .{ .ip4 = .{ .bytes = .{ 0, 0, 0, 0 }, .port = 0 } },
-                        } },
+                        .socket = .{
+                            .socket = .{
+                                .handle = new_fd,
+                                .address = .{ .ip4 = .{ .bytes = .{ 0, 0, 0, 0 }, .port = 0 } },
+                            },
+                        },
                         .pending = &.{},
                     },
                 };
-                try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
+                if (revo.std_net.setSocketNonBlocking(new_fd)) |_| {
+                    try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
+                } else |_| {
+                    _ = std.c.close(new_fd);
+                    vm.runtime.alloc.destroy(new_entry_ptr);
+                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
+                }
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
+                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
             }
         },
     }

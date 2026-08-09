@@ -113,7 +113,13 @@ fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
         self.sched.setFiberState(fid, .running);
         self.currentFiber().running = true;
 
-        if (execFiber(self) catch |e| return self.evalFailure(e)) |failure| return failure;
+        // a fiber that parks mid-native (also when the native is reached
+        // through a metamethod host call) suspends instead of failing: it is
+        // .waiting and the io waiter re-queues it on completion
+        if (execFiber(self) catch |e| {
+            if (e == error.Parked) continue;
+            return self.evalFailure(e);
+        }) |failure| return failure;
 
         if (self.currentFiber().state == .ready) {
             @branchHint(.unlikely);
@@ -382,8 +388,10 @@ inline fn execFiberDispatch(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs)});
+            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs)});
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
 
@@ -397,8 +405,10 @@ inline fn execFiberDispatch(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs)});
+            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs)});
             const result: i64 = switch (op) {
                 .band_int => li & ri,
                 .bor_int => li | ri,
@@ -416,8 +426,10 @@ inline fn execFiberDispatch(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs)});
+            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs)});
             if (ri < 0 or ri > 63) return self.fail(
                 error.ShiftAmountOutOfRange,
                 "shift amount {d} out of range",
@@ -440,8 +452,10 @@ inline fn execFiberDispatch(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs)});
+            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs)});
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
 
@@ -461,7 +475,8 @@ inline fn execFiberDispatch(
         .negate_int => {
             const v = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(v.isNumber());
-            const v_int: i64 = @intFromFloat(@as(f64, @bitCast(v.bits)));
+            const v_int: i64 = revo.memory.numToI64(@as(f64, @bitCast(v.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(v)});
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -482,8 +497,10 @@ inline fn execFiberDispatch(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-            const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs)});
+            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs)});
             const result: i64 = switch (op) {
                 .add_int => li + ri,
                 .sub_int => li - ri,
@@ -548,8 +565,10 @@ inline fn execFiberDispatch(
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
             const lhs_val = regRead(regs, base, instr.b);
             const rhs_val = regRead(regs, base, instr.c);
-            const lhs: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
-            const rhs: i64 = @intFromFloat(@as(f64, @bitCast(rhs_val.bits)));
+            // f64 compare is the language's number equality for all values,
+            // including +-inf and NaN (unordered -> false), so no conversion
+            const lhs: f64 = @bitCast(lhs_val.bits);
+            const rhs: f64 = @bitCast(rhs_val.bits);
 
             const result = switch (op) {
                 .eq_int => lhs == rhs,
@@ -625,7 +644,7 @@ inline fn execFiberDispatch(
                     continue :dispatch instr.op;
                 }
             }
-            if (try self.resolveField(object, key)) |resolved| {
+            if (try self.resolveField(object, key, instr.a)) |resolved| {
                 regWrite(regs, base, instr.a, resolved.value);
             } else regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
 
@@ -661,19 +680,19 @@ inline fn execFiberDispatch(
                 const pc = fiber.pc - 1;
                 const t = try self.tableFast(t_id);
 
-                if (self.icacheLookup(pc, t_id, t.ic_version, key)) |value| {
+                if (self.icacheLookup(pc, t_id, t.ic_version, t.gen, key)) |value| {
                     @branchHint(.likely);
                     regWrite(regs, base, instr.a, value);
                 } else if (t.getRaw(key, self)) |value| {
-                    self.icacheInsert(pc, t_id, t.ic_version, key, value);
+                    self.icacheInsert(pc, t_id, t.ic_version, t.gen, key, value);
                     regWrite(regs, base, instr.a, value);
-                } else if (try self.resolveField(object, key)) |resolved| {
-                    self.icacheInsert(pc, t_id, t.ic_version, key, resolved.value);
+                } else if (try self.resolveField(object, key, instr.a)) |resolved| {
+                    self.icacheInsert(pc, t_id, t.ic_version, t.gen, key, resolved.value);
                     regWrite(regs, base, instr.a, resolved.value);
                 } else {
                     regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
                 }
-            } else if (try self.resolveField(object, key)) |resolved| {
+            } else if (try self.resolveField(object, key, instr.a)) |resolved| {
                 regWrite(regs, base, instr.a, resolved.value);
             } else {
                 regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
@@ -868,14 +887,9 @@ inline fn execFiberDispatch(
             continue :dispatch instr.op;
         },
         .call => {
-            self.callRegister(instr) catch |e| switch (e) {
-                error.Parked => {
-                    if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
-                        continue :dispatch instr.op;
-                    }
-                    break :dispatch;
-                },
-                else => return self.evalFailure(e),
+            self.callRegister(instr) catch |e| {
+                if (e == error.Parked) return e;
+                return self.evalFailure(e);
             };
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
@@ -890,14 +904,9 @@ inline fn execFiberDispatch(
             continue :dispatch instr.op;
         },
         .call_field => {
-            execCallField(self, regs, base, instr) catch |e| switch (e) {
-                error.Parked => {
-                    if (switchOrStop(self, use_depth, &fiber, &regs, &base, &instr)) {
-                        continue :dispatch instr.op;
-                    }
-                    break :dispatch;
-                },
-                else => return self.evalFailure(e),
+            execCallField(self, regs, base, instr) catch |e| {
+                if (e == error.Parked) return e;
+                return self.evalFailure(e);
             };
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
@@ -940,8 +949,8 @@ inline fn execFiberDispatch(
             const handle = regRead(regs, base, instr.a);
             const target_num = handle.asNum() orelse
                 return self.typeError("number in join", handle);
-            const target_id = if (target_num >= 0 and @floor(target_num) == target_num)
-                @as(usize, @intFromFloat(target_num))
+            const target_id: usize = if (revo.memory.numToI64(target_num)) |tid|
+                if (tid < 0) return self.fail(error.TypeError, "invalid fiber id in join", .{}) else @intCast(tid)
             else
                 return self.fail(error.TypeError, "invalid fiber id in join", .{});
             if (target_id >= self.sched.fibers.items.len)
@@ -1109,7 +1118,8 @@ inline fn execFiberDispatch(
         inline .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm => |op| {
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
-            const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
+            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs_val)});
             const ri: i64 = @intCast(instr.bx);
             const result: i64 = switch (op) {
                 .add_int_imm => li + ri,
@@ -1125,9 +1135,9 @@ inline fn execFiberDispatch(
         },
         .lt_int_imm => {
             const lhs_val = regRead(regs, base, instr.b);
-            const lhs: i64 = @intFromFloat(@as(f64, @bitCast(lhs_val.bits)));
+            const lhs: f64 = @bitCast(lhs_val.bits);
             const rhs: i64 = @intCast(instr.bx);
-            regWrite(regs, base, instr.a, Data.new.boolean(lhs < rhs));
+            regWrite(regs, base, instr.a, Data.new.boolean(lhs < @as(f64, @floatFromInt(rhs))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1462,15 +1472,15 @@ noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instructi
         if (object.asTable()) |t_id| {
             const pc = self.currentFiber().pc - 1;
             const t = try self.tableFast(t_id);
-            if (self.icacheLookup(pc, t_id, t.ic_version, key)) |value|
+            if (self.icacheLookup(pc, t_id, t.ic_version, t.gen, key)) |value|
                 break :blk VM.FieldLookup{ .value = value, .from_meta = false };
-            if (try self.resolveField(object, key)) |resolved| {
-                self.icacheInsert(pc, t_id, t.ic_version, key, resolved.value);
+            if (try self.resolveField(object, key, instr.a)) |resolved| {
+                self.icacheInsert(pc, t_id, t.ic_version, t.gen, key, resolved.value);
                 break :blk resolved;
             }
         } else if (self.structCacheGet(object, key)) |value| {
             break :blk VM.FieldLookup{ .value = value, .from_meta = false };
-        } else if (try self.resolveField(object, key)) |resolved| {
+        } else if (try self.resolveField(object, key, instr.a)) |resolved| {
             break :blk resolved;
         }
         break :blk null;
@@ -1572,10 +1582,10 @@ noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction)
         std.debug.assert(lhs.isNumber());
         std.debug.assert(rhs.isNumber());
     }
-    const li: i64 = @intFromFloat(@as(f64, @bitCast(lhs.bits)));
-    const ri: i64 = @intFromFloat(@as(f64, @bitCast(rhs.bits)));
-    if (ri >= 0) {
-        regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(revo.memory.ipow(li, ri)))));
+    const li = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits)));
+    const ri = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits)));
+    if (li != null and ri != null and ri.? >= 0) {
+        regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(revo.memory.ipow(li.?, ri.?)))));
     } else {
         const ln: f64 = @bitCast(lhs.bits);
         const rn: f64 = @bitCast(rhs.bits);
@@ -1631,16 +1641,16 @@ noinline fn execStringRepeat(
     };
     if (str_and_num) |pair| {
         const str = self.stringValue(pair.s);
-        if (!std.math.isFinite(pair.n))
-            return self.fail(error.IncompatibleTypes, "cannot multiply string by non-finite number", .{});
-        const count: usize = @intCast(
-            std.math.clamp(@as(i64, @intFromFloat(pair.n)), 0, std.math.maxInt(i32)),
-        );
-        const total_len = std.math.mul(usize, str.len, count) catch
+        const count: i64 = revo.memory.numToInt(i64, pair.n) orelse
+            return self.fail(error.IncompatibleTypes, "cannot multiply string by non-integer number", .{});
+        if (count < 0)
+            return self.fail(error.IncompatibleTypes, "cannot multiply string by negative number", .{});
+        const count_u: usize = @intCast(count);
+        const total_len = std.math.mul(usize, str.len, count_u) catch
             return self.evalFailure(error.OutOfMemory);
         self.noteGCPressure(total_len + @sizeOf(Data));
         const result = try alloc.alloc(u8, total_len);
-        for (0..count) |i|
+        for (0..count_u) |i|
             @memcpy(result[i * str.len ..][0..str.len], str);
         regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
         return null;

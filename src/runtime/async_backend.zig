@@ -9,6 +9,7 @@ pub const AsyncJobKind = enum {
     socket_send,
     socket_recv,
     socket_accept,
+    socket_connect,
 };
 
 pub const AsyncJob = struct {

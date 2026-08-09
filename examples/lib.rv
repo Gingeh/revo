@@ -5,7 +5,7 @@ struct Version {
 	fn of_string(str) do
 		const res = str:split(".")
 			|> map(fn(c) number(c))
-		# res is still three tuples
+			|> collect()
 
 		return (:ok, Version{major = res[0]?, minor = res[1]?})
 	end,
