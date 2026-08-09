@@ -17,6 +17,7 @@ fn append(table, value) do
 end
 
 fn transpose(table) do
+	if table:len() == 0 do return {} end
 	let result = {}
 	const length = table[0]:len()
 	for i in 0..length do
@@ -75,7 +76,7 @@ for series in indices(transpose(data)) do
 	}:join("")
 	for entry in indices(linedata) do
 		const (index, point) = entry
-		if (index != 0) (output = output + " ")
+		if (index != 0) (output = output ~ " ")
 		output = {
 			output,
 			(index / linedata:len() * width + padding),
@@ -83,7 +84,7 @@ for series in indices(transpose(data)) do
 			(height - (point - min) / (max - min) * height + padding)
 		}:join("")
 	end
-	output = output + "'/>"
+	output = output ~ "'/>"
 	print(output)
 end
 print("</svg>")

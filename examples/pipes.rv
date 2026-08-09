@@ -43,7 +43,7 @@ let v = (:ok, 5)
   end)
   |> inspect
 
-let a = {inner = 21, mutate = fn(self) self.inner *= 2}
+let a = {inner = 21, mutate = fn(self) do self.inner *= 2; self end}
 # explicit pipe
 a |> fn(c) c:mutate()
   |> fn(c) assert_eq(c.inner, 42)
@@ -53,7 +53,7 @@ a |> fn(c) c:mutate()
   end
   |> inspect
 
-a = {inner = 21, mutate = fn(self) self.inner *= 2}
+a = {inner = 21, mutate = fn(self) do self.inner *= 2; self end}
 # placeholder
 
 a |> _:mutate()

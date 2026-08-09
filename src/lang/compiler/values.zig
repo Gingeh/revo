@@ -302,9 +302,10 @@ fn compileAssignSimple(
                     };
 
                     try self.compile(field.object, true);
+                    try self.regDupe();
                     try self.compile(value, true);
                     try self.emit(.struct_set_offset, @intCast(field_offset));
-                    try self.regRelease();
+                    try self.emit(.struct_get_offset, @intCast(field_offset));
                 },
                 else => {
                     // table field access: set field, return value as expression result

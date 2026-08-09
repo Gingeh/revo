@@ -27,7 +27,27 @@ pub const specs: []const api.FnSpec = &.{
         ,
         .f = root.define(&.{.string}, build),
     },
+    .{
+        .name = "version",
+        .placements = &.{api.mod("revo")},
+        .params = &.{},
+        .ret = "string",
+        .doc =
+        \\version of your revo installation, like "revo v1.2.3"
+        ,
+        .f = root.define(&.{}, version),
+    },
 };
+
+pub fn version(args: []const Data, vm: *VM) !NativeResult {
+    _ = args;
+    const v = @import("build_options").version;
+
+    return if (@import("builtin").mode == .Debug)
+        .okData(try vm.ownDataString("revo #" ++ v))
+    else
+        .okData(try vm.ownDataString("revo v" ++ v));
+}
 
 /// > eval(code: string) -> !any
 /// evaluates it as a module, gives you back its' return value

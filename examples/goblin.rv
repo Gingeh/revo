@@ -6,7 +6,7 @@ proc doto!(m) do
   fn action_to_call(action) do
     let method = action[1][1]
     let args = action[2]
-    let call = (:call, (:field, object, method), args, :true)
+    let call = (:call, (:field, object, method), args, :true, ())
     call
   end
 

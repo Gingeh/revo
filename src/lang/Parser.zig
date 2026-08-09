@@ -381,7 +381,11 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
                     const right = if (into_what == .kw_fn)
                         try self.parseFnWithBodyMin(self.advance(), bp + 1)
                     else
-                        try self.parseExpression(BP.bare_call);
+                        // parse the whole rhs at "tighter than pipe" so
+                        // placeholders can live inside infix chains, e.g.
+                        // `x |> "aaa" ~ _:upper()`; chained pipes and
+                        // or/orelse/assign still bind looser and stay outside
+                        try self.parseExpression(BP.pipe + 1);
                     left = try self.desugarPipe(left, right);
                     continue;
                 },
@@ -1730,6 +1734,15 @@ fn desugarPipe(self: *Parser, left: *Node, right: *Node) anyerror!*Node {
                 .args = call_args,
                 .implicit_self = call.implicit_self,
             } });
+        },
+        // the rhs was an infix chain without a placeholder, the pipe binds
+        // tighter than infix, so plug the piped value into the leftmost
+        // operand, keeping `x |> f() ~ z` == `(x |> f()) ~ z`
+        .binary => |bin| {
+            const left_plug = try self.desugarPipe(left, bin.left);
+            return self.allocExpr(Span.merge(left.span, right.span), .{
+                .binary = .{ .op = bin.op, .left = left_plug, .right = bin.right },
+            });
         },
         else => self.wrapPipeLexical(left, right),
     };

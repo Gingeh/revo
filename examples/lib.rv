@@ -4,8 +4,8 @@ struct Version {
 	fn is_beta(self) self.major < 1,
 	fn of_string(str) do
 		const res = str:split(".")
-			|> map(fn(c) number(c))
-			|> collect()
+			|> iter.map(fn(c) number(c))
+			|> iter.collect()
 
 		return (:ok, Version{major = res[0]?, minor = res[1]?})
 	end,
