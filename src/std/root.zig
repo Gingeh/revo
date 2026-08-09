@@ -255,21 +255,21 @@ pub const root_specs: []const api.FnSpec = &.{
 };
 
 pub const root_specs_os: []const api.FnSpec = &.{
-    .{
-        .name = "c_use",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "path", "string" },
-        },
-        .ret = ":nil",
-        .doc = "loads a C extension lib and registers its functions",
-        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, cload),
-    },
+    // .{
+    //     .name = "c_use",
+    //     .placements = &.{api.g},
+    //     .params = &.{
+    //         .{ "path", "string" },
+    //     },
+    //     .ret = ":nil",
+    //     .doc = "loads a C extension lib and registers its functions",
+    //     .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, cload),
+    // },
     .{
         .name = "read",
         .placements = &.{api.g},
         .params = &.{
-            .{ "opts", "table?" },
+            .{ "opts", "table" },
         },
         .ret = "!string",
         .doc =
@@ -295,7 +295,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         .params = &.{
             .{ "args", "table" },
         },
-        .ret = "(:stdout, :stderr)",
+        .ret = "!(string, string)",
         .doc = "runs a subprocess and returns (stdout, stderr)",
         .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.table}) else define(&[_]TypeSpec{.table}, system_),
     },
