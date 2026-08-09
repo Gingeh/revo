@@ -276,7 +276,7 @@ pub const specs: []const api.FnSpec = &.{
 fn set(args: []const Data, vm: *VM) !NativeResult {
     const str_handle = args[0].asString().?;
 
-    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.dataToString(args[1]));
+    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.dataToString(args[1], vm));
 
     const existing_str = vm.stringValue(str_handle);
     if (idx >= existing_str.len) return .{ .ok = revo.Data.new.core(.missing) };
@@ -284,13 +284,13 @@ fn set(args: []const Data, vm: *VM) !NativeResult {
     const char: u8 = blk: {
         if (args[2].asString()) |s| {
             const s_val = vm.stringValue(s);
-            if (s_val.len == 0) return .errType(2, "non-empty string", root.dataToString(args[2]));
+            if (s_val.len == 0) return .errType(2, "non-empty string", root.dataToString(args[2], vm));
             break :blk s_val[0];
         } else if (args[2].asNum()) |val| {
-            if (!std.math.isFinite(val)) return .errType(2, "string or byte", root.dataToString(args[2]));
+            if (!std.math.isFinite(val)) return .errType(2, "string or byte", root.dataToString(args[2], vm));
             break :blk @intFromFloat(std.math.clamp(@round(val), 0, 255));
         } else {
-            return .errType(2, "string or byte", root.dataToString(args[2]));
+            return .errType(2, "string or byte", root.dataToString(args[2], vm));
         }
     };
 
@@ -314,7 +314,7 @@ fn len_f(args: []const Data, vm: *VM) !NativeResult {
 /// returns character at index as single-char string
 fn index_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
-    const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.Data.new.core(.missing) } else return .errType(1, "number", root.dataToString(args[1]));
+    const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.Data.new.core(.missing) } else return .errType(1, "number", root.dataToString(args[1], vm));
     if (idx >= str.len) return .{ .ok = revo.Data.new.core(.missing) };
     const result = try vm.ownDataStringNoDedup(str[idx .. idx + 1]);
     return .{ .ok = result };
@@ -355,10 +355,10 @@ fn lower_f(args: []const Data, vm: *VM) !NativeResult {
 fn mul_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
     const times = if (args[1].asNum()) |n|
-        root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1]))
+        root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1], vm))
     else
-        return .errType(1, "number", root.dataToString(args[1]));
-    if (times < 0) return .errType(1, "positive number", root.dataToString(args[1]));
+        return .errType(1, "number", root.dataToString(args[1], vm));
+    if (times < 0) return .errType(1, "positive number", root.dataToString(args[1], vm));
 
     const count: usize = @intCast(times);
     const buf = try vm.runtime.alloc.alloc(u8, str.len * count);
@@ -373,8 +373,8 @@ fn mul_f(args: []const Data, vm: *VM) !NativeResult {
 /// extracts substring from start with given length
 fn sub_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
-    const start = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.dataToString(args[1]));
-    const length = if (args[2].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(2, "number", root.dataToString(args[2]));
+    const start = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.dataToString(args[1], vm));
+    const length = if (args[2].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(2, "number", root.dataToString(args[2], vm));
 
     if (start < 0 or length < 0 or start >= str.len) {
         const empty = try vm.ownDataString("");
@@ -501,7 +501,7 @@ fn ascii_f(args: []const Data, vm: *VM) !NativeResult {
 
 fn of_ascii(args: []const Data, vm: *VM) !NativeResult {
     const n = args[0].asNum().?;
-    const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.dataToString(args[0]));
+    const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.dataToString(args[0], vm));
     if (code > 127) {
         return .other("ASCII code out of range");
     }

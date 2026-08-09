@@ -66,14 +66,14 @@ pub const specs: []const api.FnSpec = &.{
 };
 
 fn len(args: []const Data, vm: *VM) !NativeResult {
-    const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
+    const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0], vm));
     const t = try vm.tuples.get(id);
     return .{ .ok = Data.new.num(t.items.len) };
 }
 
 fn index(args: []const Data, vm: *VM) !NativeResult {
-    const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
-    const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1]));
+    const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1], vm));
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
     if (idx >= t.items.len) return .{ .ok = revo.Data.new.core(.missing) };
@@ -81,8 +81,8 @@ fn index(args: []const Data, vm: *VM) !NativeResult {
 }
 
 fn add(args: []const Data, vm: *VM) !NativeResult {
-    const left_id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
-    const right_id = args[1].asTuple() orelse return .errType(1, "tuple", root.dataToString(args[1]));
+    const left_id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0], vm));
+    const right_id = args[1].asTuple() orelse return .errType(1, "tuple", root.dataToString(args[1], vm));
     const left = try vm.tuples.get(left_id);
     const right = try vm.tuples.get(right_id);
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, left.items.len + right.items.len);
@@ -93,9 +93,9 @@ fn add(args: []const Data, vm: *VM) !NativeResult {
 }
 
 fn mul(args: []const Data, vm: *VM) !NativeResult {
-    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
-    const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1]));
-    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1]));
+    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1], vm));
+    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1], vm));
     if (times < 0) return .errType(1, "non-negative number", "negative number");
     const tuple = try vm.tuples.get(tuple_id);
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, tuple.items.len * @as(usize, @intCast(times)));

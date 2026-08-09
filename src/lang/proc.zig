@@ -926,7 +926,7 @@ fn iter(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const items = switch (args[0].tag()) {
         .table, .tuple => args[0],
-        else => return .errType(0, "table or tuple", revo.std_lib.dataToString(args[0])),
+        else => return .errType(0, "table or tuple", revo.std_lib.dataToString(args[0], vm)),
     };
     return .okData(try makeIterValue(vm, items));
 }
@@ -941,7 +941,7 @@ fn peek(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
 
 fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
-    const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0]));
+    const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0], vm));
     const iter_tbl = try vm.tables.get(iter_id);
     const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atomId(), vm) orelse Data.new.num(0);
     return .{ .ok = index_data };
@@ -949,7 +949,7 @@ fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
 
 fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const expected_atom = args[1].asAtom() orelse return .errType(1, "atom", revo.std_lib.dataToString(args[1]));
+    const expected_atom = args[1].asAtom() orelse return .errType(1, "atom", revo.std_lib.dataToString(args[1], vm));
     const expected_name = vm.atomName(expected_atom);
 
     const item = (try iterStep(args[0..1], vm, true)).ok;
@@ -997,7 +997,7 @@ fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     const callee = if (args[0].isFunction()) args[0] else return .errType(
         0,
         "function",
-        revo.std_lib.dataToString(args[0]),
+        revo.std_lib.dataToString(args[0], vm),
     );
 
     const iter_value = try makeIterValue(vm, args[1]);
@@ -1049,7 +1049,7 @@ fn normalizeProcValue(vm: *revo.VM, value: Data) !Data {
 
 fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
-    const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0]));
+    const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0], vm));
     const iter_tbl = try vm.tables.get(iter_id);
     const items_data = iter_tbl.getRawAtom(
         revo.core_atoms.items.atomId(),

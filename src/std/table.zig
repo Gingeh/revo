@@ -287,13 +287,13 @@ pub fn @"try"(args: []const Data, vm: *VM) !NativeResult {
 /// inserts value at position, shifting elements right
 fn insert(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
-    const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
+    const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1], vm));
     const val = args[2];
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
-    if (pos < 0) return .errType(1, "non-negative number", dataToString(args[1]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
+    if (pos < 0) return .errType(1, "non-negative number", dataToString(args[1], vm));
 
     const pos_usize: usize = @intCast(pos);
     if (pos_usize <= table.array.items.len) {
@@ -309,12 +309,12 @@ fn insert(args: []const Data, vm: *VM) !NativeResult {
 /// removes element at position, returns removed value
 fn remove(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
-    const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
-    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
+    const pos_num = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", dataToString(args[1], vm));
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
-    if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", dataToString(args[1]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
+    if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", dataToString(args[1], vm));
 
     const pos_usize: usize = @intCast(pos);
     const removed = table.array.orderedRemove(pos_usize);
@@ -326,7 +326,7 @@ fn remove(args: []const Data, vm: *VM) !NativeResult {
 fn push(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].asTable().?;
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
 
     try table.array.appendSlice(vm.runtime.alloc, args[1..]);
 
@@ -337,11 +337,11 @@ fn push(args: []const Data, vm: *VM) !NativeResult {
 /// joins array elements with delimiter
 fn join(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
-    const delim_id = args[1].asString() orelse return .errType(1, "string", dataToString(args[1]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
+    const delim_id = args[1].asString() orelse return .errType(1, "string", dataToString(args[1], vm));
     const delim = vm.stringValue(delim_id);
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
     var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer buf.deinit();
 
@@ -359,9 +359,9 @@ fn join(args: []const Data, vm: *VM) !NativeResult {
 /// returns all keys as table (array indices + hash keys)
 fn keys(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
 
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
     var keys_list = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, table.array.items.len + 10);
     defer keys_list.deinit(vm.runtime.alloc);
 
@@ -387,7 +387,7 @@ fn keys(args: []const Data, vm: *VM) !NativeResult {
 /// returns all values as table
 fn values(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
 
     const table = try vm.tables.get(table_id);
     var values_list = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, table.array.items.len + 10);
@@ -421,7 +421,7 @@ fn len(args: []const Data, vm: *VM) !NativeResult {
 /// checks if key exists in table
 fn has(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
 
     const table = try vm.tables.get(table_id);
     const exists = try table.get(args[1], vm);
@@ -432,11 +432,11 @@ fn has(args: []const Data, vm: *VM) !NativeResult {
 /// creates shallow copy of table
 fn copy(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
 
     const new_table = try vm.tables.create();
     const new_t = try vm.tables.get(new_table);
-    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0], vm));
 
     try new_t.array.appendSlice(vm.runtime.alloc, table.array.items);
 
@@ -453,13 +453,13 @@ fn copy(args: []const Data, vm: *VM) !NativeResult {
 /// later values overwrite earlier ones
 fn merge(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const table1_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
-    const table2_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1]));
+    const table1_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
+    const table2_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1], vm));
 
     const result_table = try vm.tables.create();
     const result = try vm.tables.get(result_table);
-    const table1 = vm.tables.get(table1_id) catch return .errType(0, "table", dataToString(args[0]));
-    const table2 = vm.tables.get(table2_id) catch return .errType(1, "table", dataToString(args[1]));
+    const table1 = vm.tables.get(table1_id) catch return .errType(0, "table", dataToString(args[0], vm));
+    const table2 = vm.tables.get(table2_id) catch return .errType(1, "table", dataToString(args[1], vm));
 
     try result.array.appendSlice(vm.runtime.alloc, table1.array.items);
     try result.array.appendSlice(vm.runtime.alloc, table2.array.items);
@@ -481,7 +481,7 @@ fn merge(args: []const Data, vm: *VM) !NativeResult {
 /// returns :undef if key missing
 fn rawget(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
     const t = try vm.tables.get(table_id);
     return .okData(t.getRaw(args[1], vm) orelse revo.Data.new.core(.undef));
 }
@@ -490,7 +490,7 @@ fn rawget(args: []const Data, vm: *VM) !NativeResult {
 /// sets value without metamethods
 fn rawset(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
-    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
     const t = try vm.tables.get(table_id);
     try t.putRaw(args[1], args[2], vm);
     return .okData(args[0]);
@@ -503,8 +503,8 @@ test "table library" {
 /// > table + other: table -> table
 /// merges two tables (union)
 fn tableAdd(args: []const Data, vm: *VM) !NativeResult {
-    const left_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
-    const right_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1]));
+    const left_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0], vm));
+    const right_id = args[1].asTable() orelse return .errType(1, "table", dataToString(args[1], vm));
 
     const new_id = try vm.tables.create();
     const new_t = try vm.tables.get(new_id);

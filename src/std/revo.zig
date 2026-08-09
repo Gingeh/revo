@@ -57,7 +57,7 @@ pub fn eval(args: []const Data, vm: *VM) !NativeResult {
 
     const source = switch (args[0].tag()) {
         .string => vm.stringValue(args[0].asString().?),
-        else => return .errType(0, "string", dataToString(args[0])),
+        else => return .errType(0, "string", dataToString(args[0], vm)),
     };
 
     const source_name = "<eval>";

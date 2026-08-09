@@ -76,7 +76,7 @@ pub const root_specs: []const api.FnSpec = &.{
             .{ "value", "any" },
         },
         .ret = "atom",
-        .doc = "returns type of value as atom",
+        .doc = "returns type of value as atom (struct values return their type name)",
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
@@ -86,7 +86,7 @@ pub const root_specs: []const api.FnSpec = &.{
             .{ "value", "any" },
         },
         .ret = "atom",
-        .doc = "returns type of value as atom",
+        .doc = "returns type of value as atom: nil, number, string, atom, function, table, tuple, type, foreign, or the struct type name",
         .f = define(&[_]TypeSpec{.any}, typeof_),
     },
     .{
@@ -436,8 +436,8 @@ fn isBoolAtom(atom: mem.AtomID) bool {
     return atom == true_id or atom == false_id;
 }
 
-pub fn dataToString(data: Data) []const u8 {
-    return typeof(data);
+pub fn dataToString(data: Data, vm: *VM) []const u8 {
+    return typeof(data, vm);
 }
 
 /// converts a number to an integer of type T; null when the value is not a
@@ -697,7 +697,7 @@ pub fn len_(args: []const Data, vm: *VM) !NativeResult {
         .string => .okData(Data.new.num(vm.stringValue(args[0].asString().?).len)),
         .table => .okData(Data.new.num((try vm.tables.get(args[0].asTable().?)).count())),
         .tuple => .okData(Data.new.num((try vm.tuples.get(args[0].asTuple().?)).items.len)),
-        else => .errType(1, "string, table, or tuple", typeof(args[0])),
+        else => .errType(1, "string, table, or tuple", typeof(args[0], vm)),
     };
 }
 
@@ -709,7 +709,12 @@ pub fn inspect(args: []const Data, vm: *VM) !NativeResult {
     return .okData(args[0]);
 }
 
-pub fn typeof(d: Data) []const u8 {
+pub fn typeof(d: Data, vm: *VM) []const u8 {
+    if (d.asStructVal()) |instance_id| {
+        const instance = vm.struct_instances.get(instance_id) catch return "struct";
+        const desc = vm.struct_types.getType(instance.type_id) orelse return "struct";
+        return desc.name;
+    }
     return switch (d.tag()) {
         .atom => if (d.asAtom().? == revo.core_atoms.atomId(.nil)) "nil" else "atom",
         .struct_val => "struct",
@@ -720,9 +725,10 @@ pub fn typeof(d: Data) []const u8 {
 
 /// > typeof(arg0: any) -> string
 /// returns type of arg0 as string
-/// possible values: nil, number, string, atom, function, table, tuple
+/// possible values: nil, number, string, atom, function, table, tuple,
+/// type, foreign, or the struct type name for struct values
 pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
-    return .okData(Data.new.atom(try vm.internAtom(typeof(args[0]))));
+    return .okData(Data.new.atom(try vm.internAtom(typeof(args[0], vm))));
 }
 
 /// > string(arg0: any) -> string
@@ -741,7 +747,7 @@ pub fn string_(args: []const Data, vm: *VM) !NativeResult {
 /// > unwrap(result: tuple) -> any
 /// unwraps result tuple, panics if not :ok
 pub fn try_(args: []const Data, vm: *VM) !NativeResult {
-    const t_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
+    const t_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0], vm));
     const tuple = try vm.tuples.get(t_id);
     if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
     const tag = tuple.items[0];
@@ -755,7 +761,7 @@ pub fn try_(args: []const Data, vm: *VM) !NativeResult {
 /// extracts error from result tuple, panics if not :err
 pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
     const result = args[0];
-    const result_tid = result.asTuple() orelse return .errType(0, "tuple", dataToString(result));
+    const result_tid = result.asTuple() orelse return .errType(0, "tuple", dataToString(result, vm));
     const tuple = try vm.tuples.get(result_tid);
     if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "empty tuple");
 
@@ -784,7 +790,7 @@ pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
     const cap: usize = if (args.len == 0)
         0
     else if (args.len == 1)
-        as_stack_index(args[0]) orelse return .errType(0, "number", dataToString(args[0]))
+        as_stack_index(args[0]) orelse return .errType(0, "number", dataToString(args[0], vm))
     else
         return .errArity(args.len, 0);
 
@@ -798,7 +804,7 @@ pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
 
 /// validate `args[0]` as a `:chan, id` tuple and extract the channel id
 fn chanIdOf(args: []const Data, vm: *VM) NativeResult {
-    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0]));
+    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", dataToString(args[0], vm));
     const t = vm.tuples.get(tuple_id) catch return .errType(0, "chan tuple", "tuple");
     if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
     const chan_atom = revo.core_atoms.chan.atomId();
@@ -840,7 +846,7 @@ pub fn number_(args: []const Data, vm: *VM) !NativeResult {
         const parsed = try std.fmt.parseFloat(f64, vm.stringValue(id));
         return .Ok(vm, Data.new.num(parsed));
     }
-    return .errType(0, "number, string", dataToString(args[0]));
+    return .errType(0, "number, string", dataToString(args[0], vm));
 }
 
 /// > expect(what: any) -> !what
@@ -984,7 +990,7 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
 
     if (args.len > 1) return .errArity(args.len, 1);
     if (args.len == 1) {
-        const t = args[0].asTable() orelse return .errType(0, "table", typeof(args[0]));
+        const t = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
         const table = try vm.tables.get(t);
         if (try table.get(Data.new.atom(revo.core_atoms.path.atomId()), vm)) |v| {
             path = if (v.asString()) |id|
@@ -993,9 +999,9 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
                 if (atom == revo.core_atoms.atomId(.undef) or atom == revo.core_atoms.atomId(.nil))
                     path
                 else
-                    return .errType(0, "string", typeof(v))
+                    return .errType(0, "string", typeof(v, vm))
             else
-                return .errType(0, "string", typeof(v));
+                return .errType(0, "string", typeof(v, vm));
         }
         if (try table.get(Data.new.atom(revo.core_atoms.delimiter.atomId()), vm)) |v| {
             if (v.asAtom()) |atom| {
@@ -1003,7 +1009,7 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
                 if (atom == revo.core_atoms.nil.atomId() or atom == eof_id)
                     read_eof = true
                 else
-                    return .errType(0, "string, :nil, or :eof", typeof(v));
+                    return .errType(0, "string, :nil, or :eof", typeof(v, vm));
             } else if (v.asString()) |id| {
                 const s = vm.stringValue(id);
                 if (s.len == 1) {
@@ -1012,7 +1018,7 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
                     return .errType(0, "single char string", "string");
                 }
             } else {
-                return .errType(0, "string, :nil, or :eof", typeof(v));
+                return .errType(0, "string, :nil, or :eof", typeof(v, vm));
             }
         }
     }
@@ -1083,7 +1089,7 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
     const raw_path = args[0].asString() orelse return .{ .err = .{ .type_error = .{
         .arg = 0,
         .expected = "string",
-        .got = dataToString(args[0]),
+        .got = dataToString(args[0], vm),
     } } };
     const raw_path_s = vm.stringValue(raw_path);
 
@@ -1161,7 +1167,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode
 }
 
 pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
-    if (!mm.isFunction()) return .errType(0, "function", dataToString(mm));
+    if (!mm.isFunction()) return .errType(0, "function", dataToString(mm, vm));
     const result = vm.callFunction(mm, &.{val}) catch |err| {
         return .other(@errorName(err));
     };
@@ -1172,8 +1178,8 @@ pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
 /// sleeps current fiber for given milliseconds
 /// parks fiber instead of blocking
 pub fn sleep(args: []const Data, vm: *VM) !NativeResult {
-    const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0]));
-    const ms: u64 = numToInt(u64, n) orelse return .errType(0, "non-negative integer", dataToString(args[0]));
+    const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0], vm));
+    const ms: u64 = numToInt(u64, n) orelse return .errType(0, "non-negative integer", dataToString(args[0], vm));
     try vm.schedParkCurrentForSleepMS(ms);
     return .parked();
 }

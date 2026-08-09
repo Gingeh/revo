@@ -172,10 +172,10 @@ pub fn callField(self: *VM, argc: usize) VM.EvalError!void {
     const key = slots[key_slot];
     const lookup = (try resolveField(self, object, key, null)) orelse {
         fiber.registers_len = object_slot;
-        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key);
+        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key, self);
         try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{
             key_name,
-            revo.std_lib.typeof(object),
+            revo.std_lib.typeof(object, self),
         });
         return error.NotAFunction;
     };

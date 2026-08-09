@@ -318,7 +318,7 @@ const Kind = enum(usize) {
 /// returns a zero-arg callable iterator for obj
 pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
     const w = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     if (w.isString() or w.isTuple() or w.isTable())
         return makeSeqIterator(vm, w);
     return .okData(w);
@@ -328,18 +328,18 @@ pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy arithmetic sequence
 pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
     const start: f64 = if (args.len == 1) 0 else blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0]));
+        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0], vm));
         break :blk n;
     };
     const end: f64 = if (args.len == 1) blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0]));
+        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0], vm));
         break :blk n;
     } else blk: {
-        const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
+        const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
         break :blk n;
     };
     const step: f64 = if (args.len >= 3) blk: {
-        const n = args[2].asNum() orelse return .errType(2, "number", dataToString(args[2]));
+        const n = args[2].asNum() orelse return .errType(2, "number", dataToString(args[2], vm));
         break :blk n;
     } else 1;
     if (step == 0) return .errType(2, "non-zero step", "0");
@@ -355,7 +355,7 @@ pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator that transforms each element
 pub fn map_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     const it_id = try makeIterator(vm, .map);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .func, args[1]);
@@ -366,7 +366,7 @@ pub fn map_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator that only yields values where fn is truthy
 pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     const it_id = try makeIterator(vm, .filter);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .func, args[1]);
@@ -377,8 +377,8 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator of the first n elements
 pub fn take_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
     const it_id = try makeIterator(vm, .take);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .n, Data.new.num(n));
@@ -389,8 +389,8 @@ pub fn take_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator without the first n elements
 pub fn drop_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
     const it_id = try makeIterator(vm, .drop);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .n, Data.new.num(n));
@@ -405,7 +405,7 @@ pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
     defer ups.deinit(vm.runtime.alloc);
     for (args) |a| {
         const w = (try toCallable(vm, a)) orelse
-            return .errType(0, "iterable", dataToString(a));
+            return .errType(0, "iterable", dataToString(a, vm));
         try ups.append(vm.runtime.alloc, w);
     }
     const up_tuple = try vm.tuples.create(ups.items);
@@ -418,7 +418,7 @@ pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator of (index, value) tuples
 pub fn enumerate_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     const it_id = try makeIterator(vm, .enumerate);
     try putState(vm, it_id, .up, up);
     return .okData(Data.new.table(it_id));
@@ -428,8 +428,8 @@ pub fn enumerate_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator of n-element table chunks
 pub fn chunk_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
     const it_id = try makeIterator(vm, .chunk);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .n, Data.new.num(n));
@@ -440,7 +440,7 @@ pub fn chunk_fn(args: []const Data, vm: *VM) !NativeResult {
 /// maps each element to an iterable and yields its elements lazily
 pub fn flat_map_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     const it_id = try makeIterator(vm, .flat_map);
     try putState(vm, it_id, .up, up);
     try putState(vm, it_id, .func, args[1]);
@@ -452,7 +452,7 @@ pub fn flat_map_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     const out_id = try vm.tables.create();
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -466,7 +466,7 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 0);
     defer buf.deinit(vm.runtime.alloc);
     var v: Data = undefined;
@@ -477,7 +477,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
         } else if (v.asNum()) |n| {
             try buf.append(vm.runtime.alloc, @as(u8, @intFromFloat(std.math.clamp(@round(n), 0, 255))));
         } else {
-            return .errType(0, "string or number", dataToString(v));
+            return .errType(0, "string or number", dataToString(v, vm));
         }
     }
     return .{ .ok = try vm.adoptDataString(try buf.toOwnedSlice(vm.runtime.alloc)) };
@@ -488,7 +488,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var acc = args[2];
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -502,7 +502,7 @@ pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn fold_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var acc: Data = undefined;
     var got: bool = false;
     var v: Data = undefined;
@@ -524,7 +524,7 @@ pub fn fold_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
@@ -542,7 +542,7 @@ pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
@@ -560,7 +560,7 @@ pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
@@ -578,7 +578,7 @@ pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
@@ -596,7 +596,7 @@ pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len < 1 or args.len > 2) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var n: f64 = 0;
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -618,7 +618,7 @@ pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn sum_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0]));
+        return .errType(0, "iterable", dataToString(args[0], vm));
     var total: f64 = 0;
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -769,7 +769,7 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
                 else
                     try vm.callFunction(f, &[_]Data{v});
                 const sub = (try toCallable(vm, mapped)) orelse
-                    return .errType(1, "iterable", dataToString(mapped));
+                    return .errType(1, "iterable", dataToString(mapped, vm));
                 st = try vm.tables.get(st_id);
                 try st.putRawAtom(revo.core_atoms.cur.atomId(), sub, vm);
                 continue;

@@ -1842,7 +1842,7 @@ test "structs build struct instances" {
         \\ }
         \\ const user = User { name = "ana" }
         \\ type(user)
-    , "struct");
+    , "User");
 }
 
 test "struct methods crash if declared outside struct body" {

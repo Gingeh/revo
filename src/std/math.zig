@@ -37,10 +37,10 @@ fn makeUnaryChecked(
     comptime expected: []const u8,
 ) root.NativeFn {
     return struct {
-        fn apply(args: []const Data, _: *VM) !NativeResult {
+        fn apply(args: []const Data, vm: *VM) !NativeResult {
             const n = toF64(args[0]);
             if (!check(n))
-                return .errType(0, expected, dataToString(args[0]));
+                return .errType(0, expected, dataToString(args[0], vm));
             return .{ .ok = Data.new.num(op(n)) };
         }
     }.apply;

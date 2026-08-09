@@ -1372,7 +1372,7 @@ fn callNonClosureFunction(
                         .{
                             i,
                             @tagName(spec),
-                            revo.std_lib.dataToString(args[i]),
+                            revo.std_lib.dataToString(args[i], self),
                         },
                     );
                     return error.TypeError;
@@ -1773,7 +1773,7 @@ pub fn structInitInstance(
             "struct `{s}` expects an init table, got {s}",
             .{
                 desc.name,
-                revo.std_lib.typeof(init_data),
+                revo.std_lib.typeof(init_data, self),
             },
         );
         return error.TypeError;

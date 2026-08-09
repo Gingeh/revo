@@ -125,7 +125,7 @@ pub fn topResultMode(source: []const u8, module_dir: ?[]const u8, test_mode: boo
 
 fn expectTopNumber(result: *TopResult, expected: f64) !void {
     const actual = result.value.asNumber() catch {
-        std.debug.print("result was not a number, it was {s}\n", .{revo.std_lib.typeof(result.value)});
+        std.debug.print("result was not a number, it was {s}\n", .{revo.std_lib.typeof(result.value, &result.vm)});
         return error.TypeMismatch;
     };
     if (@abs(expected - actual) > 0.000000001) {
@@ -136,7 +136,7 @@ fn expectTopNumber(result: *TopResult, expected: f64) !void {
 
 fn expectTopAtom(result: *TopResult, expected: []const u8) !void {
     const s = result.value.asAtom() orelse {
-        std.debug.print("result was not a atom, it was {s}\n", .{revo.std_lib.typeof(result.value)});
+        std.debug.print("result was not a atom, it was {s}\n", .{revo.std_lib.typeof(result.value, &result.vm)});
         return error.TypeMismatch;
     };
     std.testing.expectEqualStrings(expected, result.vm.atomName(s)) catch {
