@@ -2363,7 +2363,7 @@ test "markov take body" {
     try t.topString(
         \\ fn random(n) math.floor((time.now_ns() / 1000) % n)
         \\ fn pref(a, b) fmt("%v %v", a, b)
-        \\ const NOWORD = string_of(10)
+        \\ const NOWORD = string.of_ascii(10)
         \\ struct Chain {
         \\   state: table<string, table> = {},
         \\   fn take(self, count: num) -> string do

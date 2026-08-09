@@ -334,12 +334,12 @@ pub fn build(b: *Build) !void {
         //
         // docs step
         //
-        const docs_step = b.step("docs", "generate stdlib reference markdown");
+        const docs_step = b.step("docs", "splice generated stdlib reference into stdin markdown, print to stdout");
         {
             const docgen_mod = b.createModule(.{
                 .root_source_file = b.path("tools/docgen.zig"),
                 .target = target,
-                .optimize = optimize,
+                .optimize = .Debug,
                 .link_libc = !is_freestanding,
             });
             for (imports) |imp| {

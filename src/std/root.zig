@@ -1320,12 +1320,6 @@ test "array transform" {
     try testing.topNumber("iter.sum({1, 2, 1, 3, 2}:unique())", 6);
 }
 
-test "string creation" {
-    try testing.topString("string_of(97)", "a");
-    try testing.topString("string_of((72, 105))", "Hi");
-    try testing.topString("string_of((82, 101, 118, 111))", "Revo");
-}
-
 test "string table conversion" {
     try testing.topNumber("len(\"abc\":table())", 3);
     try testing.topNumber("\"a\":ascii()", 97);

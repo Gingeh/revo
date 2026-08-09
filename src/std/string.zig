@@ -203,20 +203,41 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.define(&.{ .string, .number }, index_f),
         .core_key = revo.core_atoms.__index,
     },
-    // globals
     .{
-        .name = "string_of_ascii",
-        .placements = &.{api.g},
+        .name = "add",
+        .placements = &.{api.method("string", .string)},
         .params = &.{
-            .{ "code", "any" },
+            .{ "self", "string" },
+            .{ "other", "string" },
+        },
+        .ret = "string",
+        .doc = "concatenates two strings",
+        .f = root.define(&.{ .string, .string }, add_f),
+    },
+    .{
+        .name = "mul",
+        .placements = &.{api.method("string", .string)},
+        .params = &.{
+            .{ "self", "string" },
+            .{ "n", "number" },
+        },
+        .ret = "string",
+        .doc = "repeats string n times",
+        .f = root.define(&.{ .string, .number }, mul_f),
+    },
+    .{
+        .name = "of_ascii",
+        .placements = &.{api.mod("string")},
+        .params = &.{
+            .{ "code", "number" },
         },
         .ret = "string",
         .doc =
         \\ creates string from ASCII code(s)
-        \\   string_of(97) => "a"
-        \\   string_of({97, 98}) => "ab"
+        \\
+        \\   of_ascii(97) => "a"
         ,
-        .f = root.define(&.{.any}, string_of),
+        .f = root.define(&.{.number}, of_ascii),
     },
     // module-only (not in the metatable)
     .{
@@ -335,7 +356,8 @@ fn mul_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
     const times = if (args[1].asNum()) |n|
         root.numToInt(i64, n) orelse return .errType(1, "integer number", root.dataToString(args[1]))
-    else return .errType(1, "number", root.dataToString(args[1]));
+    else
+        return .errType(1, "number", root.dataToString(args[1]));
     if (times < 0) return .errType(1, "positive number", root.dataToString(args[1]));
 
     const count: usize = @intCast(times);
@@ -477,38 +499,14 @@ fn ascii_f(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = Data.new.num(str[0]) };
 }
 
-/// > string_of(code: number | tuple) -> string
-/// creates string from ASCII code(s)
-/// string_of(97) => "a"
-/// string_of({97, 98}) => "ab"
-fn string_of(args: []const Data, vm: *VM) !NativeResult {
-    if (args[0].asNum()) |n| {
-        const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.dataToString(args[0]));
-        if (code > 127) {
-            return .other("ASCII code out of range");
-        }
-        const char = try vm.runtime.alloc.dupe(u8, &[_]u8{@as(u8, @truncate(code))});
-        return .{ .ok = try vm.adoptDataStringNoDedup(char) };
+fn of_ascii(args: []const Data, vm: *VM) !NativeResult {
+    const n = args[0].asNum().?;
+    const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.dataToString(args[0]));
+    if (code > 127) {
+        return .other("ASCII code out of range");
     }
-    if (args[0].asTuple()) |tuple_id| {
-        const tuple = try vm.tuples.get(tuple_id);
-        var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, tuple.items.len);
-        defer buf.deinit(vm.runtime.alloc);
-        for (tuple.items) |val| {
-            if (val.asNum()) |n| {
-                const code: u32 = @intFromFloat(n);
-                if (code > 127) {
-                    return .other("ASCII code out of range");
-                }
-                try buf.append(vm.runtime.alloc, @as(u8, @truncate(code)));
-            } else {
-                return .errType(0, "number", root.dataToString(val));
-            }
-        }
-        const owned = try buf.toOwnedSlice(vm.runtime.alloc);
-        return .{ .ok = try vm.adoptDataStringNoDedup(owned) };
-    }
-    return .errType(0, "number or tuple", root.dataToString(args[0]));
+    const char = try vm.runtime.alloc.dupe(u8, &[_]u8{@as(u8, @truncate(code))});
+    return .{ .ok = try vm.adoptDataString(char) };
 }
 
 /// __call handler for the string module table
@@ -590,8 +588,7 @@ test "string methods" {
     try testing.topTrue("\"hello\":contains?(\"ell\")");
     try testing.topFalse("\"hello\":contains?(\"xyz\")");
     try testing.topNumber("\"hello\":index_of(\"ll\")", 2);
-    try testing.topString("string_of(97)", "a");
-    try testing.topString("string_of((72, 105))", "Hi");
+    try testing.topString("string.of_ascii(97)", "a");
     try testing.topString("'hello':upper()", "HELLO");
     try testing.expectCompileError("'hello':sub('x', 2)", .ParseError);
     try testing.expectCompileError("'hello':sub(2, 2, 3)", .ParseError);

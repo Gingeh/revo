@@ -495,7 +495,19 @@ pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
 pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.ArrayList(UnionVariant)) !void {
     switch (ti) {
         .@"union" => |us| for (us) |u| try variants.append(alloc, u),
-        .tuple => |types| try variants.append(alloc, .{ .name = "", .types = types }),
+        .tuple => |types| {
+            if (types.len == 0) {
+                // empty tuple is the "any tuple"
+                // keep it as a single type
+                // so it stays a matchable element inside a union
+                var one = try std.ArrayList(TypeInfo).initCapacity(alloc, 1);
+                errdefer one.deinit(alloc);
+                try one.append(alloc, .{ .tuple = types });
+                try variants.append(alloc, .{ .name = "", .types = try one.toOwnedSlice(alloc) });
+                return;
+            }
+            try variants.append(alloc, .{ .name = "", .types = types });
+        },
         else => {
             var one = try std.ArrayList(TypeInfo).initCapacity(alloc, 1);
             errdefer one.deinit(alloc);

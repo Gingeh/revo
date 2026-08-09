@@ -10,7 +10,7 @@ const NativeResult = root.NativeResult;
 pub const specs: []const api.FnSpec = &.{
     .{
         .name = "compile",
-        .placements = &.{ api.g, api.mod("re") },
+        .placements = &.{api.mod("re")},
         .params = &.{.{ "pattern", "string" }},
         .ret = "table",
         .doc = "compile a regex pattern into a reusable handle",
@@ -18,7 +18,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "is_match",
-        .placements = &.{ api.g, api.mod("re") },
+        .placements = &.{api.mod("re")},
         .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
         .ret = "bool",
         .doc = "test if regex matches anywhere in haystack; pass a string for one-shot compile",
@@ -34,7 +34,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "find_all",
-        .placements = &.{ api.g, api.mod("re") },
+        .placements = &.{api.mod("re")},
         .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
         .ret = "function",
         .doc = "return an iterator over all matches; pass a string for one-shot compile",
@@ -42,7 +42,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "free",
-        .placements = &.{ api.g, api.mod("re") },
+        .placements = &.{api.mod("re")},
         .params = &.{.{ "regex", "table" }},
         .ret = ":nil",
         .doc = "free a compiled regex handle",
