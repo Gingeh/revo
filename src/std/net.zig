@@ -437,6 +437,13 @@ fn getEntryPtr(socket_data: Data, vm: *VM) !*SocketEntry {
     return @as(*SocketEntry, @ptrFromInt(addr));
 }
 
+fn fdId(fd: std.posix.fd_t) u64 {
+    return switch (@typeInfo(std.posix.fd_t)) {
+        .pointer => @intFromPtr(fd),
+        else => @intCast(fd),
+    };
+}
+
 /// complete and remove io waiters parked on `fd` before the socket entry and
 /// fd are released, the poll loop would otherwise dispatch on_ready against
 /// the freed SocketEntry (or a reused fd) for any revents the closed fd gets
@@ -445,7 +452,7 @@ fn cancelWaitersFor(vm: *VM, fd: std.posix.fd_t) !void {
     while (idx > 0) {
         idx -= 1;
         const waiter = &vm.sched.io_waiters.items[idx];
-        if (waiter.wait_id != @as(u64, @intCast(fd))) continue;
+        if (waiter.wait_id != fdId(fd)) continue;
         _ = try completeWaiter(vm, waiter, .err, revo.Data.new.core(.SocketClosed));
         const removed = vm.sched.io_waiters.swapRemove(idx);
         if (removed.on_deinit) |deinit_fn| deinit_fn(vm.runtime.alloc, removed.token);
@@ -550,7 +557,8 @@ fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
         return .errType(0, "port number 0..65535", root.dataToString(args[0]));
     const backlog: u31 = if (args.len > 1)
         root.numToInt(u31, args[1].asNum().?) orelse return .errType(1, "backlog number", root.dataToString(args[1]))
-    else 128;
+    else
+        128;
 
     const addr = std.Io.net.IpAddress.parseIp4("0.0.0.0", port) catch |err| {
         return try root.resultTuple(vm, .err, try vm.dataAtom(@errorName(err)));

@@ -6,7 +6,7 @@ const Build = std.Build;
 const Module = Build.Module;
 const logger = std.log.scoped(.@"build/revo");
 
-const VERSION = "0.1.0a";
+const VERSION = "0.1.1";
 
 const release_targets: []const []const u8 = &.{
     "x86_64-linux-musl",
@@ -459,6 +459,12 @@ pub fn build(b: *Build) !void {
             });
 
             const rel_mvzr_mod = builds.mvzr(b, mvzr_dep, release_target, release_optimize);
+            const rel_mimalloc_mod = b.createModule(.{
+                .root_source_file = b.path("src/mimalloc.zig"),
+                .target = release_target,
+                .optimize = release_optimize,
+                .link_libc = !release_is_fs,
+            });
             const rel_core_mods: []const *Module = &.{ rel_vm_mod, rel_revo_mod, rel_c_mod };
             for (rel_core_mods) |mod| {
                 mod.addImport("revo", rel_revo_mod);
@@ -504,6 +510,7 @@ pub fn build(b: *Build) !void {
                     .{ .name = "c", .module = rel_c_mod },
                     .{ .name = "build_options", .module = rel_options_mod },
                     .{ .name = "isocline", .module = rel_isocline_mod },
+                    .{ .name = "mimalloc", .module = rel_mimalloc_mod },
                     .{ .name = "lsp_main", .module = rel_revolt_mod },
                 },
             });
