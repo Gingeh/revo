@@ -286,7 +286,8 @@ pub fn build(b: *Build) !void {
         const wasm_lib = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
         wasm_lib.entry = .disabled;
         wasm_lib.rdynamic = true;
-        // initial_memory not set, it defaults to 1 wasm page (64kb)
+        // the vm dispatch loop's frame alone can exceed the default 1mb size in ReleaseSafe
+        wasm_lib.stack_size = 16 * 1024 * 1024;
         const wasm_install = b.addInstallArtifact(wasm_lib, .{});
         b.getInstallStep().dependOn(&wasm_install.step);
     } else {
@@ -524,7 +525,11 @@ pub fn build(b: *Build) !void {
                 .name = binName(b, target_str, .nightly),
                 .root_module = release_mod,
             });
-            if (release_is_fs) release_exe.entry = .disabled;
+            if (release_is_fs) {
+                release_exe.entry = .disabled;
+                // same oversized dispatch frame as the dev wasm build
+                release_exe.stack_size = 16 * 1024 * 1024;
+            }
             release_exe.rdynamic = true;
 
             release_step.dependOn(&b.addInstallArtifact(release_exe, install_options).step);

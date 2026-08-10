@@ -259,7 +259,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         .name = "read",
         .placements = &.{api.g},
         .params = &.{
-            .{ "opts", "table" },
+            .{ "opts", "table?" }, // TODO: the optionalness doesn't work
         },
         .ret = "!string",
         .doc =

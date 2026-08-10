@@ -98,7 +98,7 @@ async function runTests() {
 
 	await runTest('reduce bug', async () => {
 		const revo = await Revo.fromBuffer(wasmBuffer);
-		const r = revo.eval('reduce((0,1,2,3,4), fn(a,b) a + b, 0)');
+		const r = revo.eval('iter.reduce((0,1,2,3,4), fn(a,b) a + b, 0)');
 		assert(r.ok);
 		assert(r.value === '10');
 		revo.destroy();
