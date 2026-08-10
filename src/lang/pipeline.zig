@@ -670,7 +670,7 @@ pub fn parseSource(allocator: std.mem.Allocator, source: []const u8) !*Node {
 }
 
 pub fn parseSourceReport(allocator: std.mem.Allocator, source: []const u8) !parser.ParseResult {
-    const lexed = try Lexer.lexReport(allocator, source);
+    const lexed = try Lexer.lexReportAt(allocator, source, .{});
     const tokens = switch (lexed) {
         .ok => |items| items,
         .err => |failure| {

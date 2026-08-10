@@ -38,7 +38,7 @@ test "vm join returns dead fiber result" {
         .{ .op = .halt, .a = 0 },
     };
     vm.mainFiber().program = &program;
-    _ = try vm.runReport();
+    _ = try revo.vm.exec.runReport(&vm);
 
     const out = vm.mainResult();
     try testing.expectEqual(@as(f64, 42), out.asNum().?);
@@ -83,7 +83,7 @@ test "vm spawn passes n args to child and join returns result" {
     };
 
     vm.mainFiber().program = &program;
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     try testing.expect(result == .ok);
 
     const out = vm.mainResult();
@@ -408,7 +408,7 @@ test "vm gc reuses freed string storage" {
     var vm = try VM.init(vt_runtime());
     defer vm.deinit();
 
-    const first = try vm.ownString("alpha");
+    const first = try vm.strings.own("alpha");
     try testing.expect(vm.strings.contains(first));
 
     vm.gc_pending = true;
@@ -416,7 +416,7 @@ test "vm gc reuses freed string storage" {
 
     try testing.expect(!vm.strings.contains(first));
 
-    const second = try vm.ownString("beta");
+    const second = try vm.strings.own("beta");
     try testing.expectEqualStrings("beta", vm.stringValue(second));
 }
 
@@ -424,7 +424,7 @@ test "vm gc keeps rooted strings alive" {
     var vm = try VM.init(vt_runtime());
     defer vm.deinit();
 
-    const s = try vm.ownString("keep-me");
+    const s = try vm.strings.own("keep-me");
     try vm.push(try vm.ownDataString(vm.stringValue(s)));
     defer _ = vm.pop() catch {};
 
@@ -458,7 +458,7 @@ test "vm gc stress test allocates many objects" {
         const tpl_id = try vm.tuples.create(&.{ Data.new.num(i), Data.new.num(i * 2) });
         try tuple_ids.append(vt_runtime().alloc, tpl_id);
 
-        const sid = try vm.ownString("stress-string");
+        const sid = try vm.strings.own("stress-string");
         try string_ids.append(vt_runtime().alloc, sid);
     }
 

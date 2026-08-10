@@ -69,8 +69,8 @@ pub const specs: []const api.FnSpec = &.{
 };
 
 pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {
-    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0], vm));
-    const new_seed: u64 = root.numToInt(u64, raw_arg) orelse return .errType(0, "non-negative integer", root.dataToString(args[0], vm));
+    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
+    const new_seed: u64 = root.numToInt(u64, raw_arg) orelse return .errType(0, "non-negative integer", root.typeof(args[0], vm));
 
     vm.runtime.rng_prng = std.Random.DefaultPrng.init(new_seed);
 
@@ -86,18 +86,18 @@ pub fn revertSeed(args: []const Data, vm: *VM) !NativeResult {
 }
 
 pub fn rand(args: []const Data, vm: *VM) !NativeResult {
-    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0], vm));
-    const upper_bound: isize = root.numToInt(isize, raw_arg) orelse return .errType(0, "integer number", root.dataToString(args[0], vm));
+    const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
+    const upper_bound: isize = root.numToInt(isize, raw_arg) orelse return .errType(0, "integer number", root.typeof(args[0], vm));
 
     return .okData(Data.new.num(randomNumber(isize, vm, 0, upper_bound)));
 }
 
 pub fn randRange(args: []const Data, vm: *VM) !NativeResult {
-    const raw_lower = args[0].asNum() orelse return .errType(0, "number", root.dataToString(args[0], vm));
-    const lower_bound: isize = root.numToInt(isize, raw_lower) orelse return .errType(0, "integer number", root.dataToString(args[0], vm));
+    const raw_lower = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
+    const lower_bound: isize = root.numToInt(isize, raw_lower) orelse return .errType(0, "integer number", root.typeof(args[0], vm));
 
-    const raw_upper = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1], vm));
-    const upper_bound: isize = root.numToInt(isize, raw_upper) orelse return .errType(1, "integer number", root.dataToString(args[1], vm));
+    const raw_upper = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
+    const upper_bound: isize = root.numToInt(isize, raw_upper) orelse return .errType(1, "integer number", root.typeof(args[1], vm));
 
     const result = if (lower_bound < upper_bound)
         randomNumber(isize, vm, lower_bound, upper_bound)

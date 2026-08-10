@@ -57,11 +57,11 @@ pub fn eval(args: []const Data, vm: *VM) !NativeResult {
 
     const source = switch (args[0].tag()) {
         .string => vm.stringValue(args[0].asString().?),
-        else => return .errType(0, "string", dataToString(args[0], vm)),
+        else => return .errType(0, "string", typeof(args[0], vm)),
     };
 
     const source_name = "<eval>";
-    const res = revo.module.runModuleReport(vm, source_name, source) catch {
+    const res = revo.module.runModule(vm, source_name, source, false) catch {
         return .other("eval failed");
     };
 
@@ -122,4 +122,4 @@ const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
 const NativeResult = root.NativeResult;
-const dataToString = root.dataToString;
+const typeof = root.typeof;

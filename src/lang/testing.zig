@@ -52,26 +52,8 @@ fn compileChecked(vm: *revo.VM, source: []const u8) ![]revo.Instruction {
     };
 }
 
-fn compileCheckedMode(vm: *revo.VM, source: []const u8, test_mode: bool) ![]revo.Instruction {
-    const result = try lang.build(vm, .{ .text = source }, .{
-        .install_debug_info = true,
-        .test_mode = test_mode,
-    });
-    return switch (result) {
-        .ok => |artifact| blk: {
-            alloc.free(artifact.spans);
-            break :blk artifact.instructions;
-        },
-        .err => |lang_err| {
-            revo.printBuildError(alloc, .{ .text = source }, lang_err);
-            vm.runtime.resetDiagArena();
-            return error.LangFailure;
-        },
-    };
-}
-
 fn runTopModuleChecked(vm: *revo.VM, source: []const u8, source_name: []const u8) !void {
-    const result = try revo.module.runModuleReport(vm, source_name, source);
+    const result = try revo.module.runModule(vm, source_name, source, false);
     switch (result) {
         .ok => {},
         .err => |failure| {
@@ -92,31 +74,6 @@ pub fn topResult(source: []const u8, module_dir: ?[]const u8) !TopResult {
     } else "<source>";
     defer if (module_dir != null) alloc.free(src_name);
     try runTopModuleChecked(&vm, source, src_name);
-    return .{
-        .vm = vm,
-        .value = vm.mainResult(),
-    };
-}
-
-// TODO: clean this up
-pub fn topResultMode(source: []const u8, module_dir: ?[]const u8, test_mode: bool) !TopResult {
-    var vm = try revo.VM.init(runtime());
-    errdefer vm.deinit();
-    const src_name: []const u8 = if (module_dir) |dir| blk: {
-        vm.module_dir = dir;
-        const joined = try std.fs.path.join(alloc, &.{ dir, "<source>" });
-        break :blk joined;
-    } else "<source>";
-    defer if (module_dir != null) alloc.free(src_name);
-
-    const program = try compileCheckedMode(&vm, source, test_mode);
-    defer alloc.free(program);
-    const result = try revo.module.runCompiledModuleReport(&vm, src_name, program);
-    switch (result) {
-        .ok => {},
-        .err => return error.RuntimeFailure,
-    }
-
     return .{
         .vm = vm,
         .value = vm.mainResult(),
@@ -304,7 +261,7 @@ pub fn expectRuntimeError(source: []const u8, expected: revo.EvalErrorKind) !voi
     defer alloc.free(program);
 
     vm.mainFiber().program = program;
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| try std.testing.expectEqual(expected, failure.kind),
@@ -319,7 +276,7 @@ pub fn expectRuntimeErrorInDir(module_dir: []const u8, source: []const u8, expec
     const source_name = try std.fs.path.join(alloc, &.{ module_dir, "<source>" });
     defer alloc.free(source_name);
 
-    const result = try revo.module.runModuleReport(&vm, source_name, source);
+    const result = try revo.module.runModule(&vm, source_name, source, false);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| try std.testing.expectEqual(expected, failure.kind),
@@ -340,7 +297,7 @@ pub fn expectRuntimeFailure(
     defer alloc.free(program);
 
     vm.mainFiber().program = program;
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {
@@ -366,7 +323,7 @@ pub fn expectRuntimeFailureWithMessage(
     defer alloc.free(program);
 
     vm.mainFiber().program = program;
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {

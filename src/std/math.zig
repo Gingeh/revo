@@ -40,7 +40,7 @@ fn makeUnaryChecked(
         fn apply(args: []const Data, vm: *VM) !NativeResult {
             const n = toF64(args[0]);
             if (!check(n))
-                return .errType(0, expected, dataToString(args[0], vm));
+                return .errType(0, expected, typeof(args[0], vm));
             return .{ .ok = Data.new.num(op(n)) };
         }
     }.apply;
@@ -219,4 +219,4 @@ const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
 const NativeResult = root.NativeResult;
-const dataToString = root.dataToString;
+const typeof = root.typeof;

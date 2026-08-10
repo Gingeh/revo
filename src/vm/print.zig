@@ -101,8 +101,9 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
     defer write_depth -= 1;
 
     const metamethod = switch (mode) {
-        .display => try vm.getMetamethod(self, "__display") orelse try vm.getMetamethod(self, "__tostring"),
-        .debug => try vm.getMetamethod(self, "__debug"),
+        .display => try vm.getMetamethodByAtom(self, try vm.internAtom("__display")) orelse
+            try vm.getMetamethodByAtom(self, revo.core_atoms.__tostring.atomId()),
+        .debug => try vm.getMetamethodByAtom(self, revo.core_atoms.__debug.atomId()),
         .decimal, .pretty => null,
     };
     if (metamethod) |mm| {

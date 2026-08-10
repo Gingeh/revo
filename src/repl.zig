@@ -152,7 +152,7 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = switch (revo.lang.lexReport(alloc, input_slice) catch return) {
+    const tokens = switch (revo.lang.lexReportAt(alloc, input_slice, .{}) catch return) {
         .ok => |t| t,
         .err => {
             isocline_c.ic_highlight_formatted(henv, input, input);
@@ -409,7 +409,7 @@ pub const Session = struct {
             break :blk self.source_acc.items;
         };
 
-        const file_id = self.workspace.open("<repl>", source) catch |err| {
+        const file_id = self.workspace.open("<repl>", source, .{}) catch |err| {
             try out.print("repl open error: {}\n", .{err});
             return true;
         };

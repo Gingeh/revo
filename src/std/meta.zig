@@ -1,6 +1,6 @@
 // debug flags
 pub fn set_debug(args: []const Data, vm: *VM) !NativeResult {
-    const table_id = args[0].asTable() orelse return .errType(0, "table", std_lib.dataToString(args[0], vm));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", std_lib.typeof(args[0], vm));
     const table = try vm.tables.get(table_id);
     vm.debug.dump = try check_field("dump", table, vm);
     vm.debug.each_instr = try check_field("instr", table, vm);
@@ -26,7 +26,7 @@ pub fn set_metatable_(args: []const Data, vm: *VM) !NativeResult {
     else if (args[1].asTable()) |id|
         id
     else
-        return .errType(1, "nil atom or table", std_lib.dataToString(args[1], vm));
+        return .errType(1, "nil atom or table", std_lib.typeof(args[1], vm));
     try vm.setMetatable(args[0], mt);
     return .{ .ok = args[0] };
 }

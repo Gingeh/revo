@@ -23,16 +23,3 @@ pub const AsyncJob = struct {
     buffer: ?[]u8,
     max_bytes: usize,
 };
-
-/// optional fn pointers: backend would provide implementations
-pub const AsyncBackend = struct {
-    // submit receives opaque vm pointer so implementations can pull VM data it needs
-    submit: ?*const anyopaque,
-    cancel: ?*const anyopaque,
-    // vm_ptr is an opaque pointer to VM; backend implementations should cast to actual VM type
-    poll: ?*const anyopaque,
-    shutdown: ?*const anyopaque,
-    // backend-private state pointer (opaque)
-    // this also means you can swap out backends on the fly
-    data: ?*anyopaque,
-};

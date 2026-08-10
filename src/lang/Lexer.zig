@@ -233,7 +233,7 @@ pub const testing = struct {
     };
 
     pub fn expectTokens(source: []const u8, expected: []const ExpectedToken) !void {
-        const tokens = try lex(std.testing.allocator, source);
+        const tokens = try lexAt(std.testing.allocator, source, .{});
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
@@ -257,7 +257,7 @@ pub const testing = struct {
     }
 
     pub fn expectTypes(source: []const u8, expected: []const TokenType) !void {
-        const tokens = try lex(std.testing.allocator, source);
+        const tokens = try lexAt(std.testing.allocator, source, .{});
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
@@ -293,11 +293,6 @@ pub fn identIsFunction(text: []const u8, pos: usize) bool {
     return i < text.len and text[i] == '(';
 }
 
-// tokenize source into a flat array (errors kill to death)
-pub fn lex(allocator: std.mem.Allocator, source: []const u8) ![]Token {
-    return lexAt(allocator, source, .{});
-}
-
 /// like lex but positions are offset by `origin`
 pub fn lexAt(allocator: std.mem.Allocator, source: []const u8, origin: Origin) ![]Token {
     var lexer = Lexer.init(source, allocator);
@@ -314,11 +309,6 @@ pub fn lexAt(allocator: std.mem.Allocator, source: []const u8, origin: Origin) !
     }
 
     return tokens.toOwnedSlice(allocator);
-}
-
-// tokenize with error recovery (returns LexResult intsead of crashing)
-pub fn lexReport(allocator: std.mem.Allocator, source: []const u8) !LexResult {
-    return lexReportAt(allocator, source, .{});
 }
 
 /// like lexReport but positions are offset by `origin`
@@ -1042,10 +1032,10 @@ test "lexes macros and pipe-forward" {
 
 test "lexes multiline strings" {
     const allocator = std.testing.allocator;
-    const tokens = try lex(allocator,
+    const tokens = try lexAt(allocator,
         \\"""hello
         \\world"""
-    );
+    , .{});
     defer {
         freeTokenStrings(allocator, tokens[0]);
         allocator.free(tokens);
@@ -1372,19 +1362,19 @@ test "lexes ident with special symbols" {
 }
 
 test "lexer reports unterminated strings comments and unexpected characters" {
-    try std.testing.expectError(error.UnterminatedString, lex(std.testing.allocator, "\"unterminated"));
-    try std.testing.expectError(error.UnterminatedComment, lex(std.testing.allocator, "## never closed"));
-    try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "@"));
+    try std.testing.expectError(error.UnterminatedString, lexAt(std.testing.allocator, "\"unterminated", .{}));
+    try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "## never closed", .{}));
+    try std.testing.expectError(error.UnexpectedCharacter, lexAt(std.testing.allocator, "@", .{}));
     {
-        const toks = try lex(std.testing.allocator, "!");
+        const toks = try lexAt(std.testing.allocator, "!", .{});
         defer std.testing.allocator.free(toks);
         try std.testing.expectEqual(TokenType.bang, toks[0].type);
     }
-    try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "$"));
+    try std.testing.expectError(error.UnexpectedCharacter, lexAt(std.testing.allocator, "$", .{}));
 }
 
 test "token span includes line column start end" {
-    const tokens = try lex(std.testing.allocator, "const x = 1\nlet y = 2");
+    const tokens = try lexAt(std.testing.allocator, "const x = 1\nlet y = 2", .{});
     defer std.testing.allocator.free(tokens);
 
     try std.testing.expectEqual(TokenType.kw_const, tokens[0].type);
@@ -1402,7 +1392,7 @@ test "token span includes line column start end" {
 }
 
 test "lexes string with newline escape" {
-    const tokens = try lex(std.testing.allocator, "\"hello\\nworld\"");
+    const tokens = try lexAt(std.testing.allocator, "\"hello\\nworld\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1415,10 +1405,11 @@ test "lexes string with newline escape" {
 }
 
 test "unterminated string span points at opening quote" {
-    const report = try lexReport(std.testing.allocator,
+    const report = try lexReportAt(std.testing.allocator,
         \\  
         \\  "unterminated
-    );
+    , .{});
+    try std.testing.expect(report == .err);
     try std.testing.expect(report == .err);
     try std.testing.expectEqual(LexError.Kind.UnterminatedString, report.err.kind);
     try std.testing.expectEqual(@as(u32, 2), report.err.span.line);
@@ -1426,10 +1417,11 @@ test "unterminated string span points at opening quote" {
 }
 
 test "unterminated multiline comment span points at opening hashes" {
-    const report = try lexReport(std.testing.allocator,
+    const report = try lexReportAt(std.testing.allocator,
         \\  
         \\  ## never closed
-    );
+    , .{});
+    try std.testing.expect(report == .err);
     try std.testing.expect(report == .err);
     try std.testing.expectEqual(LexError.Kind.UnterminatedComment, report.err.kind);
     try std.testing.expectEqual(@as(u32, 2), report.err.span.line);
@@ -1437,7 +1429,7 @@ test "unterminated multiline comment span points at opening hashes" {
 }
 
 test "lexes string with tab escape" {
-    const tokens = try lex(std.testing.allocator, "\"hi\\tworld\"");
+    const tokens = try lexAt(std.testing.allocator, "\"hi\\tworld\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1450,7 +1442,7 @@ test "lexes string with tab escape" {
 }
 
 test "lexes string with backslash escape" {
-    const tokens = try lex(std.testing.allocator, "\"path\\\\to\\\\file\"");
+    const tokens = try lexAt(std.testing.allocator, "\"path\\\\to\\\\file\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1463,7 +1455,7 @@ test "lexes string with backslash escape" {
 }
 
 test "lexes string with quote escape" {
-    const tokens = try lex(std.testing.allocator, "\"say \\\"hello\\\"\"");
+    const tokens = try lexAt(std.testing.allocator, "\"say \\\"hello\\\"\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1476,7 +1468,7 @@ test "lexes string with quote escape" {
 }
 
 test "lexes string with carriage return escape" {
-    const tokens = try lex(std.testing.allocator, "\"line1\\rline2\"");
+    const tokens = try lexAt(std.testing.allocator, "\"line1\\rline2\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1489,7 +1481,7 @@ test "lexes string with carriage return escape" {
 }
 
 test "lexes single quoted string is raw" {
-    const tokens = try lex(std.testing.allocator, "'hello\\nworld'");
+    const tokens = try lexAt(std.testing.allocator, "'hello\\nworld'", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);
@@ -1502,7 +1494,7 @@ test "lexes single quoted string is raw" {
 }
 
 test "lexes backtick string with escapes" {
-    const tokens = try lex(std.testing.allocator, "`hello\\nworld`");
+    const tokens = try lexAt(std.testing.allocator, "`hello\\nworld`", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .backtick_string) freeTokenStrings(std.testing.allocator, tok);
@@ -1515,7 +1507,7 @@ test "lexes backtick string with escapes" {
 }
 
 test "lexes backtick string with backtick escape" {
-    const tokens = try lex(std.testing.allocator, "`say \\`hi\\``");
+    const tokens = try lexAt(std.testing.allocator, "`say \\`hi\\``", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .backtick_string) freeTokenStrings(std.testing.allocator, tok);
@@ -1528,7 +1520,7 @@ test "lexes backtick string with backtick escape" {
 }
 
 test "lexes string with unknown escape passed through" {
-    const tokens = try lex(std.testing.allocator, "\"hello\\qworld\"");
+    const tokens = try lexAt(std.testing.allocator, "\"hello\\qworld\"", .{});
     defer {
         for (tokens) |tok| {
             if (tok.type == .string) freeTokenStrings(std.testing.allocator, tok);

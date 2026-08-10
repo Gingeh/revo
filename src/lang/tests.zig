@@ -1632,7 +1632,7 @@ test "runtime renderer includes source path" {
     try vm.setProgramSourceName("examples/fail.rv");
     vm.mainFiber().program = built.ok.instructions;
 
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {
@@ -1668,7 +1668,7 @@ test "runtime renderer includes stack trace call chain" {
 
     vm.mainFiber().program = built.ok.instructions;
 
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(&vm);
     switch (result) {
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {

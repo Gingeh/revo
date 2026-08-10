@@ -44,7 +44,7 @@ pub fn deinit(self: *Interner) void {
     self.dead.deinit(self.alloc);
 }
 
-fn insert(self: *Interner, owned: []u8) !memory.StringID {
+pub fn adoptNoDedup(self: *Interner, owned: []u8) !memory.StringID {
     if (self.dead.pop()) |id| {
         self.slots.items[id] = owned;
         return id;
@@ -61,7 +61,7 @@ pub fn own(self: *Interner, value: []const u8) !memory.StringID {
     if (self.by_name.get(value)) |id| return id;
     const owned = try self.alloc.dupe(u8, value);
     errdefer self.alloc.free(owned);
-    const id = try self.insert(owned);
+    const id = try self.adoptNoDedup(owned);
     try self.by_name.put(owned, id);
     return id;
 }
@@ -71,19 +71,15 @@ pub fn adopt(self: *Interner, value: []u8) !memory.StringID {
         self.alloc.free(value);
         return id;
     }
-    const id = try self.insert(value);
+    const id = try self.adoptNoDedup(value);
     try self.by_name.put(value, id);
     return id;
-}
-
-pub fn adoptNoDedup(self: *Interner, value: []u8) !memory.StringID {
-    return self.insert(value);
 }
 
 pub fn ownNoDedup(self: *Interner, value: []const u8) !memory.StringID {
     const owned = try self.alloc.dupe(u8, value);
     errdefer self.alloc.free(owned);
-    return self.insert(owned);
+    return self.adoptNoDedup(owned);
 }
 
 pub fn lookup(self: *const Interner, value: []const u8) ?memory.StringID {
@@ -161,7 +157,7 @@ test "string literals survive source free" {
 
     vm.mainFiber().program = artifact.instructions;
 
-    switch (try vm.runReport()) {
+    switch (try revo.vm.exec.runReport(&vm)) {
         .err => return error.Failed,
         .ok => {},
     }

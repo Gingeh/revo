@@ -5,7 +5,7 @@ const lang = revo.lang;
 const testing = revo.lang.testing;
 const Data = revo.Data;
 
-fn buildAndRun(vm: *revo.VM, source_path: []const u8, source: []const u8, module_scope: bool) !revo.EvalResult {
+pub fn runModule(vm: *revo.VM, source_path: []const u8, source: []const u8, module_scope: bool) !revo.EvalResult {
     const opts: lang.BuildOptions = if (module_scope) .{ .module_scope = true } else .{};
     const artifact = switch (try lang.build(vm, .{ .name = source_path, .text = source }, opts)) {
         .ok => |ok| ok,
@@ -20,18 +20,8 @@ fn buildAndRun(vm: *revo.VM, source_path: []const u8, source: []const u8, module
     return runCompiledModuleReport(vm, source_path, artifact.instructions);
 }
 
-pub fn runModule(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.Data {
-    const result = try buildAndRun(vm, source_path, source, false);
-    if (result == .err) return error.RuntimeFailure;
-    return vm.currentFiber().result;
-}
-
-pub fn runModuleReport(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.EvalResult {
-    return buildAndRun(vm, source_path, source, false);
-}
-
 pub fn runImportedModule(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.Data {
-    const result = try buildAndRun(vm, source_path, source, true);
+    const result = try runModule(vm, source_path, source, true);
     if (result == .err) return error.RuntimeFailure;
     return vm.currentFiber().result;
 }
@@ -71,7 +61,7 @@ fn swapFiberAndRun(
         vm.closeUpvalueList(&finished, 0) catch {};
         revo.VM.Fiber.deinit(&finished, vm.runtime.alloc);
     }
-    const result = try vm.runReport();
+    const result = try revo.vm.exec.runReport(vm);
     return .{ .result = result, .prev = prev };
 }
 

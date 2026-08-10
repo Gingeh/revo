@@ -53,7 +53,7 @@ pub const specs: []const api.FnSpec = &.{
         \\an arity-2 fn receives (value, index/key); materialize with iter.collect()
         \\    iter.collect(iter.map((1, 2, 3), fn(x) x * 2))
         ,
-        .f = root.define(&.{ .any, .function }, map_fn),
+        .f = root.define(&.{ .any, .function }, transformFn(.map)),
     },
     .{
         .name = "filter",
@@ -68,7 +68,7 @@ pub const specs: []const api.FnSpec = &.{
         \\an arity-2 fn receives (value, index/key)
         \\    iter.collect(iter.filter((1, 2, 3, 4), fn(x) x > 2))
         ,
-        .f = root.define(&.{ .any, .function }, filter_fn),
+        .f = root.define(&.{ .any, .function }, transformFn(.filter)),
     },
     .{
         .name = "take",
@@ -82,7 +82,7 @@ pub const specs: []const api.FnSpec = &.{
         \\returns a lazy iterator of the first n elements
         \\    iter.collect(iter.take((1, 2, 3, 4), 2))
         ,
-        .f = root.define(&.{ .any, .any }, take_fn),
+        .f = root.define(&.{ .any, .any }, boundedFn(.take)),
     },
     .{
         .name = "drop",
@@ -96,7 +96,7 @@ pub const specs: []const api.FnSpec = &.{
         \\returns a lazy iterator without the first n elements
         \\    iter.collect(iter.drop((1, 2, 3, 4), 2))
         ,
-        .f = root.define(&.{ .any, .any }, drop_fn),
+        .f = root.define(&.{ .any, .any }, boundedFn(.drop)),
     },
     .{
         .name = "zip",
@@ -139,7 +139,7 @@ pub const specs: []const api.FnSpec = &.{
         \\returns a lazy iterator of n-element table chunks
         \\    iter.collect(iter.chunk((1, 2, 3, 4, 5), 2))   # ({1, 2}, {3, 4}, {5})
         ,
-        .f = root.define(&.{ .any, .any }, chunk_fn),
+        .f = root.define(&.{ .any, .any }, boundedFn(.chunk)),
     },
     .{
         .name = "flat_map",
@@ -153,7 +153,7 @@ pub const specs: []const api.FnSpec = &.{
         \\maps each element to an iterable and yields its elements lazily
         \\    iter.collect(iter.flat_map((1, 2), fn(x) (x, x * 10)))   # (1, 10, 2, 20)
         ,
-        .f = root.define(&.{ .any, .function }, flat_map_fn),
+        .f = root.define(&.{ .any, .function }, transformFn(.flat_map)),
     },
     .{
         .name = "collect",
@@ -318,7 +318,7 @@ const Kind = enum(usize) {
 /// returns a zero-arg callable iterator for obj
 pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
     const w = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     if (w.isString() or w.isTuple() or w.isTable())
         return makeSeqIterator(vm, w);
     return .okData(w);
@@ -328,18 +328,18 @@ pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy arithmetic sequence
 pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
     const start: f64 = if (args.len == 1) 0 else blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0], vm));
+        const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
         break :blk n;
     };
     const end: f64 = if (args.len == 1) blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", dataToString(args[0], vm));
+        const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
         break :blk n;
     } else blk: {
-        const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
+        const n = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
         break :blk n;
     };
     const step: f64 = if (args.len >= 3) blk: {
-        const n = args[2].asNum() orelse return .errType(2, "number", dataToString(args[2], vm));
+        const n = args[2].asNum() orelse return .errType(2, "number", typeof(args[2], vm));
         break :blk n;
     } else 1;
     if (step == 0) return .errType(2, "non-zero step", "0");
@@ -351,50 +351,33 @@ pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.table(it_id));
 }
 
-/// > map(collection: any, fn: function) -> function
-/// returns a lazy iterator that transforms each element
-pub fn map_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const it_id = try makeIterator(vm, .map);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .func, args[1]);
-    return .okData(Data.new.table(it_id));
+/// native for map/filter/flat_map-style lazy transform iterators
+fn transformFn(comptime kind: Kind) root.NativeFn {
+    return struct {
+        fn f(args: []const Data, vm: *VM) anyerror!NativeResult {
+            const up = (try wrapIterable(vm, args[0])) orelse
+                return .errType(0, "iterable", typeof(args[0], vm));
+            const it_id = try makeIterator(vm, kind);
+            try putState(vm, it_id, .up, up);
+            try putState(vm, it_id, .func, args[1]);
+            return .okData(Data.new.table(it_id));
+        }
+    }.f;
 }
 
-/// > filter(collection: any, fn: function) -> function
-/// returns a lazy iterator that only yields values where fn is truthy
-pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const it_id = try makeIterator(vm, .filter);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .func, args[1]);
-    return .okData(Data.new.table(it_id));
-}
-
-/// > take(collection: any, n: number) -> function
-/// returns a lazy iterator of the first n elements
-pub fn take_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
-    const it_id = try makeIterator(vm, .take);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .n, Data.new.num(n));
-    return .okData(Data.new.table(it_id));
-}
-
-/// > drop(collection: any, n: number) -> function
-/// returns a lazy iterator without the first n elements
-pub fn drop_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
-    const it_id = try makeIterator(vm, .drop);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .n, Data.new.num(n));
-    return .okData(Data.new.table(it_id));
+/// native for take/drop/chunk-style bounded lazy iterators
+fn boundedFn(comptime kind: Kind) root.NativeFn {
+    return struct {
+        fn f(args: []const Data, vm: *VM) anyerror!NativeResult {
+            const up = (try wrapIterable(vm, args[0])) orelse
+                return .errType(0, "iterable", typeof(args[0], vm));
+            const n = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
+            const it_id = try makeIterator(vm, kind);
+            try putState(vm, it_id, .up, up);
+            try putState(vm, it_id, .n, Data.new.num(n));
+            return .okData(Data.new.table(it_id));
+        }
+    }.f;
 }
 
 /// > zip(...) -> function
@@ -405,7 +388,7 @@ pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
     defer ups.deinit(vm.runtime.alloc);
     for (args) |a| {
         const w = (try toCallable(vm, a)) orelse
-            return .errType(0, "iterable", dataToString(a, vm));
+            return .errType(0, "iterable", typeof(a, vm));
         try ups.append(vm.runtime.alloc, w);
     }
     const up_tuple = try vm.tuples.create(ups.items);
@@ -418,32 +401,9 @@ pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
 /// returns a lazy iterator of (index, value) tuples
 pub fn enumerate_fn(args: []const Data, vm: *VM) !NativeResult {
     const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     const it_id = try makeIterator(vm, .enumerate);
     try putState(vm, it_id, .up, up);
-    return .okData(Data.new.table(it_id));
-}
-
-/// > chunk(collection: any, n: number) -> function
-/// returns a lazy iterator of n-element table chunks
-pub fn chunk_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "number", dataToString(args[1], vm));
-    const it_id = try makeIterator(vm, .chunk);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .n, Data.new.num(n));
-    return .okData(Data.new.table(it_id));
-}
-
-/// > flat_map(collection: any, fn: function) -> function
-/// maps each element to an iterable and yields its elements lazily
-pub fn flat_map_fn(args: []const Data, vm: *VM) !NativeResult {
-    const up = (try wrapIterable(vm, args[0])) orelse
-        return .errType(0, "iterable", dataToString(args[0], vm));
-    const it_id = try makeIterator(vm, .flat_map);
-    try putState(vm, it_id, .up, up);
-    try putState(vm, it_id, .func, args[1]);
     return .okData(Data.new.table(it_id));
 }
 
@@ -452,7 +412,7 @@ pub fn flat_map_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     const out_id = try vm.tables.create();
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -466,7 +426,7 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 0);
     defer buf.deinit(vm.runtime.alloc);
     var v: Data = undefined;
@@ -477,7 +437,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
         } else if (v.asNum()) |n| {
             try buf.append(vm.runtime.alloc, @as(u8, @intFromFloat(std.math.clamp(@round(n), 0, 255))));
         } else {
-            return .errType(0, "string or number", dataToString(v, vm));
+            return .errType(0, "string or number", typeof(v, vm));
         }
     }
     return .{ .ok = try vm.adoptDataString(try buf.toOwnedSlice(vm.runtime.alloc)) };
@@ -488,7 +448,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var acc = args[2];
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -502,7 +462,7 @@ pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn fold_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var acc: Data = undefined;
     var got: bool = false;
     var v: Data = undefined;
@@ -519,21 +479,24 @@ pub fn fold_fn(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = acc };
 }
 
+/// call fn with (value, index) when it takes 2+ params, else (value)
+fn callPred(vm: *VM, f: Data, v: Data, idx: Data) !Data {
+    return if (passesIndex(vm, f))
+        try vm.callFunction(f, &[_]Data{ v, idx })
+    else
+        try vm.callFunction(f, &[_]Data{v});
+}
+
 /// > each(collection: any, fn: function) -> atom
 /// iterates over elements, calling function for side effects, returns :ok
 pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
-    while (try pullStep(vm, st_id, &v, &idx)) {
-        if (passesIndex(vm, args[1])) {
-            _ = try vm.callFunction(args[1], &[_]Data{ v, idx });
-        } else {
-            _ = try vm.callFunction(args[1], &[_]Data{v});
-        }
-    }
+    while (try pullStep(vm, st_id, &v, &idx))
+        _ = try callPred(vm, args[1], v, idx);
     return root.okAtom(vm);
 }
 
@@ -542,15 +505,11 @@ pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
-        const ok = if (passesIndex(vm, args[1]))
-            try vm.callFunction(args[1], &[_]Data{ v, idx })
-        else
-            try vm.callFunction(args[1], &[_]Data{v});
-        if (isTruthy(ok)) return .{ .ok = v };
+        if (isTruthy(try callPred(vm, args[1], v, idx))) return .{ .ok = v };
     }
     return .okData(revo.Data.new.core(.nil));
 }
@@ -560,15 +519,11 @@ pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
-        const ok = if (passesIndex(vm, args[1]))
-            try vm.callFunction(args[1], &[_]Data{ v, idx })
-        else
-            try vm.callFunction(args[1], &[_]Data{v});
-        if (!isTruthy(ok)) return .okData(Data.new.boolean(false));
+        if (!isTruthy(try callPred(vm, args[1], v, idx))) return .okData(Data.new.boolean(false));
     }
     return .okData(Data.new.boolean(true));
 }
@@ -578,15 +533,11 @@ pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
-        const ok = if (passesIndex(vm, args[1]))
-            try vm.callFunction(args[1], &[_]Data{ v, idx })
-        else
-            try vm.callFunction(args[1], &[_]Data{v});
-        if (isTruthy(ok)) return .okData(Data.new.boolean(true));
+        if (isTruthy(try callPred(vm, args[1], v, idx))) return .okData(Data.new.boolean(true));
     }
     return .okData(Data.new.boolean(false));
 }
@@ -596,18 +547,12 @@ pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len < 1 or args.len > 2) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var n: f64 = 0;
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx)) {
-        if (args.len == 2) {
-            const ok = if (passesIndex(vm, args[1]))
-                try vm.callFunction(args[1], &[_]Data{ v, idx })
-            else
-                try vm.callFunction(args[1], &[_]Data{v});
-            if (!isTruthy(ok)) continue;
-        }
+        if (args.len == 2 and !isTruthy(try callPred(vm, args[1], v, idx))) continue;
         n += 1;
     }
     return .okData(Data.new.num(n));
@@ -618,7 +563,7 @@ pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
 pub fn sum_fn(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
-        return .errType(0, "iterable", dataToString(args[0], vm));
+        return .errType(0, "iterable", typeof(args[0], vm));
     var total: f64 = 0;
     var v: Data = undefined;
     var idx: Data = undefined;
@@ -664,8 +609,7 @@ fn mapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
     const f = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.func.atomId(), vm) orelse
         return .okData(revo.Data.new.core(.done));
-    if (passesIndex(vm, f)) return .okData(try vm.callFunction(f, &[_]Data{ v, idx }));
-    return .okData(try vm.callFunction(f, &[_]Data{v}));
+    return .okData(try callPred(vm, f, v, idx));
 }
 
 fn filterNext(st_id: mem.TableID, vm: *VM) !NativeResult {
@@ -675,11 +619,7 @@ fn filterNext(st_id: mem.TableID, vm: *VM) !NativeResult {
         var v: Data = undefined;
         var idx: Data = undefined;
         if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
-        const ok = if (passesIndex(vm, f))
-            try vm.callFunction(f, &[_]Data{ v, idx })
-        else
-            try vm.callFunction(f, &[_]Data{v});
-        if (isTruthy(ok)) return .okData(v);
+        if (isTruthy(try callPred(vm, f, v, idx))) return .okData(v);
     }
 }
 
@@ -764,12 +704,9 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
                 if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
                 const f = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.func.atomId(), vm) orelse
                     return .okData(revo.Data.new.core(.done));
-                const mapped = if (passesIndex(vm, f))
-                    try vm.callFunction(f, &[_]Data{ v, idx })
-                else
-                    try vm.callFunction(f, &[_]Data{v});
+                const mapped = try callPred(vm, f, v, idx);
                 const sub = (try toCallable(vm, mapped)) orelse
-                    return .errType(1, "iterable", dataToString(mapped, vm));
+                    return .errType(1, "iterable", typeof(mapped, vm));
                 st = try vm.tables.get(st_id);
                 try st.putRawAtom(revo.core_atoms.cur.atomId(), sub, vm);
                 continue;
@@ -989,7 +926,7 @@ const api = @import("api.zig");
 const root = @import("root.zig");
 const mem = revo.memory;
 const NativeResult = root.NativeResult;
-const dataToString = root.dataToString;
+const typeof = root.typeof;
 const testing = revo.lang.testing;
 
 test "iter functions" {

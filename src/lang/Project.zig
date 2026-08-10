@@ -10,7 +10,7 @@ root: []const u8,
 
 /// open a file in ws using this project's mode and root
 pub fn open(self: Project, ws: *Workspace, name: []const u8, text: []const u8) !FileId {
-    return ws.openWith(name, text, .{
+    return ws.open(name, text, .{
         .mode = self.mode,
         .project_root = self.root,
     });

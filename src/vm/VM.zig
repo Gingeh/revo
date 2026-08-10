@@ -60,9 +60,6 @@ pub const StructCacheEntry = struct {
 
 // main loop: run runnable fibers, wake sleepers
 // wait for io/timers if needed
-pub fn runReport(self: *VM) !EvalResult {
-    return vm_exec.runReport(self);
-}
 
 /// quite a hefty struct,,, but its worth it
 pub const Fiber = struct {
@@ -416,22 +413,14 @@ pub fn addConstant(self: *VM, val: Data) !ConstantID {
 }
 
 // TODO: make a pools field, move all pools there
-pub fn ownString(self: *VM, value: []const u8) !mem.StringID {
-    return try self.strings.own(value);
-}
-
-pub fn adoptString(self: *VM, value: []u8) !mem.StringID {
-    return try self.strings.adopt(value);
-}
-
 /// dupes yours
 pub fn ownDataString(self: *VM, value: []const u8) !Data {
-    return Data.new.str(try self.ownString(value));
+    return Data.new.str(try self.strings.own(value));
 }
 
 /// kills yours
 pub fn adoptDataString(self: *VM, value: []u8) !Data {
-    return Data.new.str(try self.adoptString(value));
+    return Data.new.str(try self.strings.adopt(value));
 }
 
 pub fn adoptDataStringNoDedup(self: *VM, value: []u8) !Data {
@@ -777,6 +766,43 @@ pub fn setPanicMessageOwned(self: *VM, message: []u8) void {
     self.panic_message = message;
 }
 
+/// set the panic message + source span from an `:error` result tuple's message
+/// item (items[1], skipped when absent); `pc` points one past the instruction
+/// that produced the error
+pub fn panicFromErrTuple(self: *VM, tuple: *root.tuple.Tuple, pc: usize) error{ OutOfMemory, Panic }!void {
+    if (tuple.items.len > 1) {
+        var buf = std.Io.Writer.Allocating.init(self.runtime.alloc);
+        defer buf.deinit();
+        tuple.items[1].write(&buf.writer, self, .display) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.Panic,
+        };
+        self.setPanicMessageOwned(try buf.toOwnedSlice());
+    }
+    self.panic_span = if (self.currentDebugInfo()) |debug|
+        self.spanAtPc(debug, if (pc > 0) pc - 1 else 0)
+    else
+        null;
+}
+
+/// push the root call frame of a bare (frame-less) fiber: it runs the whole
+/// program and returns at the end; caller keeps ownership of register setup
+pub fn pushRootFrame(self: *VM, fiber: *Fiber, register_count: u8) !void {
+    if (fiber.frames.items.len != 0) return;
+    if (fiber.debug_info_id == null)
+        fiber.debug_info_id = self.pending_debug_info_id;
+    try fiber.frames.append(self.runtime.alloc, .{
+        .return_addr = @intCast(fiber.program.len),
+        .base = 0,
+        .program = fiber.program,
+        .call_site_pc = null,
+        .result_register = 0,
+        .register_count = register_count,
+        .closure_id = null,
+    });
+    fiber.top_base = 0;
+}
+
 pub fn clearPanicMessage(self: *VM) void {
     if (self.panic_message) |message| self.runtime.alloc.free(message);
     self.panic_message = null;
@@ -932,13 +958,6 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
     return self.functions.createClosure(closure.prototype, detached.items);
 }
 
-pub fn run(self: *VM) !void {
-    return switch (try self.runReport()) {
-        .ok => {},
-        .err => return error.RuntimeFailure,
-    };
-}
-
 /// `result_reg` is a register (relative to the caller frame's base) where a
 /// parked callee's eventual result should land. host callers that consume the
 /// value through dispatch instructions (index, concat, call) pass the
@@ -958,24 +977,7 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
     fiber.registers[fiber.registers_len] = callee;
     fiber.registers_len += 1;
 
-    if (fiber.frames.items.len == 0) {
-        if (fiber.debug_info_id == null)
-            fiber.debug_info_id = self.pending_debug_info_id;
-
-        try fiber.frames.append(
-            self.runtime.alloc,
-            .{
-                .return_addr = @intCast(fiber.program.len),
-                .base = 0,
-                .program = fiber.program,
-                .call_site_pc = null,
-                .result_register = 0,
-                .register_count = 0,
-                .closure_id = null,
-            },
-        );
-        fiber.top_base = 0;
-    }
+    try self.pushRootFrame(fiber, 0);
 
     const caller_frame_depth = fiber.frames.items.len;
     const base = fiber.top_base;
@@ -1372,7 +1374,7 @@ fn callNonClosureFunction(
                         .{
                             i,
                             @tagName(spec),
-                            revo.std_lib.dataToString(args[i], self),
+                            revo.std_lib.typeof(args[i], self),
                         },
                     );
                     return error.TypeError;
@@ -1943,22 +1945,7 @@ pub fn returnRegister(
                 if (tag.asAtom() ==
                     revo.core_atoms.atomId(.err))
                 {
-                    self.panic_span = if (self.currentDebugInfo()) |debug|
-                        self.spanAtPc(debug, if (fiber.pc > 0) fiber.pc - 1 else 0)
-                    else
-                        null;
-
-                    if (tuple.items.len >= 2) {
-                        var buf = std.Io.Writer.Allocating.init(
-                            self.runtime.alloc,
-                        );
-                        defer buf.deinit();
-                        tuple.items[1].write(&buf.writer, self, .display) catch |err| switch (err) {
-                            error.OutOfMemory => return error.OutOfMemory,
-                            else => return error.Panic,
-                        };
-                        self.setPanicMessageOwned(try buf.toOwnedSlice());
-                    }
+                    try self.panicFromErrTuple(tuple, fiber.pc);
                     return error.Panic;
                 }
             }
@@ -2162,14 +2149,9 @@ const TuplePool = root.tuple.TuplePool;
 pub const GlobalID = mem.StringID;
 pub const ChannelID = mem.TableID;
 pub const resolveField = lookup.resolveField;
-pub const callField = lookup.callField;
-pub const resolveIndex = lookup.resolveIndex;
 pub const FieldLookup = lookup.FieldLookup;
-pub const getMetatable = lookup.getMetatable;
-pub const getMetamethod = lookup.getMetamethod;
 pub const setMetatable = lookup.setMetatable;
 pub const setTableMetatable = lookup.setTableMetatable;
-pub const runModule = module.runModule;
 pub const runImportedModule = module.runImportedModule;
 const Scheduler = @import("scheduler.zig");
 const struct_mod = @import("struct.zig");

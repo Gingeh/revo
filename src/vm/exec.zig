@@ -14,21 +14,9 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
     self.clearPanicMessage();
     self.clearRuntimeMessage();
 
-    if (self.mainFiber().frames.items.len == 0) {
-        if (self.mainFiber().debug_info_id == null)
-            self.mainFiber().debug_info_id = self.pending_debug_info_id;
-
-        try self.mainFiber().frames.append(self.runtime.alloc, .{
-            .return_addr = @intCast(self.mainFiber().program.len),
-            .base = 0,
-            .program = self.mainFiber().program,
-            .call_site_pc = null,
-            .result_register = 0,
-            .register_count = 16,
-            .closure_id = null,
-        });
-        const fiber = self.mainFiber();
-        fiber.top_base = 0;
+    const fiber = self.mainFiber();
+    if (fiber.frames.items.len == 0) {
+        try self.pushRootFrame(fiber, 16);
         fiber.registers_len = 16;
         @memset(fiber.registers[0..16], revo.Data.new.core(.missing));
     }
@@ -216,7 +204,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot add {s} and {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         .concat => {
@@ -240,7 +228,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot subtract {s} from {s}",
-                .{ revo.std_lib.dataToString(rhs, self), revo.std_lib.dataToString(lhs, self) },
+                .{ revo.std_lib.typeof(rhs, self), revo.std_lib.typeof(lhs, self) },
             );
         },
         .mul => {
@@ -271,7 +259,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot divide {s} by {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         .mod => {
@@ -302,7 +290,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot mod {s} by {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         inline .band, .bor, .bxor => |op| {
@@ -329,7 +317,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 msg,
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         inline .shl, .shr => |op| {
@@ -356,7 +344,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot shift {s} by {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         .int_div => {
@@ -378,7 +366,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot divide {s} by {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
         .mod_int => {
@@ -389,9 +377,9 @@ inline fn execFiberDispatch(
                 std.debug.assert(rhs.isNumber());
             }
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
             const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
 
@@ -406,9 +394,9 @@ inline fn execFiberDispatch(
                 std.debug.assert(rhs.isNumber());
             }
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
             const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
             const result: i64 = switch (op) {
                 .band_int => li & ri,
                 .bor_int => li | ri,
@@ -427,9 +415,9 @@ inline fn execFiberDispatch(
                 std.debug.assert(rhs.isNumber());
             }
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
             const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
             if (ri < 0 or ri > 63) return self.fail(
                 error.ShiftAmountOutOfRange,
                 "shift amount {d} out of range",
@@ -453,9 +441,9 @@ inline fn execFiberDispatch(
                 std.debug.assert(rhs.isNumber());
             }
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
             const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
             if (ri == 0) return self.evalFailure(error.DivisionByZero);
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
 
@@ -470,13 +458,13 @@ inline fn execFiberDispatch(
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
             }
-            return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.std_lib.dataToString(v, self)});
+            return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.std_lib.typeof(v, self)});
         },
         .negate_int => {
             const v = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(v.isNumber());
             const v_int: i64 = revo.memory.numToI64(@as(f64, @bitCast(v.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(v, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(v, self)});
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -498,9 +486,9 @@ inline fn execFiberDispatch(
                 std.debug.assert(rhs.isNumber());
             }
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
             const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(rhs, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
             const result: i64 = switch (op) {
                 .add_int => li + ri,
                 .sub_int => li - ri,
@@ -1054,19 +1042,7 @@ inline fn execFiberDispatch(
             if (tag.asAtom() == revo.core_atoms.atomId(.err)) {
                 if (propagate_errors) {
                     if (fiber.frames.items.len == 2) {
-                        if (tuple.items.len > 1) {
-                            var buf = std.Io.Writer.Allocating.init(alloc);
-                            defer buf.deinit();
-                            tuple.items[1].write(&buf.writer, self, .display) catch |err| switch (err) {
-                                error.OutOfMemory => return self.evalFailure(error.OutOfMemory),
-                                else => return self.evalFailure(error.Panic),
-                            };
-                            self.setPanicMessageOwned(try buf.toOwnedSlice());
-                        }
-                        self.panic_span = if (self.currentDebugInfo()) |debug|
-                            self.spanAtPc(debug, if (fiber.pc > 0) fiber.pc - 1 else 0)
-                        else
-                            null;
+                        self.panicFromErrTuple(tuple, fiber.pc) catch |e| return self.evalFailure(e);
                         return self.evalFailure(error.Panic);
                     }
                     self.returnRegister(.{ .op = .ret, .a = instr.a }) catch |e| return self.evalFailure(e);
@@ -1119,7 +1095,7 @@ inline fn execFiberDispatch(
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.dataToString(lhs_val, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs_val, self)});
             const ri: i64 = @intCast(instr.bx);
             const result: i64 = switch (op) {
                 .add_int_imm => li + ri,
@@ -1341,7 +1317,7 @@ noinline fn execConcat(
         return self.fail(
             error.IncompatibleTypes,
             "cannot concatenate {s} and {s}",
-            .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+            .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
         );
     defer alloc.free(l_src);
 
@@ -1349,7 +1325,7 @@ noinline fn execConcat(
         return self.fail(
             error.IncompatibleTypes,
             "cannot concatenate {s} and {s}",
-            .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+            .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
         );
     defer alloc.free(r_src);
 
@@ -1369,7 +1345,7 @@ noinline fn toStringOperand(
     alloc: std.mem.Allocator,
     operand: Data,
 ) VM.EvalError!?[]u8 {
-    if (try self.getMetamethod(operand, "__tostring")) |mm| {
+    if (try self.getMetamethodByAtom(operand, revo.core_atoms.__tostring.atomId())) |mm| {
         const call_result = revo.std_lib.callUnaryMetamethod(mm, operand, self);
         fiber.* = self.currentFiber();
         base.* = fiber.*.top_base;
@@ -1485,7 +1461,7 @@ noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instructi
         }
         break :blk null;
     } orelse {
-        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key, self);
+        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.typeof(key, self);
         try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{ key_name, revo.std_lib.typeof(object, self) });
         return error.NotAFunction;
     };
@@ -1561,7 +1537,7 @@ noinline fn execPow(self: *VM, regs: []Data, base: usize, instr: Instruction) VM
             if (std.math.isNan(result)) return self.fail(
                 error.IncompatibleTypes,
                 "cannot exponentiate {s} by {s}",
-                .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+                .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
 
             regWrite(regs, base, instr.a, Data.new.num(result));
@@ -1571,7 +1547,7 @@ noinline fn execPow(self: *VM, regs: []Data, base: usize, instr: Instruction) VM
     return self.fail(
         error.IncompatibleTypes,
         "cannot exponentiate {s} by {s}",
-        .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+        .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
     );
 }
 
@@ -1593,7 +1569,7 @@ noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction)
         if (std.math.isNan(result)) return self.fail(
             error.IncompatibleTypes,
             "cannot exponentiate {s} by {s}",
-            .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+            .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
         );
 
         regWrite(regs, base, instr.a, Data.new.num(result));
@@ -1614,7 +1590,7 @@ noinline fn execPowFloat(self: *VM, regs: []Data, base: usize, instr: Instructio
     if (std.math.isNan(result)) return self.fail(
         error.IncompatibleTypes,
         "cannot exponentiate {s} by {s}",
-        .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+        .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
     );
 
     regWrite(regs, base, instr.a, Data.new.num(result));
@@ -1658,6 +1634,6 @@ noinline fn execStringRepeat(
     return self.fail(
         error.IncompatibleTypes,
         "cannot multiply {s} and {s}",
-        .{ revo.std_lib.dataToString(lhs, self), revo.std_lib.dataToString(rhs, self) },
+        .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
     );
 }

@@ -8,6 +8,51 @@ const Workspace = revo.lang.Workspace;
 
 const keywords = Lexer.TokenType.of_string.keys();
 
+const CallSig = struct {
+    detail: []const u8,
+    insert_text: []const u8,
+    format: T.InsertTextFormat,
+};
+
+/// `detail` = name(p1: t1, ...) -> ret, `insert_text` = snippet name(${1:p1}, ...)
+fn callSignature(
+    arena: std.mem.Allocator,
+    name: []const u8,
+    param_names: []const []const u8,
+    param_types: []const []const u8,
+    ret: ?[]const u8,
+) !CallSig {
+    var buf = std.Io.Writer.Allocating.init(arena);
+    try buf.writer.print("{s}(", .{name});
+    for (param_names, 0..) |n, i| {
+        if (i > 0) try buf.writer.print(", ", .{});
+        try buf.writer.print("{s}: {s}", .{ n, param_types[i] });
+    }
+    try buf.writer.print(")", .{});
+    if (ret) |r| try buf.writer.print(" -> {s}", .{r});
+    const detail = buf.written();
+
+    if (param_names.len == 0) return .{
+        .detail = detail,
+        .insert_text = try std.fmt.allocPrint(arena, "{s}()", .{name}),
+        .format = .PlainText,
+    };
+
+    var sbuf = std.Io.Writer.Allocating.init(arena);
+    try sbuf.writer.print("{s}(", .{name});
+    for (param_names, 1..) |n, i| {
+        if (i > 1) try sbuf.writer.print(", ", .{});
+        try sbuf.writer.writeByte('$');
+        try sbuf.writer.writeByte('{');
+        try sbuf.writer.print("{d}", .{i});
+        try sbuf.writer.writeByte(':');
+        try sbuf.writer.print("{s}", .{n});
+        try sbuf.writer.writeByte('}');
+    }
+    try sbuf.writer.print(")", .{});
+    return .{ .detail = detail, .insert_text = sbuf.written(), .format = .Snippet };
+}
+
 /// complete identifiers at cursor position in `text`
 pub fn completions(
     vm: *revo.VM,
@@ -123,39 +168,22 @@ fn addGeneralCompletions(
             if (entry.value_ptr.isFunction()) {
                 if (revo.std_lib.api.find(name)) |spec| {
                     doc_copy = if (spec.doc.len > 0) (arena.dupe(u8, spec.doc) catch null) else null;
-                    // detail: name(p1: t1, p2: t2) -> ret
-                    {
-                        var buf = std.Io.Writer.Allocating.init(arena);
-                        try buf.writer.print("{s}(", .{name});
-                        for (spec.params, 0..) |p, i| {
-                            if (i > 0) try buf.writer.print(", ", .{});
-                            try buf.writer.print("{s}: {s}", .{ p[0], p[1] });
-                        }
-                        try buf.writer.print(")", .{});
-                        if (spec.ret.len > 0)
-                            try buf.writer.print(" -> {s}", .{spec.ret});
-                        detail = buf.written();
+                    const names = try arena.alloc([]const u8, spec.params.len);
+                    const types = try arena.alloc([]const u8, spec.params.len);
+                    for (spec.params, 0..) |p, i| {
+                        names[i] = p[0];
+                        types[i] = p[1];
                     }
-                    // insertText: name(${1:p1}, ${2:p2}) or name()
-                    if (spec.params.len > 0) {
-                        var sbuf = std.Io.Writer.Allocating.init(arena);
-                        try sbuf.writer.print("{s}(", .{name});
-                        for (spec.params, 1..) |p, i| {
-                            if (i > 1) try sbuf.writer.print(", ", .{});
-                            try sbuf.writer.writeByte('$');
-                            try sbuf.writer.writeByte('{');
-                            try sbuf.writer.print("{d}", .{i});
-                            try sbuf.writer.writeByte(':');
-                            try sbuf.writer.print("{s}", .{p[0]});
-                            try sbuf.writer.writeByte('}');
-                        }
-                        try sbuf.writer.print(")", .{});
-                        insert_text = sbuf.written();
-                        insert_text_format = .Snippet;
-                    } else {
-                        insert_text = try std.fmt.allocPrint(arena, "{s}()", .{name});
-                        insert_text_format = .PlainText;
-                    }
+                    const sig = try callSignature(
+                        arena,
+                        name,
+                        names,
+                        types,
+                        if (spec.ret.len > 0) spec.ret else null,
+                    );
+                    detail = sig.detail;
+                    insert_text = sig.insert_text;
+                    insert_text_format = sig.format;
                 }
             }
 
@@ -203,42 +231,22 @@ fn addGeneralCompletions(
 
                 if (kind == .Function) {
                     if (try workspace.fnSig(arena, file_id, sym.name)) |sig| {
-                        // detail: name(p1: t1, p2: t2) -> ret
-                        {
-                            var buf = std.Io.Writer.Allocating.init(arena);
-                            try buf.writer.print("{s}(", .{sym.name});
-                            for (sig.params, 0..) |p, i| {
-                                if (i > 0) try buf.writer.print(", ", .{});
-                                const pt = if (p.type_name) |ti| try ti.formatType(arena) else "";
-                                try buf.writer.print("{s}: {s}", .{ p.name, pt });
-                            }
-                            try buf.writer.print(")", .{});
-                            if (sig.return_type) |rt| {
-                                const rt_str = try rt.formatType(arena);
-                                try buf.writer.print(" -> {s}", .{rt_str});
-                            }
-                            detail = buf.written();
+                        const names = try arena.alloc([]const u8, sig.params.len);
+                        const types = try arena.alloc([]const u8, sig.params.len);
+                        for (sig.params, 0..) |p, i| {
+                            names[i] = p.name;
+                            types[i] = if (p.type_name) |ti| try ti.formatType(arena) else "";
                         }
-                        // insertText: name(${1:p1}, ${2:p2}) or name()
-                        if (sig.params.len > 0) {
-                            var sbuf = std.Io.Writer.Allocating.init(arena);
-                            try sbuf.writer.print("{s}(", .{sym.name});
-                            for (sig.params, 1..) |p, i| {
-                                if (i > 1) try sbuf.writer.print(", ", .{});
-                                try sbuf.writer.writeByte('$');
-                                try sbuf.writer.writeByte('{');
-                                try sbuf.writer.print("{d}", .{i});
-                                try sbuf.writer.writeByte(':');
-                                try sbuf.writer.print("{s}", .{p.name});
-                                try sbuf.writer.writeByte('}');
-                            }
-                            try sbuf.writer.print(")", .{});
-                            insert_text = sbuf.written();
-                            insert_text_format = .Snippet;
-                        } else {
-                            insert_text = try std.fmt.allocPrint(arena, "{s}()", .{sym.name});
-                            insert_text_format = .PlainText;
-                        }
+                        const cs = try callSignature(
+                            arena,
+                            sym.name,
+                            names,
+                            types,
+                            if (sig.return_type) |rt| try rt.formatType(arena) else null,
+                        );
+                        detail = cs.detail;
+                        insert_text = cs.insert_text;
+                        insert_text_format = cs.format;
                     }
                 }
 

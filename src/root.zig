@@ -35,6 +35,7 @@ pub const Runtime = struct {
             .alloc = alloc,
             .io = io,
             .argv = argv,
+            .diag_alloc = alloc,
             .diag_arena = null,
         };
 
@@ -44,6 +45,7 @@ pub const Runtime = struct {
             .alloc = alloc,
             .io = io,
             .argv = argv,
+            .diag_alloc = alloc,
         });
         rt.diag_alloc = vm_ptr.runtime.diag_alloc;
         rt.vm = vm_ptr;
@@ -313,7 +315,6 @@ pub const TableID = memory.TableID;
 pub const TupleID = memory.TupleID;
 pub const StructTypeID = memory.StructTypeID;
 pub const StructInstanceID = memory.StructInstanceID;
-pub const Entry = memory.Entry;
 pub const ProgramCounter = vm.ProgramCounter;
 pub const ConstantID = vm.ConstantID;
 pub const GlobalID = vm.GlobalID;

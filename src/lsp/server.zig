@@ -555,7 +555,7 @@ const Handler = struct {
         const snap = h.ws.snapshot(file_id) orelse return null;
         const source = snap.text;
 
-        const lexed = try lang.lexReport(arena, source);
+        const lexed = try lang.lexReportAt(arena, source, .{});
         const tokens = switch (lexed) {
             .ok => |t| t,
             .err => return null,

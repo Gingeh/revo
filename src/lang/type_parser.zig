@@ -14,7 +14,7 @@ const TokenType = Lexer.TokenType;
 pub fn parseTypeString(ctx: anytype, s: []const u8) !TypeInfo {
     const trimmed = if (std.mem.endsWith(u8, s, "...")) s[0 .. s.len - 3] else s;
     if (trimmed.len == 0) return .any;
-    const tokens = try Lexer.lex(ctx.alloc, trimmed);
+    const tokens = try Lexer.lexAt(ctx.alloc, trimmed, .{});
     var pos: usize = 0;
     const te = try parse(tokens, &pos, ctx.alloc);
     return try evalTypeExpr(ctx, te);

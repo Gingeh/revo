@@ -215,13 +215,7 @@ pub fn deinit(self: *Workspace) void {
     self.symbol_index.deinit();
 }
 
-/// ...in script mode
-pub fn open(self: *Workspace, name: []const u8, text: []const u8) !FileId {
-    return self.openWith(name, text, .{});
-}
-
-/// ...with explicit mode/options
-pub fn openWith(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOptions) !FileId {
+pub fn open(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOptions) !FileId {
     if (self.file_names.get(name)) |id| {
         try self.change(id, text);
         return id;
@@ -315,13 +309,9 @@ pub fn snapshot(self: *Workspace, id: FileId) ?Snapshot {
     };
 }
 
-pub fn currentVersion(self: *Workspace, id: FileId) ?u32 {
-    return self.snapshot(id).?.version;
-}
-
 /// check if cached version is outdated
 pub fn isStale(self: *Workspace, id: FileId, version: u32) bool {
-    return !(self.currentVersion(id) == version);
+    return !(self.snapshot(id).?.version == version);
 }
 
 fn rebuildSymbolIndex(self: *Workspace) void {
@@ -1311,7 +1301,7 @@ fn openFromDisk(self: *Workspace, path: []const u8) ?FileId {
     ) catch return null;
 
     defer self.alloc.free(text);
-    _ = self.openWith(path, text, .{}) catch return null;
+    _ = self.open(path, text, .{}) catch return null;
     return self.file_names.get(path);
 }
 
@@ -2042,7 +2032,7 @@ test "workspace caches repeated analysis" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1");
+    const id = try ws.open("<test>", "1 + 1", .{});
     const first = try ws.analyze(alloc, id, .{});
     try std.testing.expect(first == .ok);
 
@@ -2062,7 +2052,7 @@ test "workspace invalidates cache on change" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1");
+    const id = try ws.open("<test>", "1 + 1", .{});
     const first = try ws.analyze(alloc, id, .{});
     defer switch (first) {
         .ok => |artifact| {
@@ -2098,9 +2088,9 @@ test "workspace invalidates dependent caches" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const a = try ws.open("dir/a.rv", "1");
-    const b = try ws.open("dir/b.rv", "import \"a\"");
-    const c = try ws.open("dir/c.rv", "import \"b\"");
+    const a = try ws.open("dir/a.rv", "1", .{});
+    const b = try ws.open("dir/b.rv", "import \"a\"", .{});
+    const c = try ws.open("dir/c.rv", "import \"b\"", .{});
 
     const res_b = try ws.analyze(alloc, b, .{});
     defer switch (res_b) {
@@ -2140,7 +2130,7 @@ test "analysis returns snapshot and artifact" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1");
+    const id = try ws.open("<test>", "1 + 1", .{});
     var analysis = try ws.analyzeDetailed(alloc, id, .{});
     defer analysis.deinit(alloc);
 
@@ -2161,7 +2151,7 @@ test "workspace query surface" {
         \\const x = 1
         \\x
     ;
-    const id = try ws.open("<test>", source);
+    const id = try ws.open("<test>", source, .{});
     const query_opts: lang.BuildOptions = .{
         .include_default_macros = false,
         .install_debug_info = false,
@@ -2203,7 +2193,7 @@ test "workspace diagnostics query" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "const x =");
+    const id = try ws.open("<test>", "const x =", .{});
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -2216,7 +2206,7 @@ test "workspace diagnostics clean file" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "let x = 1\nprint(x)");
+    const id = try ws.open("<test>", "let x = 1\nprint(x)", .{});
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag == null);
 }
@@ -2229,7 +2219,7 @@ test "workspace diagnostics undefined name" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "hiasdhfasduf");
+    const id = try ws.open("<test>", "hiasdhfasduf", .{});
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -2246,7 +2236,7 @@ test "workspace diagnostics warn on missing return arrow" {
         \\ fn demo() string do
         \\   "ok"
         \\ end
-    );
+    , .{});
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -2266,7 +2256,7 @@ test "workspace diagnostics merge semantic and lower failures" {
         \\ end
         \\ bind(1, "hi")
     ;
-    const id = try ws.open("<test>", source);
+    const id = try ws.open("<test>", source, .{});
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 
@@ -2294,14 +2284,14 @@ test "workspace stale version tracking" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1");
-    const v1 = ws.currentVersion(id).?;
+    const id = try ws.open("<test>", "1 + 1", .{});
+    const v1 = ws.snapshot(id).?.version;
     try std.testing.expectEqual(@as(u32, 1), v1);
     try std.testing.expect(!ws.isStale(id, v1));
 
     try ws.change(id, "1 + 2");
     try std.testing.expect(ws.isStale(id, v1));
-    const v2 = ws.currentVersion(id).?;
+    const v2 = ws.snapshot(id).?.version;
     try std.testing.expectEqual(@as(u32, 2), v2);
     try std.testing.expect(!ws.isStale(id, v2));
 }
@@ -2315,8 +2305,8 @@ test "workspace cross-file symbol index" {
     defer ws.deinit();
 
     // *opens two files with overlapping symbol names*
-    const a = try ws.open("<a>", "const x = 1\nconst y = 2");
-    const b = try ws.open("<b>", "const x = 3\nconst z = 4");
+    const a = try ws.open("<a>", "const x = 1\nconst y = 2", .{});
+    const b = try ws.open("<b>", "const x = 3\nconst z = 4", .{});
 
     // *populates inspect caches*
     _ = try ws.inspectDetailed(alloc, a, .{});

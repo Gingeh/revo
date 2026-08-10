@@ -122,10 +122,6 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID, r
 
 const MAX_TAG_LOOP = 200;
 
-pub fn resolveIndex(self: *VM, object: Data, key: Data, indexer: Data) VM.EvalError!?FieldLookup {
-    return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP, null);
-}
-
 fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: usize, result_reg: ?@import("opcode.zig").Register) VM.EvalError!?FieldLookup {
     switch (indexer.tag()) {
         .function => {
@@ -163,61 +159,6 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
     }
 }
 
-pub fn callField(self: *VM, argc: usize) VM.EvalError!void {
-    const fiber = self.currentFiber();
-    const slots = fiber.registers[0..fiber.registers_len];
-    const key_slot = slots.len - argc - 1;
-    const object_slot = key_slot - 1;
-    const object = slots[object_slot];
-    const key = slots[key_slot];
-    const lookup = (try resolveField(self, object, key, null)) orelse {
-        fiber.registers_len = object_slot;
-        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.dataToString(key, self);
-        try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{
-            key_name,
-            revo.std_lib.typeof(object, self),
-        });
-        return error.NotAFunction;
-    };
-
-    if (!lookup.from_meta) {
-        const saved_len = fiber.registers_len;
-        errdefer fiber.registers_len = saved_len;
-        fiber.registers[key_slot] = lookup.value;
-        std.mem.copyForwards(
-            Data,
-            fiber.registers[object_slot .. fiber.registers_len - 1],
-            fiber.registers[key_slot..fiber.registers_len],
-        );
-        fiber.registers_len -= 1;
-        try callViaStackLayout(self, object_slot, argc);
-        return;
-    }
-
-    const saved_object = fiber.registers[object_slot];
-    const saved_key = fiber.registers[key_slot];
-    errdefer {
-        fiber.registers[object_slot] = saved_object;
-        fiber.registers[key_slot] = saved_key;
-    }
-    fiber.registers[object_slot] = lookup.value;
-    fiber.registers[key_slot] = object;
-    try callViaStackLayout(self, object_slot, argc + 1);
-}
-
-fn callViaStackLayout(self: *VM, callee_slot: usize, argc: usize) VM.EvalError!void {
-    const fiber = self.currentFiber();
-    const args_start = callee_slot + 1;
-    const args_end = args_start + argc;
-    const callee = fiber.registers[callee_slot];
-    try VM.ensureRegCapacity(fiber, self.runtime.alloc, fiber.registers_len + argc + 1);
-    const result = try self.callFunction(callee, fiber.registers[args_start..args_end]);
-    fiber.registers_len = callee_slot;
-    try VM.ensureRegCapacity(fiber, self.runtime.alloc, fiber.registers_len + 1);
-    fiber.registers[fiber.registers_len] = result;
-    fiber.registers_len += 1;
-}
-
 pub fn setMetatable(self: *VM, val: Data, mt: ?mem.TableID) !void {
     switch (val.tag()) {
         .table => try self.setTableMetatable(val.asTable().?, mt),
@@ -241,13 +182,4 @@ pub fn setTableMetatable(self: *VM, id: mem.TableID, mt: ?mem.TableID) !void {
     } else {
         self.metatables[@intFromEnum(mem.Type.table)] = mt;
     }
-}
-
-pub fn getMetatable(self: *VM, val: Data) !?*revo.table.Table {
-    const id = try self.getMetatableId(val) orelse return null;
-    return self.tables.get(id);
-}
-
-pub fn getMetamethod(self: *VM, val: Data, name: []const u8) !?Data {
-    return self.getMetamethodByAtom(val, try self.internAtom(name));
 }
