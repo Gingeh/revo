@@ -280,6 +280,14 @@ pub const root_specs_os: []const api.FnSpec = &.{
         .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{}) else define(&[_]TypeSpec{}, cwd),
     },
     .{
+        .name = "exit",
+        .placements = &.{api.g},
+        .params = &.{.{ "status", "number" }},
+        .ret = "never",
+        .doc = "exists the program with a status",
+        .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.number}) else define(&[_]TypeSpec{.number}, exit),
+    },
+    .{
         .name = "system",
         .placements = &.{api.g},
         .params = &.{
@@ -1066,6 +1074,13 @@ pub fn cwd(args: []const Data, vm: *VM) !NativeResult {
     const cwd_path = try std.Io.Dir.cwd().realPathFileAlloc(vm.runtime.io, ".", vm.runtime.alloc);
     defer vm.runtime.alloc.free(cwd_path);
     return .{ .ok = try vm.ownDataString(cwd_path) };
+}
+
+pub fn exit(args: []const Data, vm: *VM) noreturn {
+    _ = vm;
+    const n = args[0].asNum().?;
+    const status: u8 = numToInt(u8, n) orelse 255;
+    std.process.exit(status);
 }
 
 pub fn import(args: []const Data, vm: *VM) !NativeResult {
