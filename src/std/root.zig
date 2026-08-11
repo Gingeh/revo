@@ -256,20 +256,19 @@ pub const root_specs_os: []const api.FnSpec = &.{
     //     .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, cload),
     // },
     .{
-        .name = "read",
+        .name = "input",
         .placements = &.{api.g},
         .params = &.{
-            .{ "opts", "table?" }, // TODO: the optionalness doesn't work
+            .{ "opts", "table?" },
         },
         .ret = "!string",
         .doc =
-        \\ reads from stdin or a path 
+        \\ reads a line from stdin
         \\ opts:
         \\  - delimiter: string, :eof or nothing
-        \\  - path:      string or nothing
         ,
         .variadic = true,
-        .f = if (revo.is_freestanding) defineStubVariadic(&[_]TypeSpec{}) else defineVariadic(&[_]TypeSpec{}, read),
+        .f = if (revo.is_freestanding) defineStubVariadic(&[_]TypeSpec{}) else defineVariadic(&[_]TypeSpec{}, input),
     },
     .{
         .name = "cwd",
@@ -976,8 +975,7 @@ pub fn system_(tbl: []const Data, vm: *VM) !NativeResult {
     return .Ok(vm, Data.new.tuple(try vm.tuples.create(&[2]Data{ so, se })));
 }
 
-pub fn read(args: []const Data, vm: *VM) !NativeResult {
-    var path: []const u8 = "/dev/stdin";
+pub fn input(args: []const Data, vm: *VM) !NativeResult {
     var read_eof = false;
     var delim: u8 = '\n';
 
@@ -985,17 +983,7 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
     if (args.len == 1) {
         const t = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
         const table = try vm.tables.get(t);
-        if (try table.get(Data.new.atom(revo.core_atoms.path.atomId()), vm)) |v| {
-            path = if (v.asString()) |id|
-                vm.stringValue(id)
-            else if (v.asAtom()) |atom|
-                if (atom == revo.core_atoms.atomId(.undef) or atom == revo.core_atoms.atomId(.nil))
-                    path
-                else
-                    return .errType(0, "string", typeof(v, vm))
-            else
-                return .errType(0, "string", typeof(v, vm));
-        }
+
         if (try table.get(Data.new.atom(revo.core_atoms.delimiter.atomId()), vm)) |v| {
             if (v.asAtom()) |atom| {
                 const eof_id = revo.core_atoms.eof.atomId();
@@ -1016,20 +1004,10 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
         }
     }
 
-    const rp = try resolveOsPath(path, vm.module_dir, vm);
-    defer if (!std.mem.eql(u8, rp, "/dev/stdin")) vm.runtime.alloc.free(rp);
-
-    const file, const close =
-        if (std.mem.eql(u8, rp, "/dev/stdin"))
-            .{ std.Io.File.stdin(), false }
-        else
-            .{ try std.Io.Dir.openFile(std.Io.Dir.cwd(), vm.runtime.io, rp, .{}), true };
-    defer if (close) file.close(vm.runtime.io);
-
+    const file = std.Io.File.stdin();
     var result = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 128);
     defer result.deinit(vm.runtime.alloc);
 
-    // chunked reads instead of one syscall per byte
     var buf: [4096]u8 = undefined;
     while (true) {
         const n = file.readStreaming(vm.runtime.io, &.{buf[0..]}) catch |err| switch (err) {
@@ -1155,11 +1133,6 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
 
     try vm.module_cache.put(cache_key, .{ .result = result, .stamp = current_stamp });
     return .{ .ok = result };
-}
-
-fn resolveOsPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]const u8 {
-    if (std.mem.eql(u8, raw_path, "/dev/stdin")) return "/dev/stdin";
-    return revo.resolve(raw_path, base_dir, vm.runtime.io, vm.runtime.alloc);
 }
 
 fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode) !void {
@@ -1401,41 +1374,4 @@ test "expect" {
     try testing.topNumber(
         \\ expect(42)?
     , 42);
-}
-
-test "read works" {
-    const io = std.testing.io;
-
-    {
-        var tmp = std.testing.tmpDir(.{});
-        defer tmp.cleanup();
-        try tmp.dir.writeFile(io, .{ .sub_path = "readme.rv", .data = "hello\nworld" });
-        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
-        defer std.testing.allocator.free(module_dir);
-        try testing.topStringInDir(module_dir,
-            \\ read({path = "readme.rv"}):unwrap()
-        , "hello");
-    }
-
-    {
-        var tmp = std.testing.tmpDir(.{});
-        defer tmp.cleanup();
-        try tmp.dir.writeFile(io, .{ .sub_path = "delim.txt", .data = "a|b|c" });
-        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
-        defer std.testing.allocator.free(module_dir);
-        try testing.topStringInDir(module_dir,
-            \\ read({path = "delim.txt", delimiter = "|"}):unwrap()
-        , "a");
-    }
-
-    {
-        var tmp = std.testing.tmpDir(.{});
-        defer tmp.cleanup();
-        try tmp.dir.writeFile(io, .{ .sub_path = "exact.txt", .data = "let line = :nil\nwhile do\n    let result = read()\n" });
-        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
-        defer std.testing.allocator.free(module_dir);
-        try testing.topStringInDir(module_dir,
-            \\ read({path = "exact.txt"}):unwrap()
-        , "let line = :nil");
-    }
 }

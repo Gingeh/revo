@@ -29,7 +29,7 @@ end
 let line = :nil
 let data = {}
 while do
-	let (st_, line_) = read({})
+	let (st_, line_) = input()
 	line = line_
 	st_ == :ok
 end do

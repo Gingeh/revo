@@ -5,10 +5,10 @@ end
 # print(a)
 
 const x = comp do
-	let res = read():unwrap()
+	let res = input():unwrap()
 		|> fn(c) c:upper()
 	match res
-	| "HELLO" when read()?:len() < 2 =>
+	| "HELLO" when input()?:len() < 2 =>
     set_metatable({}, {
 			__index = fn(self, k) k * 2
 		})

@@ -47,7 +47,7 @@ struct Chain {
   fn train(self, corpus: string) do
     # normalize line breaks and split punctuation so the chain sees more shape
     const all_w =
-      read({path = corpus, delimiter = :eof})?
+      fs.open(corpus)?:read()?
         :replace("\r", " ")
         :replace("\n", " ")
         :replace("\t", " ")

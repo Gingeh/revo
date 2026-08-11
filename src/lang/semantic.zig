@@ -1045,7 +1045,18 @@ const SemanticChecker = struct {
             const self_offset: usize = if (call.implicit_self) 1 else 0;
             const total_args = call.args.len + self_offset;
             if (total_args < sig.required_count or (total_args > sig.params.len)) {
-                const stdlib_spec = revo.std_lib.api.find(name);
+                const stdlib_spec = find_spec: {
+                    // same name can exist as both a global and a method
+                    // (e.g. `read` vs `file:read`); match the call kind
+                    for (revo.std_lib.api.full_specs) |group| for (group) |*s| {
+                        if (!std.mem.eql(u8, s.name, name)) continue;
+                        for (s.placements) |pl| {
+                            if (call.implicit_self and pl.kind == .method) break :find_spec s;
+                            if (!call.implicit_self and pl.kind == .global) break :find_spec s;
+                        }
+                    };
+                    break :find_spec revo.std_lib.api.find(name);
+                };
                 const is_variadic = stdlib_spec != null and stdlib_spec.?.variadic;
                 if (is_variadic and total_args >= sig.params.len -| 1) {
                     // variadic fns are fine with >= min
