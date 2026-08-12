@@ -1,0 +1,15 @@
+.{
+    .name = .zrevo,
+    .version = "0.0.0",
+    .fingerprint = 0x5e02cc16bd73d5a6,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // give yours a proper git path instead
+        .revo = .{ .path = "../.." },
+    },
+    .paths = .{
+        "functions.zig",
+        "build.zig",
+        "build.zig.zon",
+    },
+}
