@@ -34,7 +34,7 @@ pub const root_specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "any" },
         },
-        .ret = "number|:nil",
+        .ret = "number",
         .doc = "returns length of string or table",
         .f = define(&[_]TypeSpec{.any}, len_),
     },
