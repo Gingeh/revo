@@ -41,7 +41,7 @@ const CANONICAL_NAN: u64 = 0xFFF8_0000_0000_0000;
 /// (sign 0, exponent all-ones, quiet bit set), so real doubles ---- finite
 /// numbers, +-inf (quiet bit clear), signaling NaNs, and the canonical NaN
 /// (sign 1) ---- never match the boxed check
-pub const Data = struct {
+pub const Data = extern struct {
     bits: u64,
 
     pub const new = struct {

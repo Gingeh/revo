@@ -33,9 +33,9 @@ const TRANSLATOR = [_]TypeTranslation{
     .{ .zig = "?*ErevoVM", .c = "ErevoVM*" },
     .{ .zig = "?*ErevoProgram", .c = "ErevoProgram*" },
     .{ .zig = "?*ErevoData", .c = "ErevoData*" },
-    .{ .zig = "CRevoData", .c = "RevoData" },
-    .{ .zig = "*CRevoData", .c = "RevoData*" },
-    .{ .zig = "[*]const CRevoData", .c = "const RevoData*" },
+    .{ .zig = "Data", .c = "RevoData" },
+    .{ .zig = "*Data", .c = "RevoData*" },
+    .{ .zig = "[*]const Data", .c = "const RevoData*" },
     .{ .zig = "ErevoData", .c = "RevoData" },
 };
 
@@ -90,19 +90,18 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
     }.lessThan);
 
     try header.appendSlice(allocator,
-        \\typedef struct {
-        \\  uint64_t tag;
-        \\  uint64_t value;
-        \\} RevoData;
+        \\// a revo value, nanboxed in a single u64
+        \\typedef uint64_t RevoData;
         \\
-        \\// matches internal order
+        \\// type tags; they are the stored tag nibbles (bits 51-48 of the box)
         \\typedef enum {
         \\  revo_number = 0,
-        \\  revo_string,
-        \\  revo_atom,
-        \\  revo_function,
-        \\  revo_table,
-        \\  revo_tuple,
+        \\  revo_string = 8,
+        \\  revo_atom = 9,
+        \\  revo_function = 10,
+        \\  revo_table = 11,
+        \\  revo_tuple = 12,
+        \\  revo_foreign = 15,
         \\} RevoType;
         \\
         \\// guaranteed to be of these ids
@@ -122,26 +121,41 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\  ra_some,
         \\} RevoAtom;
         \\
+        \\// nanbox layout: numbers are raw f64 bits, boxed values are
+        \\// (REVO_BOX_TAG | (type << 48) | id), so the payload of a boxed
+        \\// value is an intern id, never a pointer
+        \\#define REVO_BOX_TAG 0x7FF8000000000000ULL
+        \\#define REVO_TAG_SHIFT 48
+        \\#define REVO_TAG_MASK 0xFULL
+        \\#define REVO_PAYLOAD_MASK 0x0000FFFFFFFFFFFFULL
+        \\
         \\// helpers for often-used values
-        \\#define revo_nil() (RevoData){.tag = revo_atom, .value = ra_nil}
-        \\#define revo_bool(v) (RevoData){.tag = revo_atom, .value = v ? ra_true : ra_false}
-        \\#define R_STRING(id) (RevoData){.tag = revo_string, .value = id}
-        \\static inline RevoData revo_num(double n) { RevoData d; d.tag = revo_number; union { uint64_t u; double f; } u = { .f = n }; d.value = u.u; return d; }
-        \\static inline RevoData revo_atom_val(uint64_t id) { RevoData d; d.tag = revo_atom; d.value = id; return d; }
-        \\static inline double revo_num_value(RevoData d) { union { uint64_t u; double f; } u = { .u = d.value }; return u.f; }
-        \\static inline uint64_t revo_string_id(RevoData d) { return d.value; }
-        \\static inline uint64_t revo_atom_id(RevoData d) { return d.value; }
-        \\static inline uint64_t revo_table_id(RevoData d) { return d.value; }
-        \\static inline uint64_t revo_tuple_id(RevoData d) { return d.value; }
-        \\static inline int revo_is_nil(RevoData d) { return d.tag == revo_atom && d.value == ra_nil; }
-        \\static inline int revo_is_number(RevoData d) { return d.tag == revo_number; }
-        \\static inline int revo_is_string(RevoData d) { return d.tag == revo_string; }
-        \\static inline int revo_is_atom(RevoData d) { return d.tag == revo_atom; }
-        \\static inline int revo_is_function(RevoData d) { return d.tag == revo_function; }
-        \\static inline int revo_is_table(RevoData d) { return d.tag == revo_table; }
-        \\static inline int revo_is_tuple(RevoData d) { return d.tag == revo_tuple; }
-        \\static inline int revo_is_bool(RevoData d) { return d.tag == revo_atom && (d.value == ra_true || d.value == ra_false); }
-        \\static inline int revo_bool_val(RevoData d) { return revo_is_bool(d) ? (d.value == ra_true ? 1 : 0) : 0; }
+        \\#define revo_nil() revo_atom_val(ra_nil)
+        \\#define revo_bool(v) revo_atom_val((v) ? ra_true : ra_false)
+        \\#define revo_string(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_string << REVO_TAG_SHIFT) | (id)))
+        \\#define revo_table(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_table << REVO_TAG_SHIFT) | (id)))
+        \\#define revo_tuple(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_tuple << REVO_TAG_SHIFT) | (id)))
+        \\#define revo_function(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_function << REVO_TAG_SHIFT) | (id)))
+        \\static inline int revo_type(RevoData d) {
+        \\  return (d & 0xFFF8000000000000ULL) == REVO_BOX_TAG ? (int)((d >> REVO_TAG_SHIFT) & REVO_TAG_MASK) : revo_number;
+        \\}
+        \\static inline RevoData revo_num(double n) { union { uint64_t u; double f; } u = { .f = n }; return u.u; }
+        \\static inline RevoData revo_atom_val(uint64_t id) { return (RevoData)(REVO_BOX_TAG | ((uint64_t)revo_atom << REVO_TAG_SHIFT) | id); }
+        \\static inline double revo_num_value(RevoData d) { union { uint64_t u; double f; } u = { .u = d }; return u.f; }
+        \\static inline uint64_t revo_string_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
+        \\static inline uint64_t revo_atom_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
+        \\static inline uint64_t revo_table_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
+        \\static inline uint64_t revo_tuple_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
+        \\static inline uint64_t revo_function_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
+        \\static inline int revo_is_nil(RevoData d) { return revo_type(d) == revo_atom && (d & REVO_PAYLOAD_MASK) == ra_nil; }
+        \\static inline int revo_is_number(RevoData d) { return revo_type(d) == revo_number; }
+        \\static inline int revo_is_string(RevoData d) { return revo_type(d) == revo_string; }
+        \\static inline int revo_is_atom(RevoData d) { return revo_type(d) == revo_atom; }
+        \\static inline int revo_is_function(RevoData d) { return revo_type(d) == revo_function; }
+        \\static inline int revo_is_table(RevoData d) { return revo_type(d) == revo_table; }
+        \\static inline int revo_is_tuple(RevoData d) { return revo_type(d) == revo_tuple; }
+        \\static inline int revo_is_bool(RevoData d) { return revo_is_atom(d) && ((d & REVO_PAYLOAD_MASK) == ra_true || (d & REVO_PAYLOAD_MASK) == ra_false); }
+        \\static inline int revo_bool_val(RevoData d) { return revo_is_bool(d) ? ((d & REVO_PAYLOAD_MASK) == ra_true ? 1 : 0) : 0; }
         \\
         \\// function ptr type
         \\typedef void (*RevoFn)(void *vm, size_t argc, RevoData *argv, RevoData *out_result);
@@ -157,7 +171,8 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
     try header.appendSlice(allocator,
         \\// ffi:
         \\//   intern a string -> returns stable id
-        \\//   ptr must stay valid for the duration of the call
+        \\//   ptr must stay valid for the duration of the call and is not
+        \\//   nul-terminated (get the length from revo_string_length)
         \\//   revo_string_data / revo_string_length read back interned strings
         \\
     );
