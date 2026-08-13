@@ -4,6 +4,7 @@
 const std = @import("std");
 const revo = @import("revo");
 const build_opts = @import("build_options");
+const Data = revo.Data;
 
 /// opaque handle to a vm instance
 pub const ErevoVM = opaque {};
@@ -21,11 +22,8 @@ pub const ErevoType = enum(u64) {
     tuple = 12,
 };
 
-/// a revo value passed across the c boundary (tag + value, 16 bytes)
-pub const ErevoData = extern struct {
-    tag: u64,
-    value: u64,
-};
+/// a revo value passed across the c boundary, nanboxed in a single u64
+pub const ErevoData = Data;
 
 const VM = struct {
     alloc: std.mem.Allocator,
@@ -103,8 +101,7 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
     return switch (result) {
         .ok => blk: {
             if (out_value) |out| {
-                const crd = revo.functions.CRevoData.fromData(inner.currentResult());
-                out.* = .{ .tag = crd.tag, .value = crd.value };
+                out.* = inner.currentResult();
             }
             break :blk true;
         },

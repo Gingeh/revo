@@ -24,9 +24,7 @@ static void print_value(void *vm, RevoData value) {
   } else if (revo_is_atom(value)) {
     printf("atom id=%llu\n", (unsigned long long)revo_string_id(value));
   } else {
-    printf("tag=%llu value=%llu\n",
-           (unsigned long long)value.tag,
-           (unsigned long long)value.value);
+    printf("tag=%d\n", revo_type(value));
   }
 }
 

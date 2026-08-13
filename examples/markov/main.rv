@@ -25,7 +25,7 @@ fn one_of(what: any, from: table|string) -> bool do
   :false
 end
 
-const NOWORD = string_of(10)
+const NOWORD = string.of_ascii(10)
 
 # TODO: this string should be able to be a doc comment, via @doc"string text which can also be multiline"
 """
@@ -162,7 +162,7 @@ struct Chain {
 
 # TODO: state is defaulted and it shouldn't be a compiler error here
 const c = Chain{state = {}, starts = {}, sent_starts = {}}
-c:train("./monty-python.txt")?
+c:train("./_ign-data-smaller.txt")?
 
 print(c:take({count = 500}))
 # TODO: you should be able to do this:

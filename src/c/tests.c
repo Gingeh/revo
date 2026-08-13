@@ -206,7 +206,7 @@ int main(void) {
     uint64_t s_id = revo_intern(vm, (uint64_t)(uintptr_t)"hi", 2);
     RevoData mix[3];
     mix[0] = revo_num(42.0);
-    mix[1] = R_STRING(s_id);
+    mix[1] = revo_string(s_id);
     mix[2] = revo_atom_val(ra_true);
     RevoData tp2 = revo_tuple_create(vm, 3, mix);
     assert(revo_is_tuple(tp2));
@@ -380,9 +380,9 @@ int main(void) {
   assert(revo_string_id(revo_atom_val(ra_ok)) == ra_ok);
   OK;
 
-  T("R_STRING macro");
+  T("revo_string macro");
   sid = revo_intern(vm, (uint64_t)(uintptr_t)"test-str", 8);
-  val = R_STRING(sid);
+  val = revo_string(sid);
   assert(revo_is_string(val));
   assert(revo_string_id(val) == sid);
   OK;
@@ -391,7 +391,7 @@ int main(void) {
   // type tag helpers
   //
   T("revo_is_number false on string");
-  assert(!revo_is_number(R_STRING(sid)));
+  assert(!revo_is_number(revo_string(sid)));
   OK;
 
   T("revo_is_string false on number");
@@ -408,6 +408,13 @@ int main(void) {
 
   T("revo_is_bool false on nil");
   assert(!revo_is_bool(revo_nil()));
+  OK;
+
+  T("revo_type");
+  assert(revo_type(revo_num(1)) == revo_number);
+  assert(revo_type(revo_string(sid)) == revo_string);
+  assert(revo_type(revo_atom_val(ra_ok)) == revo_atom);
+  assert(revo_type(revo_table(t)) == revo_table);
   OK;
 
   T("revo_bool_val");

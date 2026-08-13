@@ -11,15 +11,11 @@ const memory = vm.memory;
 const Data = memory.Data;
 const functions = vm.functions;
 const Tuple = vm.tuple.Tuple;
-const CRevoData = functions.CRevoData;
 const RevoBinding = functions.RevoBinding;
 const CFnPtr = functions.CFnPtr;
 
 // for error/missing returns
-const nil_val = CRevoData{
-    .tag = @intFromEnum(memory.Type.atom),
-    .value = @intFromEnum(revo.core_atoms.nil),
-};
+const nil_val = Data.new.nil();
 
 /// intern a byte slice, returns stable string id (0 on failure)
 pub export fn revo_intern(vm_ptr: *anyopaque, ptr_val: u64, len: usize) callconv(.c) u64 {
@@ -41,7 +37,7 @@ pub export fn revo_intern_atom(vm_ptr: *anyopaque, ptr_val: u64, len: usize) cal
 }
 
 /// look up a global variable by name, returns nil if missing
-pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize) callconv(.c) CRevoData {
+pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const ptr: [*]u8 = @ptrFromInt(name_ptr);
     const name_slice = ptr[0..name_len];
@@ -53,25 +49,24 @@ pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize)
     if (value.tag() == .atom and value.asAtom().? == @intFromEnum(revo.core_atoms.undef))
         return nil_val;
 
-    return CRevoData.fromData(value);
+    return value;
 }
 
 /// set a global variable by name
-pub export fn revo_setglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize, value: CRevoData) callconv(.c) void {
+pub export fn revo_setglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize, value: Data) callconv(.c) void {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const ptr: [*]u8 = @ptrFromInt(name_ptr);
     const name_slice = ptr[0..name_len];
 
-    const data = value.toData(v) catch return;
-    v.setGlobal(name_slice, data) catch {};
+    v.setGlobal(name_slice, value) catch {};
 }
 
 /// create a new empty table, returns nil on failure
-pub export fn revo_table_create(vm_ptr: *anyopaque) callconv(.c) CRevoData {
+pub export fn revo_table_create(vm_ptr: *anyopaque) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const tid = v.tables.create() catch
         return nil_val;
-    return .{ .tag = @intFromEnum(memory.Type.table), .value = @intCast(tid) };
+    return Data.new.table(tid);
 }
 
 /// return the number of entries in a table (0 on failure)
@@ -82,67 +77,60 @@ pub export fn revo_table_len(vm_ptr: *anyopaque, table_id: u64) callconv(.c) u64
 }
 
 /// look up a key in a table, returns nil if missing or on error
-pub export fn revo_table_get(vm_ptr: *anyopaque, table_id: u64, key: CRevoData) callconv(.c) CRevoData {
+pub export fn revo_table_get(vm_ptr: *anyopaque, table_id: u64, key: Data) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
 
     const tid: memory.TableID = @intCast(table_id);
-    const key_data = key.toData(v) catch return nil_val;
 
     const tbl = v.tables.get(tid) catch return nil_val;
 
-    if (tbl.get(key_data, v) catch return nil_val) |value|
-        return CRevoData.fromData(value);
+    if (tbl.get(key, v) catch return nil_val) |value|
+        return value;
 
     return nil_val;
 }
 
 /// delete a table entry, returns true if key existed
-pub export fn revo_table_remove(vm_ptr: *anyopaque, table_id: u64, key: CRevoData) callconv(.c) bool {
+pub export fn revo_table_remove(vm_ptr: *anyopaque, table_id: u64, key: Data) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const tid: memory.TableID = @intCast(table_id);
-    const key_data = key.toData(v) catch return false;
     const tbl = v.tables.get(tid) catch return false;
-    return tbl.remove(key_data, v);
+    return tbl.remove(key, v);
 }
 
 /// insert or update a table entry, silently ignores errors
-pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: CRevoData, value: CRevoData) callconv(.c) void {
+pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: Data, value: Data) callconv(.c) void {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
 
     const tid: memory.TableID = @intCast(table_id);
-    const key_data = key.toData(v) catch return;
-    const value_data = value.toData(v) catch return;
 
     const tbl = v.tables.get(tid) catch return;
-    tbl.put(tid, v, key_data, value_data) catch {};
+    tbl.put(tid, v, key, value) catch {};
 }
 
 /// create a new tuple from an array of values, returns nil on failure
-pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const CRevoData) callconv(.c) CRevoData {
+pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const Data) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const src = items[0..count];
     var data_list = std.ArrayList(Data).initCapacity(v.runtime.alloc, count) catch
         return nil_val;
     defer data_list.deinit(v.runtime.alloc);
-    for (src) |*c_item| {
-        const item_data = c_item.toData(v) catch
-            return nil_val;
-        data_list.appendAssumeCapacity(item_data);
-    }
+    for (src) |item|
+        data_list.appendAssumeCapacity(item);
     const tid = v.tuples.create(data_list.items) catch
         return nil_val;
     v.noteGCPressure(@sizeOf(Tuple) + @sizeOf(Data) * count);
-    return .{ .tag = @intFromEnum(memory.Type.tuple), .value = @intCast(tid) };
+    return Data.new.tuple(tid);
 }
 
 /// get element at index from a tuple, nil if out of bounds or on error
-pub export fn revo_tuple_get(vm_ptr: *anyopaque, tuple_id: u64, index: u64) callconv(.c) CRevoData {
+pub export fn revo_tuple_get(vm_ptr: *anyopaque, tuple_id: u64, index: u64) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const tup = v.tuples.get(@intCast(tuple_id)) catch
         return nil_val;
     if (index >= tup.items.len)
         return nil_val;
-    return CRevoData.fromData(tup.items[@intCast(index)]);
+    return tup.items[@intCast(index)];
 }
 
 /// return the number of elements in a tuple (0 on failure)
@@ -155,22 +143,22 @@ pub export fn revo_tuple_len(vm_ptr: *anyopaque, tuple_id: u64) callconv(.c) u64
 /// call a revo function from c, returns false on type/resource error (max 16 args)
 pub export fn revo_call(
     vm_ptr: *anyopaque,
-    func: CRevoData,
+    func: Data,
     argc: u64,
-    argv: [*]const CRevoData,
-    out: *CRevoData,
+    argv: [*]const Data,
+    out: *Data,
 ) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const callee = func.toData(v) catch return false;
+    const callee = func;
 
     // stack buffer avoids GC-triggering heap alloc, most revo functions have few args
     var buf: [16]Data = undefined;
     if (argc > 16) return false;
     for (0..argc) |i|
-        buf[i] = argv[i].toData(v) catch return false;
+        buf[i] = argv[i];
 
     const result = v.callFunction(callee, buf[0..argc]) catch return false;
-    out.* = CRevoData.fromData(result);
+    out.* = result;
     return true;
 }
 
@@ -190,14 +178,13 @@ pub export fn revo_string_length(vm_ptr: *anyopaque, id: u64) callconv(.c) usize
 }
 
 /// wrap a raw pointer as a foreign value, caller manages lifetime
-pub export fn revo_foreign_new(ptr: ?*anyopaque) callconv(.c) CRevoData {
-    return CRevoData.fromData(Data.new.foreign(ptr));
+pub export fn revo_foreign_new(ptr: ?*anyopaque) callconv(.c) Data {
+    return Data.new.foreign(ptr);
 }
 
 /// extract the raw pointer from a foreign value (null if not foreign)
-pub export fn revo_foreign_ptr(val: CRevoData) callconv(.c) ?*anyopaque {
-    if (val.tag != @intFromEnum(memory.Type.foreign)) return null;
-    return @ptrFromInt(@as(usize, @intCast(val.value)));
+pub export fn revo_foreign_ptr(val: Data) callconv(.c) ?*anyopaque {
+    return val.asForeign();
 }
 
 /// load a shared library and register its revo_bindings as c functions

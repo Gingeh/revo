@@ -1,8 +1,13 @@
 //
 // c extensions, for revo
-// build: make extension   (produces extension.dylib on mac)
+// build: make extension   (produces extension.so on mac)
 //
-// the shared lib exports revo_bindings which cload() picks up
+// the shared lib exports revo_bindings which import(".so") picks up
+//
+// values cross the boundary nanboxed: a RevoData is a u64. numbers are raw
+// f64 bits, boxed values carry an intern id in the low 48 bits, never a
+// pointer. read strings with revo_string_data / revo_string_length and
+// create them with revo_intern + revo_string.
 //
 
 #include "revo.h"
@@ -16,8 +21,8 @@ static void greet_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
     return;
   }
 
-  const char *name = (const char *)(uintptr_t)argv[0].value;
-  size_t name_len = strlen(name);
+  const char *name = (const char *)revo_string_data(vm, revo_string_id(argv[0]));
+  size_t name_len = revo_string_length(vm, revo_string_id(argv[0]));
 
   // build "hello, <name>!" and intern it
   char buf[256];
@@ -26,7 +31,7 @@ static void greet_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
   buf[7 + name_len] = '!';
 
   uint64_t sid = revo_intern(vm, (uint64_t)(uintptr_t)buf, 7 + name_len + 1);
-  *out_result = R_STRING(sid);
+  *out_result = revo_string(sid);
 }
 
 /// > add(a: number, b: number) -> number
@@ -41,48 +46,64 @@ static void add_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) 
 
 /// > echo(s: string) -> string
 static void echo_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
+  (void)vm;
   if (argc < 1 || !revo_is_string(argv[0])) {
     *out_result = revo_nil();
     return;
   }
-  // must re-intern: argv[0].value is a pointer, not a string_id
-  const char *str = (const char *)(uintptr_t)argv[0].value;
-  uint64_t sid = revo_intern(vm, (uint64_t)(uintptr_t)str, strlen(str));
-  *out_result = R_STRING(sid);
+  // string ids pass through as-is, no re-intern needed
+  *out_result = revo_string(revo_string_id(argv[0]));
 }
 
 /// > strlen(s: string) -> number
 static void strlen_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
-  (void)vm;
   if (argc < 1 || !revo_is_string(argv[0])) {
     *out_result = revo_num(0);
     return;
   }
-  const char *str = (const char *)(uintptr_t)argv[0].value;
-  *out_result = revo_num((double)strlen(str));
+  *out_result = revo_num((double)revo_string_length(vm, revo_string_id(argv[0])));
 }
 
 /// > typ(x) -> number
-/// returns RevoType tag: 0=number, 1=string, 2=atom, etc
+/// returns the RevoType tag of the value
 static void typ_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   (void)vm;
   if (argc < 1) {
     *out_result = revo_nil();
     return;
   }
-  *out_result = revo_num((double)argv[0].tag);
+  *out_result = revo_num((double)revo_type(argv[0]));
 }
 
 /// > regex(pattern: string, text: string) -> bool
 static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
-  (void)vm;
   if (argc < 2 || !revo_is_string(argv[0]) || !revo_is_string(argv[1])) {
     *out_result = revo_num(0);
     return;
   }
 
-  const char *pattern = (const char *)(uintptr_t)argv[0].value;
-  const char *text = (const char *)(uintptr_t)argv[1].value;
+  // intern ids are slices without a nul terminator; copy for regcomp
+  char pattern[256];
+  char text[256];
+  {
+    const char *p = (const char *)revo_string_data(vm, revo_string_id(argv[0]));
+    size_t plen = revo_string_length(vm, revo_string_id(argv[0]));
+    if (plen >= sizeof(pattern)) {
+      *out_result = revo_num(0);
+      return;
+    }
+    memcpy(pattern, p, plen);
+    pattern[plen] = '\0';
+
+    const char *t = (const char *)revo_string_data(vm, revo_string_id(argv[1]));
+    size_t tlen = revo_string_length(vm, revo_string_id(argv[1]));
+    if (tlen >= sizeof(text)) {
+      *out_result = revo_num(0);
+      return;
+    }
+    memcpy(text, t, tlen);
+    text[tlen] = '\0';
+  }
 
   regex_t regex;
   if (regcomp(&regex, pattern, REG_EXTENDED | REG_NOSUB) != 0) {

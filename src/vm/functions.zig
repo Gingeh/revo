@@ -39,53 +39,11 @@ pub const RevoBinding = extern struct {
     fn_ptr: *const anyopaque,
 };
 
-/// not the real repr, converted from the underlying type
-/// (currently only nanbox, but if i start supporting x32, that would be very handy)
-pub const CRevoData = extern struct {
-    tag: u64,
-    value: u64,
-
-    pub fn toData(self: *const CRevoData, _: *revo.VM) !Data {
-        const tag: mem.Type = @enumFromInt(
-            @as(@typeInfo(mem.Type).@"enum".tag_type, @intCast(self.tag)),
-        );
-        return switch (tag) {
-            .number => Data.numberRaw(@bitCast(self.value)),
-            // low bits hold the id; high bits are tag bits it can discard
-            .string => Data.new.str(@truncate(self.value)),
-            .atom => Data.new.atom(@truncate(self.value)),
-            .function => Data.new.function(@truncate(self.value)),
-            .table => Data.new.table(@truncate(self.value)),
-            .tuple => Data.new.tuple(@truncate(self.value)),
-            .struct_val, .struct_type => unreachable,
-            .foreign => Data.new.foreign(@ptrFromInt(@as(usize, @truncate(self.value)))),
-        };
-    }
-
-    pub fn fromData(data: Data) CRevoData {
-        const tag = data.tag();
-        return .{
-            .tag = @intFromEnum(tag),
-            .value = switch (tag) {
-                .number => @bitCast(data.asNum().?),
-                .string => data.asString().?,
-                .atom => data.asAtom().?,
-                .function => data.asFunction().?,
-                .table => data.asTable().?,
-                .tuple => data.asTuple().?,
-                .struct_val => data.asStructVal().?,
-                .struct_type => data.asStructType().?,
-                .foreign => @intFromPtr(data.asForeign().?),
-            },
-        };
-    }
-};
-
 pub const CFnPtr = *const fn (
     vm: *anyopaque,
     argc: usize,
-    argv: [*]CRevoData,
-    out_result: *CRevoData,
+    argv: [*]const Data,
+    out_result: *Data,
 ) callconv(.c) void;
 /// TODO: make functions have fixed arity too
 pub const VARIADIC: u8 = 0xFF;

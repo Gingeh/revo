@@ -1300,20 +1300,17 @@ fn callNonClosureFunction(
             try self.ensureAbsoluteSlot(args_end);
             const args = fiber.registers[args_start..args_end];
 
-            var c_args_buf: [16]root.functions.CRevoData = @splat(.{ .tag = 0, .value = 0 });
+            var c_args_buf: [16]mem.Data = @splat(.{ .bits = 0 });
             const c_args = if (args.len <= 16)
                 c_args_buf[0..args.len]
             else
-                try self.runtime.alloc.alloc(root.functions.CRevoData, args.len);
+                try self.runtime.alloc.alloc(mem.Data, args.len);
             defer if (args.len > 16) self.runtime.alloc.free(c_args);
 
             for (args, 0..) |arg, i|
-                c_args[i] = root.functions.CRevoData.fromData(arg);
+                c_args[i] = arg;
 
-            var c_result: root.functions.CRevoData = .{
-                .tag = 0,
-                .value = 0,
-            };
+            var c_result: mem.Data = .{ .bits = 0 };
             f.fn_ptr(
                 @ptrCast(self),
                 argc,
@@ -1324,7 +1321,7 @@ fn callNonClosureFunction(
             try self.writeRegisterFast(
                 base,
                 instr.c,
-                try c_result.toData(self),
+                c_result,
             );
         },
         .native => |f| {
