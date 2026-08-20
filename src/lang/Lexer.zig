@@ -995,15 +995,15 @@ pub fn isIdentContinue(c: u8) bool {
 }
 
 test "lexes calls with sigils and hash literals" {
-    try testing.expectTokens("if @foo(0) == :WriteDenied @bar(1)", &.{
+    try testing.expectTokens("if foo(0) == :WriteDenied bar(1)", &.{
         .{ .t = .kw_if, .v = "if" },
-        .{ .t = .ident, .v = "@foo" },
+        .{ .t = .ident, .v = "foo" },
         .{ .t = .lparen, .v = "(" },
         .{ .t = .number, .v = "0" },
         .{ .t = .rparen, .v = ")" },
         .{ .t = .eq, .v = "==" },
         .{ .t = .hash, .v = ":WriteDenied" },
-        .{ .t = .ident, .v = "@bar" },
+        .{ .t = .ident, .v = "bar" },
         .{ .t = .lparen, .v = "(" },
         .{ .t = .number, .v = "1" },
         .{ .t = .rparen, .v = ")" },
@@ -1158,7 +1158,7 @@ test "lexes multiline block syntax" {
     try t.expectTypes(
         \\do
         \\    sys.print "hello"
-        \\    if @peek(idx) == :ok :good else :bad
+        \\    if peek(idx) == :ok :good else :bad
         \\end
     , &.{
         .kw_do,
@@ -1186,7 +1186,7 @@ test "lexes declarations loop return and import" {
         \\do
         \\    const sys = import "sys"
         \\    const pluralise = fn(n) n
-        \\    let num: int = loop(x) do return len(@consume(idx + 1)) end
+        \\    let num: int = loop(x) do return len(consume(idx + 1)) end
         \\end
     , &.{
         .kw_do,

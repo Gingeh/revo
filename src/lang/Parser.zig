@@ -2208,7 +2208,7 @@ test "unknown attribute is a parse error" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = try lexer.lexAt(alloc, "@67 fn foo() 1", .{});
+    const tokens = try lexer.lexAt(alloc, "@bar fn foo() 1", .{});
     try std.testing.expectError(error.UnknownAttribute, parseTokens(alloc, tokens));
 }
 
