@@ -449,10 +449,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         else
             self.allocExpr(token.span(), .{ .multiline_string = token.text }),
         .hash => self.allocExpr(token.span(), .{ .hash = token.text[1..] }),
-        .ident => if (std.mem.eql(u8, token.text, "@doc"))
-            self.parseDocAttr(token)
-        else
-            self.allocExpr(token.span(), .{ .ident = token.text }),
+        .ident => self.allocExpr(token.span(), .{ .ident = token.text }),
         .kw_const, .kw_global, .kw_let, .kw_struct, .kw_test, .kw_suite => self.parseDecl(token),
         .kw_proc => self.parseProc(token),
         .kw_fn => self.parseFnWithBodyMin(token, 0),
@@ -499,6 +496,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
 
             break :blk self.allocExpr(token.span(), .nil);
         },
+        .attribute => self.parseAttrs(token),
         else => return error.UnexpectedToken,
     };
 }
@@ -509,42 +507,66 @@ fn parseUnary(self: *Parser, op: ast.UnOp, right_bp: u8, token: Token) anyerror!
     return self.allocExpr(Span.merge(token.span(), expr.span), .{ .unary = .{ .op = op, .expr = expr } });
 }
 
-fn parseDocAttr(self: *Parser, token: Token) anyerror!*Node {
-    const doc_token = self.advance();
-    const doc_text = switch (doc_token.type) {
-        .string, .multiline_string, .backtick_string => doc_token.text,
-        else => return error.UnexpectedToken,
-    };
+const AttrKind = enum { native, doc };
+
+const attr_table = std.StaticStringMap(AttrKind).initComptime(.{
+    .{ "@native", .native },
+    .{ "@doc", .doc },
+});
+
+const PendingAttr = struct {
+    kind: AttrKind,
+    doc_text: []const u8 = undefined,
+    span: Span,
+};
+
+fn parseAttrs(self: *Parser, first: Token) anyerror!*Node {
+    var pending: std.ArrayList(PendingAttr) = .empty;
+    defer pending.deinit(self.alloc);
+
+    var token = first;
+    while (true) {
+        const kind = attr_table.get(token.text) orelse return error.UnknownAttribute;
+        var attr = PendingAttr{ .kind = kind, .span = token.span() };
+        if (kind == .doc) {
+            const doc_token = self.advance();
+            attr.doc_text = switch (doc_token.type) {
+                .string, .multiline_string, .backtick_string => doc_token.text,
+                else => return error.UnexpectedToken,
+            };
+        }
+        try pending.append(self.alloc, attr);
+
+        if (!self.check(.attribute)) break;
+        token = self.advance();
+    }
 
     const target = try self.parsePrefix();
-    return self.applyDocAttr(target, doc_text, token.span());
+    for (pending.items) |attr| {
+        _ = try self.applyAttr(target, attr);
+    }
+    return target;
 }
 
-fn applyDocAttr(self: *Parser, node: *Node, doc_text: []const u8, doc_span: Span) anyerror!*Node {
+fn applyAttr(self: *Parser, node: *Node, attr: PendingAttr) anyerror!*Node {
     switch (node.expr) {
-        .decl => {
-            _ = try self.applyDocAttr(node.expr.decl.inner, doc_text, doc_span);
-            return node;
-        },
+        .decl => return self.applyAttr(node.expr.decl.inner, attr),
         .fn_expr => {
-            node.expr.fn_expr.doc = doc_text;
+            switch (attr.kind) {
+                .native => node.expr.fn_expr.native = true,
+                .doc => node.expr.fn_expr.doc = attr.doc_text,
+            }
             return node;
         },
         .binding => |binding| {
-            const value = binding.value;
-            if (value.expr != .fn_expr) return error.UnexpectedToken;
-            value.expr.fn_expr.doc = doc_text;
-            return node;
+            if (binding.value.expr != .fn_expr) return error.UnexpectedToken;
+            return self.applyAttr(binding.value, attr);
         },
-        .assign_expr => {
-            const value = node.expr.assign_expr.value;
-            if (value.expr != .fn_expr) return error.UnexpectedToken;
-            value.expr.fn_expr.doc = doc_text;
-            return node;
+        .assign_expr => |assign| {
+            if (assign.value.expr != .fn_expr) return error.UnexpectedToken;
+            return self.applyAttr(assign.value, attr);
         },
-        else => {
-            return error.UnexpectedToken;
-        },
+        else => return error.UnexpectedToken,
     }
 }
 
@@ -2145,6 +2167,49 @@ test "parses @doc annotation on function declaration" {
     const value = root.expr.decl.inner.expr.binding.value;
     try std.testing.expect(value.expr == .fn_expr);
     try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
+}
+
+test "parses @native annotation on function declaration" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src =
+        \\ @native
+        \\ fn add(a, b) a + b
+    ;
+    const tokens = try lexer.lexAt(alloc, src, .{});
+    const root = try parseTokens(alloc, tokens);
+    const value = root.expr.decl.inner.expr.binding.value;
+    try std.testing.expect(value.expr == .fn_expr);
+    try std.testing.expect(value.expr.fn_expr.native);
+    try std.testing.expect(value.expr.fn_expr.doc == null);
+}
+
+test "parses @native @doc annotations in order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src =
+        \\ @native @doc "adds two numbers"
+        \\ fn add(a, b) a + b
+    ;
+    const tokens = try lexer.lexAt(alloc, src, .{});
+    const root = try parseTokens(alloc, tokens);
+    const value = root.expr.decl.inner.expr.binding.value;
+    try std.testing.expect(value.expr == .fn_expr);
+    try std.testing.expect(value.expr.fn_expr.native);
+    try std.testing.expectEqualStrings("adds two numbers", value.expr.fn_expr.doc.?);
+}
+
+test "unknown attribute is a parse error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lexAt(alloc, "@67 fn foo() 1", .{});
+    try std.testing.expectError(error.UnknownAttribute, parseTokens(alloc, tokens));
 }
 
 test "parses import statement" {

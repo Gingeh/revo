@@ -286,6 +286,7 @@ pub const Expr = union(enum) {
         return_type: ?*TypeExpr = null,
         body: *Node,
         doc: ?[]const u8 = null,
+        native: bool = false,
         type_params: []const []const u8 = &.{},
     },
     binding: Binding,

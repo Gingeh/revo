@@ -110,6 +110,7 @@ pub const TokenType = enum {
     rsquiggly,
     comment,
     eof,
+    attribute,
 
     pub fn classify(self: TokenType) ?TokenClass {
         return switch (self) {
@@ -117,7 +118,7 @@ pub const TokenType = enum {
             .string, .multiline_string, .backtick_string => .string,
             .hash => .enum_member,
             .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
-            .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly => .operator,
+            .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
             .ident, .eof => null,
         };
@@ -435,7 +436,7 @@ fn next(self: *Lexer) !Token {
 
         '$' => return error.UnexpectedCharacter,
         '@' => if (isIdentStart(self.peek()))
-            self.lexAtIdent(start, line, column)
+            self.lexAttribute(start, line, column)
         else
             return error.UnexpectedCharacter,
         '(' => self.makeToken(.lparen, start, self.pos, line, column),
@@ -969,17 +970,9 @@ fn lexIdent(self: *Lexer, start: usize, line: u32, column: u32) Token {
     };
 }
 
-fn lexAtIdent(self: *Lexer, start: usize, line: u32, column: u32) Token {
+fn lexAttribute(self: *Lexer, start: usize, line: u32, column: u32) Token {
     while (isIdentContinue(self.peek())) _ = self.advance();
-    const text = self.source[start..self.pos];
-    return .{
-        .type = .ident,
-        .text = text,
-        .line = line,
-        .column = column,
-        .start = start + self.base_offset,
-        .end = self.pos + self.base_offset,
-    };
+    return self.makeToken(.attribute, start, self.pos, line, column);
 }
 
 fn makeToken(self: *Lexer, kind: TokenType, start: usize, end: usize, line: u32, column: u32) Token {
