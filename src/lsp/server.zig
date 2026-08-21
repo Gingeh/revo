@@ -539,7 +539,7 @@ const Handler = struct {
                     .type => T.InlayHint.Kind.Type,
                     .parameter => T.InlayHint.Kind.Parameter,
                 },
-                .paddingLeft = true,
+                .paddingLeft = false,
             });
         }
         return try out.toOwnedSlice(arena);

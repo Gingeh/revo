@@ -610,7 +610,7 @@ fn parseFnWithBodyMin(self: *Parser, start: Token, body_min_bp: u8) anyerror!*No
 
             var new_params = try self.alloc.alloc(ast.FnParam, params.len + 1);
             errdefer self.alloc.free(new_params);
-            new_params[0] = .{ .name = "self" };
+            new_params[0] = .{ .name = "self", .name_span = atom_token.span() };
             @memcpy(new_params[1..], params);
 
             const fn_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
@@ -973,10 +973,10 @@ fn parseFor(self: *Parser, start: Token) anyerror!*Node {
     var params = try std.ArrayList(ast.FnParam).initCapacity(self.alloc, 2);
     errdefer params.deinit(self.alloc);
     const first = try self.expectIdent();
-    try params.append(self.alloc, .{ .name = first.text });
+    try params.append(self.alloc, .{ .name = first.text, .name_span = first.span() });
     while (self.match(.comma)) {
         const name = try self.expectIdent();
-        try params.append(self.alloc, .{ .name = name.text });
+        try params.append(self.alloc, .{ .name = name.text, .name_span = name.span() });
     }
     _ = try self.expect(.kw_in);
 
@@ -1257,7 +1257,7 @@ fn parseProc(self: *Parser, start: Token) anyerror!*Node {
         _ = try self.expect(.lparen);
 
         const name = try self.expectIdent();
-        const param: ast.FnParam = .{ .name = name.text };
+        const param: ast.FnParam = .{ .name = name.text, .name_span = name.span() };
         _ = try self.expect(.rparen);
         const body = try self.parseExpression(0);
 
@@ -1504,7 +1504,7 @@ fn parseParamList(self: *Parser, terminator: TokenType) anyerror![]ast.FnParam {
     while (!self.check(terminator)) {
         const optional = self.match(.huh);
         const name = try self.expectIdent();
-        var param: ast.FnParam = .{ .name = name.text, .optional = optional };
+        var param: ast.FnParam = .{ .name = name.text, .name_span = name.span(), .optional = optional };
         if (self.match(.colon)) param.type_name = try self.parseTypeExpr();
         try params.append(self.alloc, param);
         if (!self.match(.comma)) break;

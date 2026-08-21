@@ -1,8 +1,0 @@
-#* asdfsadf *#
-pub const a = 5
-
-const x = a
-
-#* hi *#
-fn b() 5
-const y = b

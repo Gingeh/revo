@@ -199,7 +199,8 @@ const Parser = struct {
             const type_name = if (self.match(.colon)) try self.parseExpr() else null;
             // `...` lexes as `..` + `.`; claimed only here in type position
             const variadic = self.match(.dotdot) and self.match(.dot);
-            try params.append(self.alloc, .{ .name = name.text, .type_name = type_name, .variadic = variadic });
+            // synthesized from a type string, no source span to attach
+            try params.append(self.alloc, .{ .name = name.text, .name_span = .{ .start = 0, .end = 0, .line = 0, .column = 0 }, .type_name = type_name, .variadic = variadic });
             if (!self.match(.comma)) break;
         }
         return try params.toOwnedSlice(self.alloc);

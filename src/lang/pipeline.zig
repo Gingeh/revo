@@ -246,7 +246,7 @@ fn extractPubDefs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out
                             const qualified = try std.fmt.allocPrint(alloc, "{s}.{s}", .{ prefix, pm.name });
                             const proc_node = try allocNode(alloc, d.inner.span, .{ .proc_macro = .{
                                 .name = qualified,
-                                .param = .{ .name = pm.param.name },
+                                .param = .{ .name = pm.param.name, .name_span = pm.param.name_span },
                                 .body = pm.body,
                             } });
                             try out.append(alloc, proc_node);

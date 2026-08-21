@@ -106,6 +106,7 @@ pub const Location = struct {
 pub const SymbolKind = enum {
     binding,
     function,
+    param,
     struct_type,
     type_alias,
 };
@@ -552,7 +553,26 @@ pub fn documentSymbols(
 ) ![]Symbol {
     var analysis = try self.inspectDetailed(alloc, id, opts);
     defer analysis.deinit(alloc);
-    return try copySymbols(alloc, analysis.symbols);
+
+    // params resolve for hover/definition but stay out of the outline
+    var out = try std.ArrayList(Symbol).initCapacity(alloc, analysis.symbols.len);
+    errdefer {
+        for (out.items) |*sym| {
+            alloc.free(sym.name);
+            if (sym.type_name) |*ti| types.deinitType(ti, alloc);
+        }
+        out.deinit(alloc);
+    }
+    for (analysis.symbols) |sym| {
+        if (sym.kind == .param) continue;
+        try out.append(alloc, .{
+            .name = try alloc.dupe(u8, sym.name),
+            .kind = sym.kind,
+            .range = sym.range,
+            .type_name = if (sym.type_name) |ti| try types.clone(ti, alloc) else null,
+        });
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 /// go-to-definition: find the binding that a word at `pos` refers to
@@ -1125,20 +1145,59 @@ pub fn inlayHints(
     errdefer hints.deinit(alloc);
 
     for (analysis.symbols) |sym| {
-        const sym_tn = if (sym.type_name) |ti| try ti.formatType(alloc) else continue;
-        defer alloc.free(sym_tn);
-        if (sym.kind == .function) continue;
-        if (std.mem.startsWith(u8, sym_tn, "fn(")) continue;
+        const ti = sym.type_name orelse continue;
+        if (ti == .any or ti == .never) continue;
         if (sym.range.end.line < range.start.line or sym.range.start.line > range.end.line) continue;
 
         const line = sourceLine(snap.text, sym.range.start.line);
-        const needle = try std.fmt.allocPrint(alloc, ": {s}", .{sym_tn});
+
+        if (ti == .function) {
+            const decl_needle = try std.fmt.allocPrint(alloc, "fn {s}(", .{sym.name});
+            defer alloc.free(decl_needle);
+            const is_decl = std.mem.indexOf(u8, line, decl_needle) != null;
+
+            if (!is_decl) {
+                // alias like `const z = yo`
+                const tn = try ti.formatType(alloc);
+                defer alloc.free(tn);
+                const needle = try std.fmt.allocPrint(alloc, ": {s}", .{tn});
+                defer alloc.free(needle);
+                if (std.mem.indexOf(u8, line, needle) != null) continue;
+                try hints.append(alloc, .{
+                    .position = sym.range.end,
+                    .label = try std.fmt.allocPrint(alloc, ": {s}", .{tn}),
+                    .kind = .type,
+                });
+                continue;
+            }
+
+            // declaration: `-> ret` after the params, unless annotated
+            if (std.mem.indexOf(u8, line, "->") != null) continue;
+            if (ti.function.return_type == .any) continue;
+            const ret = try ti.function.return_type.formatType(alloc);
+            defer alloc.free(ret);
+
+            var paren = sym.range.end.character;
+            while (paren < line.len and line[paren] != ')') paren += 1;
+            if (paren >= line.len) continue;
+
+            try hints.append(alloc, .{
+                .position = .{ .line = sym.range.start.line, .character = paren + 1 },
+                .label = try std.fmt.allocPrint(alloc, " -> {s}", .{ret}),
+                .kind = .type,
+            });
+            continue;
+        }
+
+        const tn = try ti.formatType(alloc);
+        defer alloc.free(tn);
+        const needle = try std.fmt.allocPrint(alloc, ": {s}", .{tn});
         defer alloc.free(needle);
         if (std.mem.indexOf(u8, line, needle) != null) continue;
 
         try hints.append(alloc, .{
-            .position = .{ .line = sym.range.end.line, .character = sym.range.end.character },
-            .label = try std.fmt.allocPrint(alloc, ": {s}", .{sym_tn}),
+            .position = sym.range.end,
+            .label = try std.fmt.allocPrint(alloc, ": {s}", .{tn}),
             .kind = .type,
         });
     }
@@ -2158,28 +2217,16 @@ const SymbolVisitor = struct {
     alloc: std.mem.Allocator,
     out: *std.ArrayList(Symbol),
     text: []const u8,
-    in_decl: bool = false,
     /// a binding like `const x = import "foo"` names the module itself
     import_named: bool = false,
 
     pub fn visit(self: *@This(), node: *const lang.Node) void {
         switch (node.expr) {
-            .decl => |d| {
-                self.in_decl = true;
-                defer self.in_decl = false;
-                switch (d.inner.expr) {
-                    .binding => |b| self.addBinding(b),
-                    .struct_def => |def| self.addName(def.name, .struct_type, def.name_span),
-                    .type_alias => |t| self.addName(t.name, .type_alias, t.name_span),
-                    else => {},
-                }
-                self.import_named = false;
-                // walkAST would re-visit d.inner; it's already handled above
-            },
-            .binding => |b| if (!self.in_decl) self.addBinding(b),
-            .struct_def => |def| if (!self.in_decl) self.addName(def.name, .struct_type, def.name_span),
-            .type_alias => |t| if (!self.in_decl) self.addName(t.name, .type_alias, t.name_span),
-            .import_stmt => |is| if (!self.in_decl) {
+            .binding => |b| self.addBinding(b),
+            .fn_expr => |f| for (f.params) |p| self.addName(p.name, .param, p.name_span),
+            .struct_def => |def| self.addName(def.name, .struct_type, def.name_span),
+            .type_alias => |t| self.addName(t.name, .type_alias, t.name_span),
+            .import_stmt => |is| {
                 if (self.import_named) {
                     self.import_named = false;
                 } else {
@@ -2188,7 +2235,8 @@ const SymbolVisitor = struct {
             },
             else => {},
         }
-        if (node.expr != .decl) lang.ast.walkAST(SymbolVisitor, self, node);
+        // decls fall through - walkAST reaches every binding exactly once
+        lang.ast.walkAST(SymbolVisitor, self, node);
     }
 
     fn addBinding(self: *@This(), b: lang.ast.Binding) void {
