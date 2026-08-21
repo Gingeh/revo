@@ -1,4 +1,4 @@
-```
+```text
 p for planned,
 ? for maybe,
 x for done
@@ -28,12 +28,15 @@ x for done
 
 - [x] comptime test system
   - [x] normal tests
+
     ```ruby
     test "test name" do
         assert!(:true)
     end
     ```
+
   - [ ] doctests (like ex)
+
     ```ruby
     #*
     > double(n: positive number) -> n * 2
@@ -46,6 +49,7 @@ x for done
     | x when x > 0 and number?(x) ok(x*2)
     | _ err("arg 0 is not a positive number")
     ```
+
 - [x] doc comment system
 - [ ] annotate more code (backwardly done after writing rn)
 
@@ -94,7 +98,6 @@ x for done
 - [ ] m:n thread mapping
 - [ ] rewrite i/o
       if `Io.Evented` is complete and enough, none of this matters
-
 - [x] async runtime
 - [x] `poll` (any posix)
 - [ ] `kqueue` (bsd and macos)
@@ -121,11 +124,14 @@ x for done
 - [ ] bigints
 - [ ] zerocosts
   - [ ] `mean` keyword (or `btw`, `also`): pure side-effect, returns nothing, can be in any position
-    ```
+
+    ```text
     1 + mean(12) "hi"  # prints "hi", returns 1 + 12
     ```
+
   - [ ] `inspect`: print value with debug info, return unchanged
-    ```
+
+    ```text
     1 + inspect(2) == 3
     ```
 
@@ -138,8 +144,8 @@ x for done
 - [ ] break&fix error spans
 - [ ] progress indicators
 - help command
-    - [ ] docs for zig functions
-          may be irrelevant if all signatures move to ambient declaration files
+  - [ ] docs for zig functions
+        may be irrelevant if all signatures move to ambient declaration files
 
 ### build system
 

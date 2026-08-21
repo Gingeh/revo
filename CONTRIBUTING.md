@@ -19,8 +19,9 @@ the commit etiquette is influenced by that of
 
 - every commit should at least compile
 - its fine if something doesnt work in the middle of a commit chain, as long as it works by the final one
-- formatted like 
-    ```
+- formatted like
+
+    ```text
     lang+repl!+diag: fix occasional combustion
     # if multiple scopes, list with + to separate them
     # if breaking change, use !
@@ -29,7 +30,6 @@ the commit etiquette is influenced by that of
 
     fixed GH-1337 # for github issues, use GH-12 rather than #12
     ```
-
 
 ## about AI-generated code
 

@@ -1,12 +1,13 @@
 # revolt, the revo language server
 
 the server builds on the great work done by the zls team, being [lsp-kit][#references]
+
 - [supported features](#supported-features)
 - [installation](#supported-features)
-    - [neovim](#neovim)
-    - [helix](#helix)
+  - [neovim](#neovim)
+  - [helix](#helix)
 
-# installation
+## installation
 
 release builds of `revo` bundle the LSP! run `revo --lsp` to start it.
 
@@ -22,7 +23,7 @@ the binary is then gonna be at `zig-out/bin/revolt`
 
 if you know how to add an lsp to emacs/zed/vscode/flow/whatever, please make a pull request!
 
-## neovim
+### neovim
 
 compile the binary and put it somewhere in your path
 if you don't want to do so, just change the cmd field to wherever it is
@@ -53,9 +54,10 @@ then open the logs via
 :lua vim.cmd('tabnew ' .. vim.lsp.log.get_filename())
 ```
 
-## helix
+### helix
 
 this is what i use
+
 ```toml
 [[language]]
 name = "revo"
@@ -71,7 +73,7 @@ command = "revolt"
 
 you might want to add a grammar entry for syntax highlighting
 
-## supported features
+### supported features
 
 - [DONE] textDocument/didOpen
 - [DONE] textDocument/didChange
@@ -82,7 +84,7 @@ you might want to add a grammar entry for syntax highlighting
 - [DONE] textDocument/references
 - [DONE] textDocument/documentSymbol
 - [DONE] textDocument/rename
-    - [DONE] textDocument/prepareRename
+  - [DONE] textDocument/prepareRename
 - [STUB] textDocument/completion
 - [DONE] textDocument/publishDiagnostics
 - [DONE] textDocument/inlayHint
@@ -91,11 +93,11 @@ you might want to add a grammar entry for syntax highlighting
 - [TODO] textDocument/willSaveWaitUntil
 - [TODO] textDocument/formatting
 - [TODO] textDocument/codeAction
-    - [TODO] inline a function
+  - [TODO] inline a function
 - [TODO] textDocument/inlayHint
 - [TODO] textDocument/codeLens
 
-# server logs
+## server logs
 
 revolt logs to stderr at `debug` level. to see the raw LSP traffic, run
 the server manually:
@@ -104,7 +106,7 @@ the server manually:
 revolt --log-level=debug 2> /tmp/revolt.log
 ```
 
-## testing
+### testing
 
 tests are in `src/lsp/test.py` using `pytest-lsp`. they spin up a real revolt process and
 talk to it over stdio
@@ -123,11 +125,11 @@ the test fixture hardcodes the server path to `zig-out/bin/revolt` so build the 
 
 the rest of the architecture docs are going to be in `src/lsp/readme.org`
 
+## development
 
-# development
 my only expertise in LSP development is reading through the spec, so any help is appreciated
 
-## testing
+### testing
 
 the test suite is not gonna build it automatically or try to find it in your path
 it's hardcoded to `../../zig-out/bin/revolt`
@@ -147,7 +149,7 @@ also use `-s` to show stdout/stderr
 .venv/bin/python -m pytest test.py -v --tb=short
 ```
 
-# references
+## references
 
 - [neovim lsp docs](https://neovim.io/doc/user/lsp/)
 - [lsp specification](https://microsoft.github.io/language-server-protocol/)

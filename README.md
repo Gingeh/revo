@@ -1,6 +1,5 @@
 # `revo, the programming language
 
-  
 [homepage & docs](https://lung.fyi/revo)
 | [github](https://github.com/if-not-nil/revo)
 | [learn](https://lung.fyi/revo/basics)
@@ -8,7 +7,7 @@
 
 an expressive, dynamically-typed language for the joy of programming
 
-![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange)  ![version 0.1.1](https://img.shields.io/badge/version-0.1.1a-navy)
+![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange) ![version 0.1.1](https://img.shields.io/badge/version-0.1.1a-navy)
 
 - [introduction](#introduction)
 - [installing](#installing)
@@ -19,7 +18,7 @@ an expressive, dynamically-typed language for the joy of programming
 - [credits](#credits)
 - [license](#license)
 
-# introduction
+## introduction
 
 (see [the introduction](https://lung.fyi/revo/docs))
 
@@ -108,7 +107,7 @@ suite "math" do
 end
 ```
 
-## simple embedding api
+### simple embedding api
 
 ```c
 #include "revo.h"
@@ -135,8 +134,8 @@ erevo_program_destroy(program);
 erevo_vm_destroy(vm);
 ```
 
+## installing
 
-# installing
 binary releases are not yet available
 
 i highly recommend using [anyzig](https://github.com/marler8997/anyzig)
@@ -145,7 +144,7 @@ you will need [zig](https://ziglang.org/download) version `0.16.0` to build revo
 
 available on most package managers as `zig`
 
-## on posix (linux/bsd/mac)
+### on posix (linux/bsd/mac)
 
 ```bash 
 git clone https://github.com/if-not-nil/revo --recursive && cd revo
@@ -159,9 +158,10 @@ cp ./zig-out/bin/revo ~/.local/bin/revo
 revo --version
 ```
 
-### repl
+#### repl
 
 the default REPL backend is [isocline](https://github.com/daanx/isocline):
+
 - repl history saved to `~/.revo_history`
 - multi-line expressions are shift+enter or C-j
 - tab completion for revo keywords, commands (`:q`, `:clear`, `:backend`), and stdlib modules
@@ -170,10 +170,11 @@ the default REPL backend is [isocline](https://github.com/daanx/isocline):
 
 you can also get a dumb repl by doing `-Dfeatures=lsp` (no isocline) or `-Dfeatures=` (no features at all)
 
-### packaging:
+#### packaging
+
 - AUR: `revo-git` ([info & pkgbuild](https://aur.archlinux.org/packages/revo-git))
 
-## windows
+### windows
 
 ```bash
 git clone https://github.com/if-not-nil/revo && cd revo
@@ -193,9 +194,10 @@ copy ./zig-out/bin/revo C:/tools/revo/bin
 # verify installation
 revo --version
 ```
+
 *note - the windows version does not yet have an async backend or a full-featured line editor. the latter is the easiest to add, a windows contributor might want to take a look at [./src/repl.zig](./src/repl.zig)*
 
-# usage
+## usage
 
 ```bash
 usage: revo [options] [script [args...]]
@@ -223,15 +225,15 @@ examples:
   revo --dis script.rv           show bytecode disassembly
 ```
 
-# tools
+## tools
 
 - `tree-sitter`
-    [doomy/tree-sitter-revo on codeberg](https://codeberg.org/doomy/tree-sitter-revo)
-    this gives most editors revo syntax highlighting support
+  [doomy/tree-sitter-revo on codeberg](https://codeberg.org/doomy/tree-sitter-revo)
+  this gives most editors revo syntax highlighting support
 
-## development
+### development
 
-### building
+#### building
 
 ```bash
 zig build # debug build
@@ -246,14 +248,14 @@ zig build lib
 **note:** the C library and header are only built with `zig build lib`.
 the auto-generated header is always in sync with exported functions, marked with `callconv("c")`
 
-### running tests
+#### running tests
 
 ```bash
 zig build test --summary all 
 # opt: -Dtest-filter="some test name filter"
 ```
 
-### revolt (the language server)
+#### revolt (the language server)
 
 revo ships an LSP server at `src/lsp/`. it handles diagnostics, go-to-definition, hover,
 references, document symbols, and workspace symbols.
@@ -270,7 +272,7 @@ zig build lsp
 
 the binary lands at `zig-out/bin/revolt`
 
-#### neovim setup
+##### neovim setup
 
 ```lua
 vim.lsp.config('revolt', {
@@ -283,7 +285,7 @@ vim.lsp.enable('revolt')
 
 see [docs/lsp.md](src/lsp/README.md) for the full feature list, troubleshooting, and other editors
 
-### contributing
+#### contributing
 
 recommending to a friend is always greatly appreciated. any contributions are welcome!
 
@@ -291,11 +293,11 @@ you can contribute via github, codeberg or via [emailing me a .patch](mailto:lun
 
 see [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-## credits
+### credits
 
 - [isocline](https://github.com/daanx/isocline) by daanx - MIT
 - [lsp-kit](https://github.com/zigtools/lsp-kit) by the zigtools team - MIT
 
-# license
+## license
 
 revo is licensed under [MIT.](https://mit-license.org/) see the [LICENSE.txt](./LICENSE.txt) file for details

@@ -4,7 +4,7 @@ this doc describes the details behind revo's development, for contribution guide
 
 ## zlint
 
-the zig linter, config is at `zlint.json` 
+the zig linter, config is at `zlint.json`
 
 ```sh
 zlint
@@ -34,11 +34,11 @@ zig build lib
 nm zig-out/lib/liberevo.a | rg erevo_
 ```
 
-# architecture
+## architecture
 
 the pipeline is `source -> lexer -> parser -> expander -> semantic -> compiler -> vm`; `build.zig` mirrors it with modules `vm`, `revo`, `c`, `erevo`, plus the exe and the lsp
 
-## pipeline (`src/lang/pipeline.zig`)
+### pipeline (`src/lang/pipeline.zig`)
 
 `build()` is the whole front end, step by step
 
@@ -56,7 +56,7 @@ errors at any step surface as `lang.Error` variants (`parse`/`expand`/`semantic`
 
 ~ `lower` the compiler emits the artifact
 
-## lowering (`src/lang/compiler/`)
+### lowering (`src/lang/compiler/`)
 
 one pass over the expanded ast, emitting into a pointer-based ir.
 `IrInst` operands are `.inst` pointers (data flow by pointer rather than register number), which is what makes the passes below ok. registers come from a stack (`state.zig`, `pushRegister`/`popRegister`), locals are per-function slots, upvalues resolve recursively by name, and every inst carries `fn_depth`
@@ -76,7 +76,7 @@ the root compiles as `__main` plus `call` + `halt` (`compileRoot`)
 
 ~ then `lowerInst` packs each `IrInst` into the vm's `Instruction`, the artifact (`instructions` + 1:1 `spans`) is copied to the runtime allocator, and nested prototypes get their bytecode segments
 
-## the vm (`src/vm/`)
+### the vm (`src/vm/`)
 
 `module.runCompiledModuleReport` -> `exec.runReport` push the root frame on the main fiber, then loop, run ready fibers, wake sleepers, poll the async backend, wait on io/timers if nothing is runnable. `scheduler.zig` owns the fiber ready queue, channels, and waiters; `VM.Fiber` holds the register file + frames with `top_base` cached for the dispatcher. fibers here are just the cooperative/stackful coroutine model, user code yields control explicitly rather than being preempted
 
@@ -91,20 +91,20 @@ the `2-way` here is close-ish to the the one described in [the Holzle/Chambers/U
 
 ~ concurrency: cooperative fibers (with `spawn`/`join`, `chan`/`send`/`recv`), blocking syscalls run on the async backend - `async_backend_posix.zig` (worker threads + completion pipe), `async_backend_none.zig` on windows/freestanding (any no-libc build)
 
-# stdlib (`src/std/`)
+## stdlib (`src/std/`)
 
 the surface is at `iface/*.d.rv`, files carry doc-comment+declatarion sigs; `api.zig` merges them with the zig `impls` at boot (`register_stdlib`) into `full_specs`, keyed on the bare name, so the doc set always matches the runtime. the primitive type metatable *is* the module table, so `x:method()` dispatch is a single lookup
 
 whenever you want to add a function, add the related declaration into iface
 
-# c api, lsp, wasm, repl
+## c api, lsp, wasm, repl
 
 - `src/c/` - `erevo.zig` exports embedding api over opaque handles, `bindings.zig` autogenerates `revo.h`, `tests.c` is the c suite (`zig build test-c`)
 - `src/lsp/` - revo lsp thru lsp-kit dep, uses `Workspace` together with the front-end, bundled into release binaries (`revo --lsp`), stubbed when the `lsp` feature is off
 - wasm - `main_wasm.zig` on freestanding targets, io stubbed to panic (since no io on wasm); the dispatch frame can exceed the 1mb default stack so build sets 16mb to fix OOBs
 - `src/repl.zig` - uses isocline by default; `-Dfeatures=lsp` or `-Dfeatures=` gives the dumb repl
 
-# build system
+## build system
 
 `build.zig` has to remain such that zig and git are the only build-time dependencies
 
@@ -126,7 +126,7 @@ notable steps
 
 `src/lang/tests.zig` are the integration tests
 
-# docs
+## docs
 
 plaintext docs can be generated via `revo --docs`, but the documentation we have for the website needs html. this is what `revo --docs --docs-html` is for
 
