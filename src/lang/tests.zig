@@ -427,9 +427,9 @@ test "concat operator" {
 // semantic type checking of stdlib functions
 //
 
-test "@doc annotates functions without changing runtime behavior" {
+test "doc comments annotate functions without changing runtime behavior" {
     try t.topNumber(
-        \\ @doc "adds numbers"
+        \\ #* adds numbers *#
         \\ fn add(a, b) a + b
         \\ add(20, 22)
     , 42);

@@ -1,0 +1,19 @@
+##!
+ clocks and parking: wall-clock and monotonic time in milliseconds or nanoseconds
+!##
+
+#* returns current wall-clock time in milliseconds *#
+pub declare time.now = fn() -> number
+
+#* returns current wall-clock time in nanoseconds since the first call *#
+pub declare time.now_ns = fn() -> number
+
+#* returns monotonic clock in milliseconds *#
+pub declare time.monotonic = fn() -> number
+
+#* returns monotonic clock in nanoseconds since the first call *#
+pub declare time.monotonic_ns = fn() -> number
+
+#* parks current fiber for given milliseconds *#
+pub declare time.sleep = fn(ms: number) -> parked
+

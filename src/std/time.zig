@@ -1,46 +1,9 @@
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "now",
-        .placements = &.{api.mod("time")},
-        .params = &.{},
-        .ret = "number",
-        .doc = "returns current wall-clock time in milliseconds",
-        .f = root.define(&.{}, now_ms),
-    },
-    .{
-        .name = "now_ns",
-        .placements = &.{api.mod("time")},
-        .params = &.{},
-        .ret = "number",
-        .doc = "returns current wall-clock time in nanoseconds since the first call",
-        .f = root.define(&.{}, now_ns),
-    },
-    .{
-        .name = "monotonic",
-        .placements = &.{api.mod("time")},
-        .params = &.{},
-        .ret = "number",
-        .doc = "returns monotonic clock in milliseconds",
-        .f = root.define(&.{}, monotonic_ms),
-    },
-    .{
-        .name = "monotonic_ns",
-        .placements = &.{api.mod("time")},
-        .params = &.{},
-        .ret = "number",
-        .doc = "returns monotonic clock in nanoseconds since the first call",
-        .f = root.define(&.{}, monotonic_ns),
-    },
-    .{
-        .name = "sleep",
-        .placements = &.{api.mod("time")},
-        .params = &.{
-            .{ "ms", "number" },
-        },
-        .ret = "parked",
-        .doc = "parks current fiber for given milliseconds",
-        .f = root.define(&.{.number}, root.sleep),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "now", .f = root.define(&.{}, now_ms) },
+    .{ .name = "now_ns", .f = root.define(&.{}, now_ns) },
+    .{ .name = "monotonic", .f = root.define(&.{}, monotonic_ms) },
+    .{ .name = "monotonic_ns", .f = root.define(&.{}, monotonic_ns) },
+    .{ .name = "sleep", .f = root.define(&.{.number}, root.sleep) },
 };
 
 fn now_ms(_: []const Data, vm: *VM) !NativeResult {

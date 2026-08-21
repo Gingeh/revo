@@ -1,0 +1,28 @@
+##!
+ number parsing and float helpers: is_nan, is_finite, rounding, absolute value
+!##
+
+#* converts value to number: number("12") => 12 *#
+pub declare number.__call = fn(value: any) -> number
+
+#* checks if number is NaN *#
+pub declare number.is_nan? = fn(self: number) -> bool
+
+#* checks if number is finite *#
+pub declare number.is_finite? = fn(self: number) -> bool
+
+#* checks if number is infinite *#
+pub declare number.is_inf? = fn(self: number) -> bool
+
+#* largest integer <= self *#
+pub declare number.floor = fn(self: number) -> number
+
+#* smallest integer >= self *#
+pub declare number.ceil = fn(self: number) -> number
+
+#* rounds to nearest integer *#
+pub declare number.round = fn(self: number) -> number
+
+#* absolute value *#
+pub declare number.abs = fn(self: number) -> number
+

@@ -1,68 +1,10 @@
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "len",
-        .placements = &.{ api.mod("tuple"), api.method("tuple", .tuple) },
-        .params = &.{
-            .{ "self", "tuple" },
-        },
-        .ret = "number",
-        .doc = "returns length of tuple",
-        .f = root.define(&[_]root.TypeSpec{.tuple}, len),
-    },
-    .{
-        .name = "unwrap",
-        .placements = &.{ api.mod("tuple"), api.method("tuple", .tuple) },
-        .params = &.{
-            .{ "self", "tuple" },
-        },
-        .ret = "any",
-        .doc = "unwraps result tuple, panics if not :ok",
-        .f = root.define(&[_]root.TypeSpec{.tuple}, root.try_),
-    },
-    .{
-        .name = "unwrap_err",
-        .placements = &.{ api.mod("tuple"), api.method("tuple", .tuple) },
-        .params = &.{
-            .{ "self", "tuple" },
-        },
-        .ret = "any",
-        .doc = "extracts error from result tuple, panics if not :err",
-        .f = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_),
-    },
-    .{
-        .name = "add",
-        .placements = &.{ api.mod("tuple"), api.method("tuple", .tuple) },
-        .params = &.{
-            .{ "self", "tuple" },
-            .{ "other", "tuple" },
-        },
-        .ret = "tuple",
-        .doc = "concatenates two tuples",
-        .f = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add),
-    },
-    .{
-        .name = "mul",
-        .placements = &.{ api.mod("tuple"), api.method("tuple", .tuple) },
-        .params = &.{
-            .{ "self", "tuple" },
-            .{ "n", "number" },
-        },
-        .ret = "tuple",
-        .doc = "repeats tuple n times",
-        .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul),
-    },
-    .{
-        .name = "__index",
-        .placements = &.{api.method("tuple", .tuple)},
-        .params = &.{
-            .{ "self", "tuple" },
-            .{ "idx", "number" },
-        },
-        .ret = "any",
-        .doc = "returns element at index",
-        .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, index),
-        .core_key = revo.core_atoms.__index,
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "len", .f = root.define(&[_]root.TypeSpec{.tuple}, len) },
+    .{ .name = "unwrap", .f = root.define(&[_]root.TypeSpec{.tuple}, root.try_) },
+    .{ .name = "unwrap_err", .f = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_) },
+    .{ .name = "add", .f = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add) },
+    .{ .name = "mul", .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },
+    .{ .name = "__index", .f = root.define(&[_]root.TypeSpec{ .tuple, .any }, index) },
 };
 
 fn len(args: []const Data, vm: *VM) !NativeResult {
@@ -76,8 +18,8 @@ fn index(args: []const Data, vm: *VM) !NativeResult {
     const n = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
-    if (idx >= t.items.len) return .{ .ok = revo.Data.new.core(.missing) };
-    return .{ .ok = t.items[idx] };
+    if (idx >= t.items.len) return .okData(revo.Data.new.core(.missing));
+    return .okData(t.items[idx]);
 }
 
 fn add(args: []const Data, vm: *VM) !NativeResult {
@@ -114,3 +56,14 @@ const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
 const NativeResult = root.NativeResult;
+const testing = revo.lang.testing;
+
+test "generic unwrap_err infers T" {
+    try testing.topString("(:err, \"boom\"):unwrap_err()", "boom");
+    try testing.topNumber("(:err, 7):unwrap_err()", 7);
+}
+
+test "untyped receivers resolve module fns via the metatable" {
+    try testing.topNumber("fn f(t) do t:unwrap_err() end f((:err, 3))", 3);
+    try testing.topNumber("fn f(t) do t:len() end f((1, 2, 3))", 3);
+}

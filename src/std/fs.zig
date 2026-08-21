@@ -1,148 +1,16 @@
-pub const specs: []const api.FnSpec = &.{
-    // fs module
-    .{
-        .name = "open",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "path", "string" },
-        },
-        .ret = "!table",
-        .doc =
-        \\wraps a path in a file handle table
-        \\use `file.close()` when you're done with the handle
-        ,
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, open_fn),
-    },
-    .{
-        .name = "readdir",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "path", "string" },
-        },
-        .ret = "!table",
-        .doc = "returns table of directory entries",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, readdir_fn),
-    },
-    .{
-        // method version
-        .name = "readdir",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!table",
-        .doc = "returns table of directory entries for the dir handle's path",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, readdir_meth_fn),
-    },
-    .{
-        .name = "exists?",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "path", "string" },
-        },
-        .ret = "!bool",
-        .doc = "does path exist?",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, exists_fn),
-    },
-    .{
-        .name = "remove",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "path", "string" },
-        },
-        .ret = "!atom",
-        .doc = "removes a file or empty directory at path",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, remove_fn),
-    },
-    .{
-        .name = "mkdir",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "path", "string" },
-            .{ "permissions", "atom|number?" },
-        },
-        .ret = "!atom",
-        .doc = "creates a directory, using default permissions when omitted",
-        .variadic = true,
-        .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{.string}) else root.defineVariadic(&.{.string}, mkdir_fn),
-    },
-    .{
-        .name = "rename",
-        .placements = &.{api.mod("fs")},
-        .params = &.{
-            .{ "old_path", "string" },
-            .{ "new_path", "string" },
-        },
-        .ret = "!atom",
-        .doc = "renames a file or directory",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .string, .string }) else root.define(&.{ .string, .string }, rename_fn),
-    },
-    // file module (used as __index for file handle mts)
-    .{
-        .name = "read",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!string",
-        .doc = "reads the full file contents as a string",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, read_fn),
-    },
-    .{
-        .name = "write",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-            .{ "data", "any" },
-            .{ "permissions", "atom|number?" },
-        },
-        .ret = "!number",
-        .doc =
-        \\overwrites the file with the provided string
-        \\optional permissions default to the platform file default
-        ,
-        .variadic = true,
-        .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, write_fn),
-    },
-    .{
-        .name = "append",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-            .{ "data", "any" },
-            .{ "permissions", "atom|number?" },
-        },
-        .ret = "!number",
-        .doc =
-        \\appends data to the file, creating it if needed
-        \\optional permissions default to the platform file default
-        ,
-        .variadic = true,
-        .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, append_fn),
-    },
-    .{
-        .name = "stat",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!table",
-        .doc = "get file metadata as a table",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, stat_fn),
-    },
-    .{
-        .name = "close",
-        .placements = &.{api.mod("file")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!atom",
-        .doc =
-        \\closes a file handle table
-        \\this is currently a logical close for wrapper handles
-        ,
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, close_fn),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "open", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, open_fn) },
+    .{ .name = "readdir", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, readdir_fn) },
+    .{ .name = "readdir", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, readdir_meth_fn) },
+    .{ .name = "exists?", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, exists_fn) },
+    .{ .name = "remove", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, remove_fn) },
+    .{ .name = "mkdir", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{.string}) else root.defineVariadic(&.{.string}, mkdir_fn) },
+    .{ .name = "rename", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .string, .string }) else root.define(&.{ .string, .string }, rename_fn) },
+    .{ .name = "read", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, read_fn) },
+    .{ .name = "write", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, write_fn) },
+    .{ .name = "append", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, append_fn) },
+    .{ .name = "stat", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, stat_fn) },
+    .{ .name = "close", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, close_fn) },
 };
 
 const path_key = "__path";

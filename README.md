@@ -1,9 +1,9 @@
 # `revo, the programming language
 
   
-[homepage & docs](https://gills.pages.dev/revo)
+[homepage & docs](https://lung.fyi/revo)
 | [github](https://github.com/if-not-nil/revo)
-| [learn](https://gills.pages.dev/revo/basics)
+| [learn](https://lung.fyi/revo/basics)
 | [chat & discuss](https://discord.com/invite/XzGWh7TX59)
 
 an expressive, dynamically-typed language for the joy of programming
@@ -21,7 +21,7 @@ an expressive, dynamically-typed language for the joy of programming
 
 # introduction
 
-(see [the introduction](https://gills.pages.dev/revo/docs))
+(see [the introduction](https://lung.fyi/revo/docs))
 
 ```ruby
 # =======================
@@ -222,6 +222,12 @@ examples:
   revo --bench script.rv         run with performance counters
   revo --dis script.rv           show bytecode disassembly
 ```
+
+# tools
+
+- `tree-sitter`
+    [doomy/tree-sitter-revo on codeberg](https://codeberg.org/doomy/tree-sitter-revo)
+    this gives most editors revo syntax highlighting support
 
 ## development
 

@@ -8,64 +8,13 @@ const Data = revo.Data;
 const VM = revo.VM;
 const NativeResult = root.NativeResult;
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "set_seed",
-        .placements = &.{api.mod("rng")},
-        .params = &.{
-            .{ "seed", "number" },
-        },
-        .ret = "",
-        .doc = "Statically sets the seed used for generation of pseudo-random numbers.",
-        .f = root.define(&.{.number}, setSeed),
-    },
-    .{
-        .name = "revert_seed",
-        .placements = &.{api.mod("rng")},
-        .params = &.{},
-        .ret = "",
-        .doc = "Reverts seed back to using the current time at the time of generation.",
-        .f = root.define(&.{}, revertSeed),
-    },
-    .{
-        .name = "rand",
-        .placements = &.{api.mod("rng")},
-        .params = &.{
-            .{ "upper_bound", "number" },
-        },
-        .ret = "number",
-        .doc = "Returns a random integer in the range [0, upper_bound]",
-        .f = root.define(&.{.number}, rand),
-    },
-    .{
-        .name = "range",
-        .placements = &.{api.mod("rng")},
-        .params = &.{
-            .{ "lower_bound", "number" },
-            .{ "upper_bound", "number" },
-        },
-        .ret = "number",
-        .doc = "Returns a random integer in the range [lower_bound, upper_bound]",
-        .f = root.define(&.{ .number, .number }, randRange),
-    },
-    .{
-        .name = "rand_float",
-        .placements = &.{api.mod("rng")},
-        .params = &.{},
-        .ret = "number",
-        .doc = "Returns a random float in the range [0, 1]",
-        .f = root.define(&.{}, randFloat),
-    },
-    .{
-        .name = "choice",
-        .placements = &.{api.mod("rng")},
-        .params = &.{
-            .{ "input", "table" },
-        },
-        .ret = "any",
-        .doc = "Returns a random element from a table (note: this function *ignores* key value pairs.)",
-        .f = root.define(&.{.table}, choice),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "set_seed", .f = root.define(&.{.number}, setSeed) },
+    .{ .name = "revert_seed", .f = root.define(&.{}, revertSeed) },
+    .{ .name = "rand", .f = root.define(&.{.number}, rand) },
+    .{ .name = "range", .f = root.define(&.{ .number, .number }, randRange) },
+    .{ .name = "rand_float", .f = root.define(&.{}, randFloat) },
+    .{ .name = "choice", .f = root.define(&.{.table}, choice) },
 };
 
 pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {

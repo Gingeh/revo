@@ -1,0 +1,25 @@
+##!
+ process and host access: cwd, exit, subprocesses, stdin lines, importing modules, running tests
+!##
+
+#* reads one line from stdin, or until a custom delimiter (opts: { delimiter: string|:nil|:eof }) *#
+pub declare input = fn(opts: table?...) -> !string
+
+#* returns current working directory path *#
+pub declare cwd = fn() -> string
+
+#* exists the program with a status *#
+pub declare exit = fn(status: number) -> never
+
+#* runs a subprocess and returns (stdout, stderr) *#
+pub declare system = fn(args: table) -> !(string, string)
+
+#* imports a revo module by path *#
+pub declare import = fn(path: string) -> any
+
+#* internal, do not use unless you know what you're doing. runs a test *#
+pub declare __internal_dotest = fn(name: string, body: function) -> :ok
+
+#* internal, pls dont use. runs a test suite *#
+pub declare __internal_dosuite = fn(name: string, body: function) -> :ok
+

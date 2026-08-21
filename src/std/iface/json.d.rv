@@ -1,0 +1,10 @@
+##!
+ encode values as json and decode json back into revo values
+!##
+
+#* encodes value as json string *#
+pub declare json.encode = fn(value: any) -> !string
+
+#* decodes json string into revo value *#
+pub declare json.decode = fn(source: string) -> !any/string
+

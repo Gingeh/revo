@@ -267,6 +267,49 @@ fn probeImportFile(
     return try alloc.dupe(u8, buf[0..n]);
 }
 
+/// the `<stem>.d.rv` manifest path for an extension lib, caller checks
+/// existence; shared by the pipeline resolver and the workspace (which has
+/// no io to probe with)
+pub fn extensionManifestPath(alloc: std.mem.Allocator, resolved_lib: []const u8) ![]const u8 {
+    const dir = std.fs.path.dirname(resolved_lib) orelse return error.NoDirname;
+    const stem = std.fs.path.stem(resolved_lib);
+    const name = try std.fmt.allocPrint(alloc, "{s}.d.rv", .{stem});
+    defer alloc.free(name);
+    return try std.fs.path.join(alloc, &.{ dir, name });
+}
+
+/// if a `<stem>.d.rv` manifest sits next to a resolved extension lib,
+/// return its path - the manifest is the type interface for the lib
+pub fn extensionManifestFor(
+    io: std.Io,
+    alloc: std.mem.Allocator,
+    resolved_lib: []const u8,
+) !?[]const u8 {
+    const manifest = try extensionManifestPath(alloc, resolved_lib);
+    defer alloc.free(manifest);
+    return probeImportFile(io, alloc, null, manifest);
+}
+
+test "extensionManifestFor finds a sibling manifest" {
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "lib.so", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "lib.d.rv", .data = "pub declare open = fn(p: string) -> string\n" });
+
+    const lib = try tmp.dir.realPathFileAlloc(std.testing.io, "lib.so", a);
+    defer a.free(lib);
+    const manifest = (try extensionManifestFor(std.testing.io, a, lib)) orelse return error.TestUnexpectedResult;
+    defer a.free(manifest);
+    try std.testing.expect(std.mem.endsWith(u8, manifest, "lib.d.rv"));
+
+    // no manifest -> null
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "other.so", .data = "" });
+    const other = try tmp.dir.realPathFileAlloc(std.testing.io, "other.so", a);
+    defer a.free(other);
+    try std.testing.expect((try extensionManifestFor(std.testing.io, a, other)) == null);
+}
+
 /// guaranteed IDs
 pub const core_atoms = vm.core_atoms;
 

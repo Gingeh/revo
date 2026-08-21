@@ -1,42 +1,9 @@
 // for metaprogramming
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "eval",
-        .placements = &.{api.mod("revo")},
-        .params = &.{
-            .{ "code", "string" },
-        },
-        .ret = "!any/string",
-        .doc =
-        \\evaluates it as a module, gives you back its' return value
-        \\you can treat it as a function's body
-        ,
-        .f = root.define(&.{.string}, eval),
-    },
-    .{
-        .name = "build",
-        .placements = &.{api.mod("revo")},
-        .params = &.{
-            .{ "code", "string" },
-        },
-        .ret = "!string",
-        .doc =
-        \\builds it as a module, gives you back its' bytecode in a string
-        \\the string is only useful for writing to a file or executing
-        ,
-        .f = root.define(&.{.string}, build),
-    },
-    .{
-        .name = "version",
-        .placements = &.{api.mod("revo")},
-        .params = &.{},
-        .ret = "string",
-        .doc =
-        \\version of your revo installation, like "revo v1.2.3"
-        ,
-        .f = root.define(&.{}, version),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "eval", .f = root.define(&.{.string}, eval) },
+    .{ .name = "build", .f = root.define(&.{.string}, build) },
+    .{ .name = "version", .f = root.define(&.{}, version) },
 };
 
 pub fn version(args: []const Data, vm: *VM) !NativeResult {

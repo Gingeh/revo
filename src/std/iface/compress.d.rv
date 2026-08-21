@@ -1,0 +1,43 @@
+##!
+ for compression and decompression
+!##
+
+#* encodes data as standard base64 with padding *#
+pub declare compress.base64_encode = fn(data: string) -> string
+
+#* decodes standard base64 string *#
+pub declare compress.base64_decode = fn(data: string) -> !string
+
+#* encodes data as url-safe base64 without padding *#
+pub declare compress.base64url_encode = fn(data: string) -> string
+
+#* decodes url-safe base64 string *#
+pub declare compress.base64url_decode = fn(data: string) -> !string
+
+#* compresses data using gzip format *#
+pub declare compress.gzip_compress = fn(data: string) -> !string
+
+#* decompresses gzip data *#
+pub declare compress.gzip_decompress = fn(data: string) -> !string
+
+#* compresses data using zlib format *#
+pub declare compress.zlib_compress = fn(data: string) -> !string
+
+#* decompresses zlib data *#
+pub declare compress.zlib_decompress = fn(data: string) -> !string
+
+#* compresses data using raw deflate *#
+pub declare compress.deflate = fn(data: string) -> !string
+
+#* decompresses raw deflate data *#
+pub declare compress.inflate = fn(data: string) -> !string
+
+#* decompresses zstd data *#
+pub declare compress.zstd_decompress = fn(data: string) -> !string
+
+#* decompresses lzma data *#
+pub declare compress.lzma_decompress = fn(data: string) -> !string
+
+#* decompresses xz data *#
+pub declare compress.xz_decompress = fn(data: string) -> !string
+

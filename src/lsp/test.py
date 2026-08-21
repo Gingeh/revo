@@ -62,7 +62,7 @@ print(say_hi("world"))
 """
 
 DOC_URI = "file:///test/doc.rv"
-DOC_TEXT = """@doc "greets a person by name"
+DOC_TEXT = """#* greets a person by name *#
 fn greet(name: string) -> string do
   "hello " + name
 end
@@ -200,7 +200,8 @@ async def test_utf16_positions(client: LanguageClient):
     text = 'print("héllo")\nfn f(a) a\nprint("héllo") f\n'
     client.text_document_did_open(
         params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(uri=uri, language_id="revo", version=1, text=text),
+            text_document=TextDocumentItem(
+                uri=uri, language_id="revo", version=1, text=text),
         )
     )
     await client.wait_for_notification("textDocument/publishDiagnostics")
@@ -213,10 +214,12 @@ async def test_utf16_positions(client: LanguageClient):
     )
     assert result is not None, "hover on f returned None"
     assert result.contents is not None
-    assert "fn f" in result.contents.value, f"expected fn f hover, got: {result.contents.value}"
+    assert "fn f" in result.contents.value, f"expected fn f hover, got: {
+        result.contents.value}"
     assert result.range.start.line == 1
     assert result.range.start.character == 3, (
-        f"definition should be at utf-16 col 3, got {result.range.start.character}"
+        f"definition should be at utf-16 col 3, got {
+            result.range.start.character}"
     )
 
     loc = await client.text_document_definition_async(
@@ -228,7 +231,8 @@ async def test_utf16_positions(client: LanguageClient):
     assert loc is not None, "definition on f returned None"
     assert loc.range.start.line == 1
     assert loc.range.start.character == 3, (
-        f"definition should be at utf-16 col 3, got {loc.range.start.character}"
+        f"definition should be at utf-16 col 3, got {
+            loc.range.start.character}"
     )
 
 
@@ -251,6 +255,17 @@ async def test_hover(client: LanguageClient):
 @pytest.mark.asyncio(loop_scope="module")
 async def test_fn_hover(client: LanguageClient):
     """hover over a function should show its doc"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=TEST_URI,
+                language_id="revo",
+                version=1,
+                text=TEST_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
     client.text_document_did_open(
         params=DidOpenTextDocumentParams(
             text_document=TextDocumentItem(
@@ -319,6 +334,173 @@ async def test_fn_hover(client: LanguageClient):
     assert contents is not None
     assert "fn greet(name: string) -> string" in contents.value, "expected type signature with explicit return type"
     assert "greets a person" in contents.value, "expected doc text at call site"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_doc_inherits_through_alias(client: LanguageClient):
+    """`const x = a` - hovering x shows a's doc"""
+    uri = "file:///test/alias.rv"
+    text = """#* the answer *#
+pub const a = 5
+
+const x = a
+
+x
+"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=uri,
+                language_id="revo",
+                version=1,
+                text=text,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    # hover over `a` directly
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=1, character=10),
+            text_document=TextDocumentIdentifier(uri=uri),
+        )
+    )
+    assert result is not None, "hover on a is None"
+    assert "the answer" in result.contents.value, f"expected doc on a, got: {
+        result.contents.value!r}"
+
+    # hover over `x`, which aliases `a`
+    result = await client.text_document_hover_async(
+        params=HoverParams(
+            position=Position(line=3, character=6),
+            text_document=TextDocumentIdentifier(uri=uri),
+        )
+    )
+    print("alias hover:", result)
+    assert result is not None, "hover on x is None"
+    assert "the answer" in result.contents.value, f"expected inherited doc on x, got: {
+        result.contents.value!r}"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_manifest_hover(client: LanguageClient):
+    """hover over a lib import typed by its .d.rv manifest"""
+    import tempfile
+
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        with open(os.path.join(tmp.name, "extension.so"), "w"):
+            pass
+        with open(os.path.join(tmp.name, "extension.d.rv"), "w") as f:
+            f.write("pub declare add = fn(a: number, b: number) -> number\n")
+            f.write("pub declare concat = fn(parts: tuple, sep: string) -> string\n")
+        uri = f"file://{tmp.name}/app.rv"
+        script = 'import "extension.so"\nprint(extension.concat(("a", "b"), "-"))\n'
+        client.text_document_did_open(
+            params=DidOpenTextDocumentParams(
+                text_document=TextDocumentItem(
+                    uri=uri,
+                    language_id="revo",
+                    version=1,
+                    text=script,
+                )
+            )
+        )
+        await client.wait_for_notification("textDocument/publishDiagnostics")
+
+        # hover over the module name
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=0, character=10),
+                text_document=TextDocumentIdentifier(uri=uri),
+            )
+        )
+        assert result is not None, "hover over module name is None"
+        value = result.contents.value
+        print("  module hover:", repr(value))
+        assert "module `extension`" in value
+        assert "concat" in value
+        # content is a revo code block so the editor can highlight it
+        assert "```revo" in value and value.index("```revo") < value.index("fn add"), \
+            f"member sigs not in a revo fence: {value}"
+        assert "- `fn" not in value, f"member bullets left in: {value}"
+        # range covers just the module name in the import statement
+        assert result.range is not None
+        r = result.range
+        print("  module hover range:", r)
+        assert r.start.line == 0 and r.start.character == 8, f"expected name span, got: {
+            r}"
+        assert r.end.character == 17, f"expected name span, got: {r}"
+
+        # hover over the member at the call site: signature from the manifest,
+        # range covering just `concat` in the current file
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=1, character=21),
+                text_document=TextDocumentIdentifier(uri=uri),
+            )
+        )
+        assert result is not None, "hover over member is None"
+        value = result.contents.value
+        print("  member hover:", repr(value))
+        assert "fn concat(parts: tuple, sep: string) -> string" in value, f"expected manifest sig, got: {
+            value}"
+        assert result.range is not None
+        r = result.range
+        print("  member hover range:", r)
+        assert r.start.line == 1 and r.start.character == 16, f"expected call-site word span, got: {
+            r}"
+        assert r.end.character == 22, f"expected call-site word span, got: {r}"
+
+        # signature help inside the member call
+        sig = await client.text_document_signature_help_async(
+            params=SignatureHelpParams(
+                position=Position(line=1, character=24),
+                text_document=TextDocumentIdentifier(uri=uri),
+            )
+        )
+        print("  member signature help:", sig)
+        assert sig is not None, "signature help over member call is None"
+        label = sig.signatures[sig.active_signature].label
+        assert label.startswith(
+            "concat(") and "tuple" in label and "string" in label, f"expected manifest sig, got: {label}"
+
+        # hover over the declared name inside the manifest file itself:
+        # the range must cover just `zadd`, not the whole decl
+        manifest_uri = f"file://{tmp.name}/extension.d.rv"
+        with open(os.path.join(tmp.name, "extension.d.rv")) as f:
+            manifest_text = f.read()
+        client.text_document_did_open(
+            params=DidOpenTextDocumentParams(
+                text_document=TextDocumentItem(
+                    uri=manifest_uri,
+                    language_id="revo",
+                    version=1,
+                    text=manifest_text,
+                )
+            )
+        )
+        await client.wait_for_notification("textDocument/publishDiagnostics")
+        name_col = manifest_text.index("add")  # `pub declare add = ...`
+        result = await client.text_document_hover_async(
+            params=HoverParams(
+                position=Position(line=0, character=name_col + 1),
+                text_document=TextDocumentIdentifier(uri=manifest_uri),
+            )
+        )
+        assert result is not None, "hover over manifest decl is None"
+        assert result.range is not None, f"hover over manifest decl has no range: {
+            result}"
+        r = result.range
+        print("  decl hover range:", r)
+        assert r.start.line == 0
+        assert r.start.character == name_col, f"range must start at the name: {
+            r}"
+        assert r.end.character == name_col + \
+            3, f"range must cover just the name: {r}"
+    finally:
+        tmp.cleanup()
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -471,7 +653,8 @@ async def test_undefined_name_no_duplicates(client: LanguageClient):
     for d in diags:
         key = (d.message, d.range.start.line, d.range.start.character,
                d.range.end.line, d.range.end.character)
-        assert key not in seen, f"duplicate diagnostic: {d.message} at {d.range}"
+        assert key not in seen, f"duplicate diagnostic: {
+            d.message} at {d.range}"
         seen.add(key)
 
 
@@ -679,7 +862,8 @@ async def test_inlay_hints(client: LanguageClient):
     result = await client.text_document_inlay_hint_async(
         params=InlayHintParams(
             text_document=TextDocumentIdentifier(uri=TEST_URI),
-            range=Range(start=Position(line=0, character=0), end=Position(line=10, character=0)),
+            range=Range(start=Position(line=0, character=0),
+                        end=Position(line=10, character=0)),
         ),
     )
     print("  inlay hints:", result)
@@ -776,10 +960,12 @@ def _open_import_pair(client: LanguageClient, tmpdir):
     one_uri = "file://" + one_path
     two_uri = "file://" + two_path
     client.text_document_did_open(params=DidOpenTextDocumentParams(
-        text_document=TextDocumentItem(uri=one_uri, language_id="revo", version=1, text=ONE_RV_CONTENT),
+        text_document=TextDocumentItem(
+            uri=one_uri, language_id="revo", version=1, text=ONE_RV_CONTENT),
     ))
     client.text_document_did_open(params=DidOpenTextDocumentParams(
-        text_document=TextDocumentItem(uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
+        text_document=TextDocumentItem(
+            uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
     ))
     return one_uri, two_uri
 
@@ -801,7 +987,8 @@ async def test_import_hover(client: LanguageClient):
         assert result is not None, "hover on imported fn returned None"
         contents = result.contents
         assert contents is not None
-        assert "hi" in contents.value, f"expected 'hi' in hover, got: {contents.value}"
+        assert "hi" in contents.value, f"expected 'hi' in hover, got: {
+            contents.value}"
         assert "fn hi" in contents.value or "num" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )
@@ -821,7 +1008,8 @@ async def test_import_completion(client: LanguageClient):
         assert result is not None, "expected completions, got None"
         items = result.items if hasattr(result, 'items') else result
         labels = [i.label for i in items]
-        assert "hi" in labels, f"expected 'hi' completion from import, got: {labels}"
+        assert "hi" in labels, f"expected 'hi' completion from import, got: {
+            labels}"
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -841,7 +1029,8 @@ async def test_import_hover_module_name(client: LanguageClient):
         assert result is not None, "hover on module name returned None"
         contents = result.contents
         assert contents is not None
-        assert "module" in contents.value, f"expected 'module' in hover, got: {contents.value}"
+        assert "module" in contents.value, f"expected 'module' in hover, got: {
+            contents.value}"
         assert "fn hi(a: int, b: int) -> int" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )
@@ -864,7 +1053,8 @@ async def test_import_hover_autoopen(client: LanguageClient):
 
         two_uri = "file://" + two_path
         client.text_document_did_open(params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
+            text_document=TextDocumentItem(
+                uri=two_uri, language_id="revo", version=1, text=TWO_RV_CONTENT),
         ))
         await client.wait_for_notification("textDocument/publishDiagnostics")
 
@@ -878,7 +1068,8 @@ async def test_import_hover_autoopen(client: LanguageClient):
         assert result is not None, "hover on imported fn (auto-open) returned None"
         contents = result.contents
         assert contents is not None
-        assert "hi" in contents.value, f"expected 'hi' in hover, got: {contents.value}"
+        assert "hi" in contents.value, f"expected 'hi' in hover, got: {
+            contents.value}"
         assert "fn hi" in contents.value or "num" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )

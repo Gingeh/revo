@@ -48,6 +48,14 @@ const TypeParamSubst = struct {
         }
         return null;
     }
+
+    /// first binding per name wins
+    pub fn put(self: *TypeParamSubst, name: []const u8, t: TypeInfo) !void {
+        if (self.count >= self.entries.len) return;
+        if (self.get(name) != null) return;
+        self.entries[self.count] = .{ .name = name, .type = t };
+        self.count += 1;
+    }
 };
 
 fn genericSubstReturnType(
@@ -55,20 +63,31 @@ fn genericSubstReturnType(
     type_params: []const []const u8,
     type_args: []const []const u8,
     args: []const *Node,
+    params: []const TypeInfo,
     return_type: TypeInfo,
 ) TypeInfo {
     if (type_params.len <= 4) {
         var subst: TypeParamSubst = .{ .count = type_params.len };
+        // explicit type args win; the shape walk binds vars found inside
+        // compound params (e.g. `unwrap(x: (:err, T)) -> T`)
         for (type_params, 0..) |tp, i| {
-            subst.entries[i] = .{
-                .name = tp,
-                .type = if (i < type_args.len)
-                    types_mod.resolveTypeName(self, type_args[i])
-                else if (i < args.len and type_args.len == 0)
-                    inferExprType(self, args[i])
-                else
-                    .any,
-            };
+            if (i < type_args.len)
+                subst.entries[i] = .{
+                    .name = tp,
+                    .type = types_mod.resolveTypeName(self, type_args[i]),
+                };
+        }
+        var arg_types: [4]TypeInfo = @splat(.any);
+        for (args, 0..) |a, i| {
+            if (i < 4) arg_types[i] = inferExprType(self, a);
+        }
+        types_mod.bindTypeParams(&subst, params, arg_types[0..@min(args.len, 4)]) catch {};
+        // plain `fn id[T](x: T)`: bind from the positional arg if still unbound
+        if (type_args.len == 0) {
+            for (type_params, 0..) |tp, i| {
+                if (subst.get(tp) == null and i < args.len)
+                    subst.put(tp, inferExprType(self, args[i])) catch {};
+            }
         }
         return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch .any;
     }
@@ -76,15 +95,21 @@ fn genericSubstReturnType(
     var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
     defer param_map.deinit();
     for (type_params, 0..) |tp, i| {
-        param_map.put(
-            tp,
-            if (i < type_args.len)
-                types_mod.resolveTypeName(self, type_args[i])
-            else if (i < args.len and type_args.len == 0)
-                inferExprType(self, args[i])
-            else
-                .any,
-        ) catch {};
+        if (i < type_args.len)
+            param_map.put(tp, types_mod.resolveTypeName(self, type_args[i])) catch {};
+    }
+    var arg_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, @min(args.len, 8)) catch return .any;
+    defer arg_types.deinit(self.alloc);
+    for (args) |a| {
+        if (arg_types.items.len >= 8) break;
+        arg_types.append(self.alloc, inferExprType(self, a)) catch return .any;
+    }
+    types_mod.bindTypeParams(&param_map, params, arg_types.items) catch {};
+    if (type_args.len == 0) {
+        for (type_params, 0..) |tp, i| {
+            if (!param_map.contains(tp) and i < args.len)
+                param_map.put(tp, inferExprType(self, args[i])) catch {};
+        }
     }
     return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch .any;
 }
@@ -94,13 +119,15 @@ pub fn inferCallReturnType(
     callee: *const Node,
     args: []const *Node,
     type_args: []const []const u8,
+    implicit_self: bool,
 ) TypeInfo {
+    _ = implicit_self;
     const callee_type = inferExprType(self, callee);
     if (callee_type == .function) {
         const fn_sig = callee_type.function;
         const ret = fn_sig.return_type;
         if (fn_sig.type_params.len > 0 and ret != .any)
-            return genericSubstReturnType(self, fn_sig.type_params, type_args, args, ret);
+            return genericSubstReturnType(self, fn_sig.type_params, type_args, args, fn_sig.params, ret);
         if (ret != .any) return ret;
     }
 
@@ -108,7 +135,7 @@ pub fn inferCallReturnType(
         const fn_name = callee.expr.ident;
         const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
         if (sig.type_params.len > 0 and sig.return_type != .any)
-            return genericSubstReturnType(self, sig.type_params, type_args, args, sig.return_type);
+            return genericSubstReturnType(self, sig.type_params, type_args, args, sig.param_types, sig.return_type);
         return sig.return_type;
     }
 

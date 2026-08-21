@@ -449,8 +449,9 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         else
             self.allocExpr(token.span(), .{ .multiline_string = token.text }),
         .hash => self.allocExpr(token.span(), .{ .hash = token.text[1..] }),
+        .doc_comment => self.parseDocAttr(token),
         .ident => self.allocExpr(token.span(), .{ .ident = token.text }),
-        .kw_const, .kw_global, .kw_let, .kw_struct, .kw_test, .kw_suite => self.parseDecl(token),
+        .kw_const, .kw_global, .kw_let, .kw_struct, .kw_test, .kw_suite, .kw_declare => self.parseDecl(token),
         .kw_proc => self.parseProc(token),
         .kw_fn => self.parseFnWithBodyMin(token, 0),
         .minus => self.parseUnary(.negate, 60, token),
@@ -507,16 +508,14 @@ fn parseUnary(self: *Parser, op: ast.UnOp, right_bp: u8, token: Token) anyerror!
     return self.allocExpr(Span.merge(token.span(), expr.span), .{ .unary = .{ .op = op, .expr = expr } });
 }
 
-const AttrKind = enum { native, doc };
+const AttrKind = enum { native };
 
 const attr_table = std.StaticStringMap(AttrKind).initComptime(.{
     .{ "@native", .native },
-    .{ "@doc", .doc },
 });
 
 const PendingAttr = struct {
     kind: AttrKind,
-    doc_text: []const u8 = undefined,
     span: Span,
 };
 
@@ -527,15 +526,7 @@ fn parseAttrs(self: *Parser, first: Token) anyerror!*Node {
     var token = first;
     while (true) {
         const kind = attr_table.get(token.text) orelse return error.UnknownAttribute;
-        var attr = PendingAttr{ .kind = kind, .span = token.span() };
-        if (kind == .doc) {
-            const doc_token = self.advance();
-            attr.doc_text = switch (doc_token.type) {
-                .string, .multiline_string, .backtick_string => doc_token.text,
-                else => return error.UnexpectedToken,
-            };
-        }
-        try pending.append(self.alloc, attr);
+        try pending.append(self.alloc, .{ .kind = kind, .span = token.span() });
 
         if (!self.check(.attribute)) break;
         token = self.advance();
@@ -552,10 +543,7 @@ fn applyAttr(self: *Parser, node: *Node, attr: PendingAttr) anyerror!*Node {
     switch (node.expr) {
         .decl => return self.applyAttr(node.expr.decl.inner, attr),
         .fn_expr => {
-            switch (attr.kind) {
-                .native => node.expr.fn_expr.native = true,
-                .doc => node.expr.fn_expr.doc = attr.doc_text,
-            }
+            node.expr.fn_expr.native = true;
             return node;
         },
         .binding => |binding| {
@@ -565,6 +553,38 @@ fn applyAttr(self: *Parser, node: *Node, attr: PendingAttr) anyerror!*Node {
         .assign_expr => |assign| {
             if (assign.value.expr != .fn_expr) return error.UnexpectedToken;
             return self.applyAttr(assign.value, attr);
+        },
+        else => return error.UnexpectedToken,
+    }
+}
+
+fn parseDocAttr(self: *Parser, doc_token: Token) anyerror!*Node {
+    const target = try self.parsePrefix();
+    // the lexer keeps the `#*`/`*#` padding in the token text
+    const trimmed = std.mem.trim(u8, doc_token.text, " \t\n\r");
+    return applyDocAttr(target, trimmed);
+}
+
+fn applyDocAttr(node: *Node, doc_text: []const u8) anyerror!*Node {
+    switch (node.expr) {
+        // the doc belongs to the declared thing, not the decl wrapper
+        .decl => |d| {
+            _ = try applyDocAttr(d.inner, doc_text);
+            return node;
+        },
+        .binding => |*b| {
+            b.doc = doc_text;
+            return node;
+        },
+        .type_alias => |*t| {
+            t.doc = doc_text;
+            return node;
+        },
+        .assign_expr => {
+            const value = node.expr.assign_expr.value;
+            if (value.expr != .fn_expr) return error.UnexpectedToken;
+            value.expr.fn_expr.doc = doc_text;
+            return node;
         },
         else => return error.UnexpectedToken,
     }
@@ -857,11 +877,56 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
             _ = try self.expect(.assign);
             const type_expr = try self.parseTypeExpr();
             const node = try self.allocExpr(Span.merge(start.span(), type_expr.span), .{
-                .type_alias = .{ .name = name.text, .type_expr = type_expr },
+                .type_alias = .{ .name = name.text, .name_span = name.span(), .type_expr = type_expr },
             });
             break :blk self.allocExpr(
                 start.span(),
                 .{ .decl = .{ .inner = node, .kind = ast.DeclKind.type_alias_decl } },
+            );
+        },
+        .kw_declare => blk: {
+            // bodge: `type`, `import`, `join` are stdlib globals, usable as names
+            if (!self.check(.ident)) switch (self.peek().type) {
+                .kw_type, .kw_import, .kw_join => {},
+                else => return error.UnexpectedToken,
+            };
+            const first = self.advance();
+            const name = first.text;
+            var head: ?ast.DeclareHead = null;
+            if (self.check(.hash)) {
+                // `string:__index` - the lexer merges `:` + key into one hash
+                const key = self.advance();
+                head = .{ .core = .{ .target = first.text, .key = key.text[1..] } };
+            } else if (self.match(.colon)) {
+                // `string:__index` - a core-key slot on a target type
+                const key = try self.expectIdent();
+                head = .{ .core = .{ .target = first.text, .key = key.text } };
+            } else if (self.check(.dot)) {
+                // `fs.open`, `math.pi` - a dotted module path
+                var segs = std.ArrayList([]const u8).initCapacity(self.alloc, 2) catch return error.OutOfMemory;
+                try segs.append(self.alloc, first.text);
+                while (self.match(.dot)) {
+                    const seg = try self.expectIdent();
+                    try segs.append(self.alloc, seg.text);
+                }
+                head = .{ .module = try segs.toOwnedSlice(self.alloc) };
+            }
+            const tps = if (self.match(.lbracket)) try self.parseTypeParamList() else &.{};
+            _ = try self.expect(.assign);
+            const type_expr = try self.parseTypeExpr();
+            const node = try self.allocExpr(Span.merge(start.span(), type_expr.span), .{
+                .type_alias = .{
+                    .name = name,
+                    .name_span = first.span(),
+                    .type_expr = type_expr,
+                    .declare_head = head,
+                    .declare_tps = tps,
+                },
+            });
+            break :blk self.allocExpr(
+                start.span(),
+                // declares are pub by default; `pub declare` still parses
+                .{ .decl = .{ .inner = node, .kind = ast.DeclKind.declare_decl, .pub_ = true } },
             );
         },
         else => return error.UnexpectedToken,
@@ -1027,6 +1092,7 @@ fn parsePubPrefix(self: *Parser, _: Token) anyerror!*Node {
         .kw_type,
         .kw_macro,
         .kw_import,
+        .kw_declare,
     };
     var found = false;
     inline for (pub_keywords) |kt| {
@@ -1104,7 +1170,13 @@ fn parseImport(self: *Parser, start: Token) anyerror!*Node {
     // import "path" autobind
     {
         const path_token = try self.expect(.string);
-        const name = try self.alloc.dupe(u8, std.fs.path.stem(path_token.text));
+        const name = try self.alloc.dupe(
+            u8,
+            if (std.mem.endsWith(u8, path_token.text, ".d.rv"))
+                path_token.text[0 .. path_token.text.len - ".d.rv".len]
+            else
+                std.fs.path.stem(path_token.text),
+        );
         return self.allocExpr(
             Span.merge(start.span(), path_token.span()),
             .{ .import_stmt = .{ .name = name, .path = path_token.text } },
@@ -1264,6 +1336,7 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
     return self.allocExpr(Span.merge(start.span(), if (items.items.len == 0) close.span() else end_span), .{
         .struct_def = .{
             .name = name.text,
+            .name_span = name.span(),
             .items = try items.toOwnedSlice(self.alloc),
         },
     });
@@ -2151,22 +2224,39 @@ test "quasiquote inner nodes carry template spans" {
     try std.testing.expectEqual(@as(usize, 14), inner.span.end);
 }
 
-test "parses @doc annotation on function declaration" {
+test "parses doc comment on function declaration" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
     const src =
-        \\ @doc "adds"
+        \\ #* adds *#
         \\ fn add(a, b) a + b
     ;
     const tokens = try lexer.lexAt(alloc, src, .{});
     const root = try parseTokens(alloc, tokens);
     try std.testing.expect(root.expr == .decl);
     try std.testing.expect(root.expr.decl.inner.expr == .binding);
-    const value = root.expr.decl.inner.expr.binding.value;
-    try std.testing.expect(value.expr == .fn_expr);
-    try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
+    const b = root.expr.decl.inner.expr.binding;
+    try std.testing.expect(b.value.expr == .fn_expr);
+    try std.testing.expectEqualStrings("adds", b.doc.?);
+}
+
+test "doc comment attaches to non-fn const binding" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src =
+        \\ #* a plain value *#
+        \\ const a = 5
+    ;
+    const tokens = try lexer.lexAt(alloc, src, .{});
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    const b = root.expr.decl.inner.expr.binding;
+    try std.testing.expect(b.value.expr == .number);
+    try std.testing.expectEqualStrings("a plain value", b.doc.?);
 }
 
 test "parses @native annotation on function declaration" {
@@ -2186,21 +2276,21 @@ test "parses @native annotation on function declaration" {
     try std.testing.expect(value.expr.fn_expr.doc == null);
 }
 
-test "parses @native @doc annotations in order" {
+test "parses @native with a doc comment" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
     const src =
-        \\ @native @doc "adds two numbers"
-        \\ fn add(a, b) a + b
+        \\ #* adds two numbers *#
+        \\ @native fn add(a, b) a + b
     ;
     const tokens = try lexer.lexAt(alloc, src, .{});
     const root = try parseTokens(alloc, tokens);
-    const value = root.expr.decl.inner.expr.binding.value;
-    try std.testing.expect(value.expr == .fn_expr);
-    try std.testing.expect(value.expr.fn_expr.native);
-    try std.testing.expectEqualStrings("adds two numbers", value.expr.fn_expr.doc.?);
+    const b = root.expr.decl.inner.expr.binding;
+    try std.testing.expect(b.value.expr == .fn_expr);
+    try std.testing.expect(b.value.expr.fn_expr.native);
+    try std.testing.expectEqualStrings("adds two numbers", b.doc.?);
 }
 
 test "unknown attribute is a parse error" {
@@ -2343,4 +2433,57 @@ test "parses pub type with pub_ flag" {
     try std.testing.expect(root.expr == .decl);
     try std.testing.expect(root.expr.decl.pub_);
     try std.testing.expect(root.expr.decl.kind == .type_alias_decl);
+}
+
+test "parses declare as an ambient decl" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lexAt(alloc, "pub declare ring = fn(volume: number, label: string) -> bool", .{});
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.kind == .declare_decl);
+    const alias = root.expr.decl.inner.expr.type_alias;
+    try std.testing.expectEqualStrings("ring", alias.name);
+    try std.testing.expect(alias.type_expr.kind == .function);
+}
+
+test "declare fn doc comment attaches to the decl" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lexAt(
+        alloc,
+        "#* lights the lamp loudness *# declare lamp = fn(volume: number) -> bool",
+        .{},
+    );
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expectEqualStrings(
+        "lights the lamp loudness",
+        root.expr.decl.inner.expr.type_alias.doc.?,
+    );
+}
+
+test "doc comment attaches to any decl, docs land on the declared thing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lexAt(alloc, "#* a doc *# const x = 42", .{});
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expectEqualStrings("a doc", root.expr.decl.inner.expr.binding.doc.?);
+}
+
+test "declare defaults to pub" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lexAt(alloc, "declare ring = fn() -> int", .{});
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr.decl.pub_);
 }

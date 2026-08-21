@@ -27,10 +27,7 @@ end
 
 const NOWORD = string.of_ascii(10)
 
-# TODO: this string should be able to be a doc comment, via @doc"string text which can also be multiline"
-"""
-markov chain
-"""
+#* markov chain *#
 struct Chain {
   state = {},
   starts = {},

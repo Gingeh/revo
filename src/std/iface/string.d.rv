@@ -1,0 +1,94 @@
+##!
+ string manipulation: length, case, substrings, search and replace, splitting and joining
+!##
+
+#* returns length of string *#
+pub declare string.len = fn(self: string) -> number
+
+#* converts string to uppercase *#
+pub declare string.upper = fn(self: string) -> string
+
+#* converts string to lowercase *#
+pub declare string.lower = fn(self: string) -> string
+
+#* extracts substring from start with given length *#
+pub declare string.sub = fn(self: string, start: number, length: number) -> string
+
+#*
+finds first occurrence of needle in string
+returns index or :missing if not found
+*#
+pub declare string.find = fn(self: string, needle: string) -> number|atom
+
+#* replaces all occurrences of old with new *#
+pub declare string.replace = fn(self: string, old: string, new: string) -> string
+
+#* splits string by delimiter into table *#
+pub declare string.split = fn(self: string, delim: string) -> table
+
+#* trims whitespace from both ends *#
+pub declare string.trim = fn(self: string) -> string
+
+#* checks if string starts with prefix *#
+pub declare string.starts_with? = fn(self: string, prefix: string) -> bool
+
+#* checks if string ends with suffix *#
+pub declare string.ends_with? = fn(self: string, suffix: string) -> bool
+
+#* reverses the string *#
+pub declare string.reverse = fn(self: string) -> string
+
+#*
+replaces character at index with given char or byte
+index is 0-based
+*#
+pub declare string.with = fn(self: string, idx: number, char: string|number) -> string
+
+#*
+converts string to table of characters
+
+```
+"asdf":table() => {"a", "s", "d", "f"}
+```
+*#
+pub declare string.table = fn(self: string) -> table
+
+#*
+returns ASCII code of first character
+
+```
+"a":ascii() => 97
+```
+*#
+pub declare string.ascii = fn(self: string) -> number
+
+#* checks if string contains substring *#
+pub declare string.contains? = fn(self: string, substr: string) -> bool
+
+#* ret 0-based index of substring or nil *#
+pub declare string.index_of = fn(self: string, substr: string) -> number|:nil
+
+#* returns character at index as single-char string *#
+pub declare string:__index = fn(self: string, idx: any) -> string
+
+#* concatenates two strings *#
+pub declare string.add = fn(self: string, other: string) -> string
+
+#* repeats string n times *#
+pub declare string.mul = fn(self: string, n: number) -> string
+
+#*
+creates string from ASCII code(s)
+
+```
+of_ascii(97) => "a"
+```
+*#
+pub declare string.of_ascii = fn(code: number) -> string
+
+#* joins table elements into string with separator *#
+pub declare string.join = fn(table: table, sep: string) -> string
+
+#* converts value to string: string(x) *#
+pub declare string.__call = fn(value: any) -> string
+

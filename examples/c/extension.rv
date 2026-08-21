@@ -1,8 +1,14 @@
-const ex = import("extension.so")
+import "extension.so"
 
-print("echo:", ex.echo("hello"))
-print("strlen:", ex.strlen("hello"))
-print("add:", ex.add(3, 4))
-print("typ(5):", ex.typ(5))
-print("typ(\"hi\"):", ex.typ("hi"))
-print("regex:", ex.regex("^h", "hello"))
+# the sibling extension.d.rv is the interface: every call is typed against
+# it, and all bindings land in this module's table (sig placement is ignored
+# while the manifest exists)
+print(extension.greet("world"))
+print(extension.add(3, 4))
+print(extension.echo("hello"))
+print(extension.strlen("hello"))
+print(extension.typ(5))
+print(extension.regex("^h", "hello"))
+
+print(extension.concat(("a", "b", "c"), "-"))
+print(extension.concat(("revo", "rules"), ", "))

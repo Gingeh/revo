@@ -34,6 +34,9 @@ pub const Frame = struct {
 
 pub const NativeFn = *const fn (args: []const Data, vm: *revo.VM) NativeResult;
 
+/// binding table entry for a dlopen'd extension; every binding lands in
+/// the module table under the import's name. the typed interface for an
+/// extension is its sibling `<stem>.d.rv` manifest
 pub const RevoBinding = extern struct {
     name: [*:0]const u8,
     fn_ptr: *const anyopaque,

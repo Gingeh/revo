@@ -9,27 +9,9 @@ const NativeResult = root.NativeResult;
 
 const json = std.json;
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "encode",
-        .placements = &.{api.mod("json")},
-        .params = &.{
-            .{ "value", "any" },
-        },
-        .ret = "!string",
-        .doc = "encodes value as json string",
-        .f = root.define(&.{.any}, encode),
-    },
-    .{
-        .name = "decode",
-        .placements = &.{api.mod("json")},
-        .params = &.{
-            .{ "source", "string" },
-        },
-        .ret = "!any/string",
-        .doc = "decodes json string into revo value",
-        .f = root.define(&.{.string}, decode),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "encode", .f = root.define(&.{.any}, encode) },
+    .{ .name = "decode", .f = root.define(&.{.string}, decode) },
 };
 
 fn encode(args: []const Data, vm: *VM) !NativeResult {

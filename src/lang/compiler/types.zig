@@ -8,9 +8,8 @@ pub const UnionVariant = struct {
 };
 
 pub const TypeInfo = union(enum) {
-    bool,
-    // TODO: maybe unify here maybe split at vm
-    int,
+    bool, // TODO: remove, make this be atom union of :true | :false
+    int, // TODO: unify int and float, make it only be number
     float,
     string,
     atom: []const u8,
@@ -558,7 +557,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
 
         .tuple => |items| inferTupleType(ctx, items),
         .table => |entries| inferTableType(ctx, entries),
-        .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args),
+        .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args, call.implicit_self),
         .field => |field| ctx.inferFieldType(field.object, field.name),
         .index => |index| inferIndexType(ctx, index.object, index.key),
         .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params),
@@ -672,6 +671,53 @@ pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Nod
 pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     if (exprs.len == 0) return .any;
     return inferExprType(ctx, exprs[exprs.len - 1]);
+}
+
+/// walk arg types against param types and bind each type_var found inside a
+/// param to the concrete type at the same position, e.g. `self: (:err, T)`
+/// against `(err, string)` binds T -> string. best-effort: first binding per
+/// name wins, mismatched shapes are skipped
+/// subst is any type with `put(name: []const u8, t: TypeInfo)`
+pub fn bindTypeParams(subst: anytype, params: []const TypeInfo, arg_types: []const TypeInfo) anyerror!void {
+    const count = @min(params.len, arg_types.len);
+    for (0..count) |i| try bindTypeParam(subst, params[i], arg_types[i]);
+}
+
+fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
+    switch (param) {
+        .type_var => |name| if (arg != .any) try subst.put(name, arg),
+        .tuple => |items| {
+            if (arg != .tuple) return;
+            if (arg.tuple.len != items.len) return;
+            for (items, arg.tuple) |p, a| try bindTypeParam(subst, p, a);
+        },
+        .table => |tbl| {
+            if (arg != .table) return;
+            try bindTypeParam(subst, tbl.value.*, arg.table.value.*);
+            if (tbl.key) |k| if (arg.table.key) |ak| try bindTypeParam(subst, k.*, ak.*);
+        },
+        .function => |fsig| {
+            if (arg != .function) return;
+            try bindTypeParams(subst, fsig.params, arg.function.params);
+            try bindTypeParam(subst, fsig.return_type, arg.function.return_type);
+        },
+        // tagged unions only: match each param variant to the arg variant with
+        // the same discriminator atom
+        .@"union" => |variants| {
+            if (arg != .@"union") return;
+            for (variants) |pv| {
+                if (pv.types.len == 0 or pv.types[0] != .atom) continue;
+                for (arg.@"union") |av| {
+                    if (av.types.len != pv.types.len) continue;
+                    if (av.types[0] != .atom or av.types[0].atom.len == 0) continue;
+                    if (!std.mem.eql(u8, atomPayload(pv.types[0].atom), atomPayload(av.types[0].atom))) continue;
+                    for (pv.types[1..], av.types[1..]) |p, a| try bindTypeParam(subst, p, a);
+                    break;
+                }
+            }
+        },
+        else => {},
+    }
 }
 
 /// substitute type params in a TypeInfo tree
@@ -2038,7 +2084,7 @@ test "stdlib sigs: method return types reach the compiler" {
 }
 
 test "stdlib sigs: global return types reach the compiler" {
-    // semantic knows read/cwd from root_specs_os; misuse that compiled
+    // semantic knows cwd/read from the os iface; misuse that compiled
     // against .any now errors before codegen
     try t.expectCompileError(
         \\ let x = cwd()
@@ -2154,4 +2200,121 @@ test "error-union sugar and the literal form are the same union" {
         \\ | (:ok, v) => v
         \\ | (:err, e) => panic(e)
     );
+}
+
+//
+// ambient declares
+//
+
+test "declare typed const is usable in type positions" {
+    try t.topNumber(
+        \\ declare MAX_ITEMS = number
+        \\ const x: MAX_ITEMS = 5
+        \\ x
+    , 5);
+}
+
+test "declare fn calls typecheck and run into undefined variable" {
+    try t.expectRuntimeError(
+        \\ declare lamp = fn(volume: number, label: string) -> bool
+        \\ lamp(1, "x")
+    , .UndefinedVariable);
+}
+
+test "declare fn return type reaches the compiler" {
+    var vm = try VM.init(testRuntime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ declare add = fn(a: number, b: number) -> number
+        \\ add(1, 2) + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
+test "declare rejects duplicate names" {
+    try t.expectCompileError(
+        \\ declare MAX_ITEMS = number
+        \\ declare MAX_ITEMS = number
+    , .ParseError);
+}
+
+test "declare rejects non-top-level placement" {
+    try t.expectCompileError(
+        \\ fn f() do
+        \\     declare y = number
+        \\ end
+    , .ParseError);
+}
+
+test ".d.rv import typechecks calls and never executes the file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "audio.d.rv",
+        .data = "pub declare ring = fn(volume: number, label: string) -> bool\nundefined_poison()\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(module_dir);
+    // build succeeds (semantic extracted the sig); runtime only fails on the
+    // empty module table - the poison call inside the file never ran
+    try t.expectRuntimeErrorInDir(
+        module_dir,
+        "import \"audio.d.rv\"\naudio.ring(1, \"x\")\n",
+        .NotAFunction,
+    );
+}
+
+test "manifest .d.rv types .so imports, sig fallback without one" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "fake.so", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "fake.d.rv", .data = "pub declare open = fn(path: string) -> string\n" });
+    const module_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(module_dir);
+    const source_name = try std.fs.path.join(std.testing.allocator, &.{ module_dir, "<source>" });
+    defer std.testing.allocator.free(source_name);
+
+    const source = "import \"fake.so\"\nfake.open(5)\n";
+
+    // manifest present: the wrong-arg call is a compile error
+    {
+        var vm = try VM.init(t.runtime());
+        defer vm.deinit();
+        vm.module_dir = module_dir;
+        const result = try lang.build(&vm, .{ .name = source_name, .text = source }, .{ .install_debug_info = false });
+        switch (result) {
+            .ok => return error.ExpectedCompileFailure,
+            .err => |f| switch (f) {
+                .semantic, .lower => vm.runtime.resetDiagArena(),
+                .expand, .parse => return error.ExpectedCompileFailure,
+            },
+        }
+    }
+
+    // manifest gone: no sigs to synthesize from, the call compiles untyped
+    try tmp.dir.deleteFile(std.testing.io, "fake.d.rv");
+    {
+        var vm = try VM.init(t.runtime());
+        defer vm.deinit();
+        vm.module_dir = module_dir;
+        const result = try lang.build(&vm, .{ .name = source_name, .text = source }, .{ .install_debug_info = false });
+        switch (result) {
+            .ok => |artifact| {
+                std.testing.allocator.free(artifact.instructions);
+                std.testing.allocator.free(artifact.spans);
+            },
+            .err => return error.ExpectedCompileSuccess,
+        }
+    }
 }

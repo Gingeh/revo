@@ -155,6 +155,8 @@ runtime: revo.Runtime,
 
 constants: std.ArrayList(Data),
 stdlib_globals: Globals,
+/// iface specs loaded at init; released by `deinit` through `api.freeLoadedSpecs`
+loaded_specs: []const []const revo.std_lib.api.FnSpec = &.{},
 tables: TablePool,
 tuples: TuplePool,
 functions: FunctionPool,
@@ -272,6 +274,7 @@ pub fn init(runtime: revo.Runtime) !VM {
         .globals = Globals.init(rt.alloc),
         .const_globals = ConstGlobals.init(rt.alloc),
         .module_dir = null,
+        .loaded_specs = &.{},
         .loading_stack = loading_stack,
         .loaded_extensions = .empty,
         .gc_mark_stack = gc_mark_stack,
@@ -328,6 +331,7 @@ pub fn deinit(self: *VM) void {
     self.globals.deinit();
     self.const_globals.deinit();
     self.stdlib_globals.deinit();
+    revo.std_lib.api.freeLoadedSpecs(self.runtime.alloc, self.loaded_specs);
 
     for (self.loading_stack.items) |path|
         self.runtime.alloc.free(path);

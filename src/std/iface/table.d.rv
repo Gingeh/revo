@@ -1,0 +1,82 @@
+##!
+ table manipulation: keys and values, insertion and removal, sorting, joining, shallow copies
+!##
+
+#*
+gets value without metamethods
+returns :undef if key missing
+*#
+pub declare table.rawget = fn(self: table, key: any) -> any
+
+#* sets value without metamethods *#
+pub declare table.rawset = fn(self: table, key: any, value: any) -> table
+
+#* sets the metatable of the table, `:nil` clears it *#
+pub declare table.set_meta = fn(self: table, meta: :nil|table) -> table
+
+#* unwraps result tuple, panics if not :ok *#
+pub declare table.unwrap = fn(self: table) -> any
+
+#* inserts value at position, shifting elements right *#
+pub declare table.insert = fn(self: table, pos: number, value: any) -> atom
+
+#* inserts elements as last *#
+pub declare table.push = fn(self: table, values: any...) -> table
+
+#* removes element at position, returns removed value *#
+pub declare table.remove = fn(self: table, pos: number) -> any
+
+#* joins array elements with delimiter *#
+pub declare table.join = fn(self: table, delim: string) -> string
+
+#* returns all keys as table (array indices + hash keys) *#
+pub declare table.keys = fn(self: table) -> table
+
+#* returns all values as table *#
+pub declare table.values = fn(self: table) -> table
+
+#* checks if key exists in table *#
+pub declare table.has? = fn(self: table, key: any) -> bool
+
+#* creates shallow copy of table *#
+pub declare table.copy = fn(self: table) -> table
+
+#*
+merges second table into first
+later values overwrite earlier ones
+*#
+pub declare table.merge = fn(self: table, other: table) -> table
+
+#* sorts table array part in ascending order (numbers < strings) *#
+pub declare table.sort = fn(self: table) -> table
+
+#* sorts table array part using comparison function fn(a, b) -> bool (true if a < b) *#
+pub declare table.sort_by = fn(self: table, fn: function) -> table
+
+#* returns first element or nil *#
+pub declare table.first = fn(self: table) -> any
+
+#* returns last element or nil *#
+pub declare table.last = fn(self: table) -> any
+
+#* reverses table array part in place *#
+pub declare table.reverse = fn(self: table) -> table
+
+#* flattens nested tables into single array *#
+pub declare table.flatten = fn(self: table) -> table
+
+#* ret 0-based index of value or nil if not found *#
+pub declare table.index_of = fn(self: table, value: any) -> number|:nil
+
+#* checks if table contains value *#
+pub declare table.contains? = fn(self: table, value: any) -> bool
+
+#* removes duplicate elements *#
+pub declare table.unique = fn(self: table) -> table
+
+#* returns length of table array part *#
+pub declare table.len = fn(self: table) -> number
+
+#* merges two tables (union) *#
+pub declare table.add = fn(self: table, other: table) -> table
+

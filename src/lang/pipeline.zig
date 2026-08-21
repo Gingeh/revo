@@ -254,7 +254,7 @@ fn extractPubDefs(node: *Node, prefix: []const u8, alloc: std.mem.Allocator, out
                     },
                     .type_alias => |t| {
                         const ta_node = try allocNode(alloc, d.inner.span, .{
-                            .type_alias = .{ .name = t.name, .type_expr = t.type_expr },
+                            .type_alias = .{ .name = t.name, .name_span = t.name_span, .type_expr = t.type_expr },
                         });
                         try out.append(alloc, ta_node);
                     },
@@ -324,7 +324,30 @@ pub fn extractPubFnSigs(
         },
         .decl => |d| {
             if (d.pub_) {
-                if (d.inner.expr == .binding) {
+                if (d.kind == .declare_decl) {
+                    if (d.inner.expr == .type_alias) {
+                        const t = d.inner.expr.type_alias;
+                        switch (t.type_expr.kind) {
+                            .function => |f| {
+                                var params = try std.ArrayList(ImportParam).initCapacity(alloc, f.params.len);
+                                for (f.params) |p| {
+                                    params.appendAssumeCapacity(.{ .name = p.name, .type_expr = p.type_name });
+                                }
+                                var entry = out.getPtr(prefix) orelse blk: {
+                                    const empty = try std.ArrayList(ImportFnMeta).initCapacity(alloc, 0);
+                                    try out.put(prefix, empty);
+                                    break :blk out.getPtr(prefix).?;
+                                };
+                                try entry.append(alloc, .{
+                                    .name = t.name,
+                                    .params = try params.toOwnedSlice(alloc),
+                                    .return_type_expr = f.return_type,
+                                });
+                            },
+                            else => {},
+                        }
+                    }
+                } else if (d.inner.expr == .binding) {
                     const b = d.inner.expr.binding;
                     if (b.value.expr == .fn_expr and b.target.expr == .ident) {
                         const fn_expr = b.value.expr.fn_expr;
@@ -433,6 +456,16 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
             if (comptime !revo.is_freestanding) {
                 const resolved = (resolveModuleFile(self.vm, path) catch return null) orelse return null;
                 defer self.vm.runtime.alloc.free(resolved);
+                // shared libs carry their sigs as data, instead of source source
+                // a sibling `lib.d.rv` manifest is the type interface and required for
+                // typed imports; without one the module resolves untyped
+                if (std.mem.endsWith(u8, resolved, ".so") or std.mem.endsWith(u8, resolved, ".dylib")) {
+                    if (revo.extensionManifestFor(self.vm.runtime.io, a, resolved) catch null) |manifest| {
+                        defer a.free(manifest);
+                        return std.Io.Dir.cwd().readFileAlloc(self.vm.runtime.io, manifest, a, std.Io.Limit.unlimited) catch null;
+                    }
+                    return null;
+                }
                 return std.Io.Dir.cwd().readFileAlloc(self.vm.runtime.io, resolved, a, std.Io.Limit.unlimited) catch null;
             }
             return null;
@@ -448,6 +481,7 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         known_globals.items,
         null,
         &type_annotations,
+        null,
         .{ .ptr = &pipeline_resolver, .resolveFn = PipelineResolver.resolve },
     )) |semantic_err| {
         // the original report is arena-owned inside semantic.analyze; copy it

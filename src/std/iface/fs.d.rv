@@ -1,0 +1,56 @@
+##!
+ filesystem access: reading files, listing directories, path checks, creating and removing entries
+!##
+# authoring: docs are `#* ... *#` blocks above the declare
+# write docs as markdown, bare ``` fences for code examples (no language tag)
+# an `#` line is an editorial comment (skipped); the head may carry a `[T]`
+# generic suffix; a bare `__call`/`__index` head sets the core key
+
+#*
+wraps a path in a file handle table
+use `file.close()` when you're done with the handle
+*#
+pub declare fs.open = fn(path: string) -> !table
+
+#* returns table of directory entries *#
+pub declare fs.readdir = fn(path: string) -> !table
+
+#* returns table of directory entries for the dir handle's path *#
+pub declare file.readdir = fn(self: table) -> !table
+
+#* does path exist? *#
+pub declare fs.exists? = fn(path: string) -> !bool
+
+#* removes a file or empty directory at path *#
+pub declare fs.remove = fn(path: string) -> !atom
+
+#* creates a directory, using default permissions when omitted *#
+pub declare fs.mkdir = fn(path: string, permissions: atom|number?...) -> !atom
+
+#* renames a file or directory *#
+pub declare fs.rename = fn(old_path: string, new_path: string) -> !atom
+
+#* reads the full file contents as a string *#
+pub declare file.read = fn(self: table) -> !string
+
+#*
+overwrites the file with the provided string
+optional permissions default to the platform file default
+*#
+pub declare file.write = fn(self: table, data: any, permissions: atom|number?...) -> !number
+
+#*
+appends data to the file, creating it if needed
+optional permissions default to the platform file default
+*#
+pub declare file.append = fn(self: table, data: any, permissions: atom|number?...) -> !number
+
+#* get file metadata as a table *#
+pub declare file.stat = fn(self: table) -> !table
+
+#*
+closes a file handle table
+this is currently a logical close for wrapper handles
+*#
+pub declare file.close = fn(self: table) -> !atom
+

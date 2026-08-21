@@ -1,0 +1,19 @@
+##!
+ regular expressions: compile patterns, test for matches, find and iterate over matches
+!##
+
+#* compile a regex pattern into a reusable handle *#
+pub declare re.compile = fn(pattern: string) -> table
+
+#* test if regex matches anywhere in haystack; pass a string for one-shot compile *#
+pub declare re.is_match = fn(regex: table | string, haystack: string) -> bool
+
+#* return first match or nil; pass a string for one-shot compile *#
+pub declare re.find = fn(regex: table | string, haystack: string) -> string | :nil
+
+#* return an iterator over all matches; pass a string for one-shot compile *#
+pub declare re.find_all = fn(regex: table | string, haystack: string) -> function
+
+#* free a compiled regex handle *#
+pub declare re.free = fn(regex: table) -> :nil
+

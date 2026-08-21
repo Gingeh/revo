@@ -333,26 +333,6 @@ pub fn build(b: *Build) !void {
         }
 
         //
-        // docs step
-        //
-        const docs_step = b.step("docs", "splice generated stdlib reference into stdin markdown, print to stdout");
-        {
-            const docgen_mod = b.createModule(.{
-                .root_source_file = b.path("tools/docgen.zig"),
-                .target = target,
-                .optimize = .Debug,
-                .link_libc = !is_freestanding,
-            });
-            for (imports) |imp| {
-                docgen_mod.addImport(imp.name, imp.module);
-            }
-            docgen_mod.addImport("build_options", shared_build_options);
-            const docgen_exe = b.addExecutable(.{ .name = "docgen", .root_module = docgen_mod });
-            const run_docgen = b.addRunArtifact(docgen_exe);
-            docs_step.dependOn(&run_docgen.step);
-        }
-
-        //
         // check step
         //
         const check_step = b.step("check", "type-check without codegen or linking");
@@ -378,6 +358,8 @@ pub fn build(b: *Build) !void {
             const test_exe_step = b.step("test-exe", "test only the exe root");
             test_exe_step.dependOn(&b.addRunArtifact(exe_test).step);
             test_step.dependOn(test_exe_step);
+
+            test_step.dependOn(&b.addRunArtifact(c_test).step);
         }
 
         //

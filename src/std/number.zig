@@ -1,85 +1,12 @@
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "__call",
-        .placements = &.{api.mod("number")},
-        .params = &.{
-            .{ "value", "any" },
-        },
-        .ret = "number",
-        .doc = "converts value to number: number(\"12\") => 12",
-        .core_key = revo.core_atoms.__call,
-        .f = root.define(&.{ .any, .any }, call),
-    },
-    .{
-        .name = "is_nan?",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "bool",
-        .doc = "checks if number is NaN",
-        .f = root.define(&.{.number}, isNan),
-    },
-    .{
-        .name = "is_finite?",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "bool",
-        .doc = "checks if number is finite",
-        .f = root.define(&.{.number}, isFinite),
-    },
-    .{
-        .name = "is_inf?",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "bool",
-        .doc = "checks if number is infinite",
-        .f = root.define(&.{.number}, isInf),
-    },
-    .{
-        .name = "floor",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "number",
-        .doc = "largest integer <= self",
-        .f = root.define(&.{.number}, floor),
-    },
-    .{
-        .name = "ceil",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "number",
-        .doc = "smallest integer >= self",
-        .f = root.define(&.{.number}, ceil),
-    },
-    .{
-        .name = "round",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "number",
-        .doc = "rounds to nearest integer",
-        .f = root.define(&.{.number}, round),
-    },
-    .{
-        .name = "abs",
-        .placements = &.{ api.mod("number"), api.method("number", .number) },
-        .params = &.{
-            .{ "self", "number" },
-        },
-        .ret = "number",
-        .doc = "absolute value",
-        .f = root.define(&.{.number}, abs),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "__call", .f = root.define(&.{ .any, .any }, call) },
+    .{ .name = "is_nan?", .f = root.define(&.{.number}, isNan) },
+    .{ .name = "is_finite?", .f = root.define(&.{.number}, isFinite) },
+    .{ .name = "is_inf?", .f = root.define(&.{.number}, isInf) },
+    .{ .name = "floor", .f = root.define(&.{.number}, floor) },
+    .{ .name = "ceil", .f = root.define(&.{.number}, ceil) },
+    .{ .name = "round", .f = root.define(&.{.number}, round) },
+    .{ .name = "abs", .f = root.define(&.{.number}, abs) },
 };
 
 // -- [impl] ------------------------------------------------------------------
@@ -124,12 +51,12 @@ fn abs(args: []const Data, _: *VM) !NativeResult {
 test "number module and metatable" {
     try testing.topNumber("unwrap(number(\"12\"))", 12);
     try testing.topNumber("unwrap(number(3.5))", 3.5);
-    try testing.topTrue("number.is_nan(unwrap(number(\"nan\")))");
-    try testing.topTrue("unwrap(number(\"nan\")):isNan()");
-    try testing.topFalse("42:isNan()");
-    try testing.topTrue("42:isFinite()");
-    try testing.topFalse("42:isInf()");
-    try testing.topTrue("unwrap(number(\"inf\")):isInf()");
+    try testing.topTrue("number.is_nan?(unwrap(number(\"nan\")))");
+    try testing.topTrue("unwrap(number(\"nan\")):is_nan?()");
+    try testing.topFalse("42:is_nan?()");
+    try testing.topTrue("42:is_finite?()");
+    try testing.topFalse("42:is_inf?()");
+    try testing.topTrue("unwrap(number(\"inf\")):is_inf?()");
     try testing.topNumber("3.7:floor()", 3);
     try testing.topNumber("3.2:ceil()", 4);
     try testing.topNumber("3.5:round()", 4);

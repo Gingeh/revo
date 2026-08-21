@@ -160,7 +160,8 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\// function ptr type
         \\typedef void (*RevoFn)(void *vm, size_t argc, RevoData *argv, RevoData *out_result);
         \\
-        \\// function binding
+        \\// function binding; the typed interface lives in a sibling
+        \\// `<stem>.d.rv` manifest, not here
         \\typedef struct {
         \\  const char *name;
         \\  RevoFn fn;

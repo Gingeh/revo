@@ -1,0 +1,19 @@
+##!
+ the revo runtime itself: version, evaluating source, building modules to bytecode
+!##
+
+#*
+evaluates it as a module, gives you back its' return value
+you can treat it as a function's body
+*#
+pub declare revo.eval = fn(code: string) -> !any/string
+
+#*
+builds it as a module, gives you back its' bytecode in a string
+the string is only useful for writing to a file or executing
+*#
+pub declare revo.build = fn(code: string) -> !string
+
+#* version of your revo installation, like "revo v1.2.3" *#
+pub declare revo.version = fn() -> string
+

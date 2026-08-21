@@ -183,6 +183,8 @@ pub const FnParam = struct {
     name: []const u8,
     type_name: ?*TypeExpr = null,
     optional: bool = false,
+    /// type position only: trailing `...` marks an open arg list
+    variadic: bool = false,
 };
 
 pub const TableEntry = struct {
@@ -211,6 +213,7 @@ pub const DeclKind = enum {
     test_decl,
     suite_decl,
     type_alias_decl,
+    declare_decl,
 };
 
 pub const DeclNode = struct {
@@ -235,6 +238,7 @@ pub const Binding = struct {
     type_name: ?*TypeExpr = null,
     value: *Node,
     mutable: bool = false,
+    doc: ?[]const u8 = null,
 
     fn printAt(self: *const Binding, writer: *std.Io.Writer, comptime tag: []const u8, depth: ?usize) anyerror!void {
         try writer.print("({s}", .{tag});
@@ -320,12 +324,30 @@ pub const Expr = union(enum) {
     tuple: []*Node,
     tuple_pattern: []*Node,
     table: []TableEntry,
-    struct_def: struct { name: []const u8, items: []StructItem },
+    struct_def: struct { name: []const u8, name_span: Span, items: []StructItem },
     proc_macro: struct { name: []const u8, param: FnParam, body: *Node },
     quasiquote: Quasiquote,
     try_expr: *Node, // expr?
     orelse_expr: struct { left: *Node, right: *Node }, // expr orelse 42
-    type_alias: struct { name: []const u8, type_expr: *TypeExpr },
+    type_alias: TypeAlias,
+};
+
+/// `pub declare` alias: name, optional head (`fs.open` module path or
+/// `string:__index` core slot), `[T]` generics, annotated type
+pub const TypeAlias = struct {
+    name: []const u8,
+    name_span: Span,
+    type_expr: *TypeExpr,
+    doc: ?[]const u8 = null,
+    declare_head: ?DeclareHead = null,
+    declare_tps: []const []const u8 = &.{},
+};
+
+/// a declare's name may name a target instead of a plain ident:
+/// `fs.open`, `string:__index`, or a plain ident (`.`/head = null)
+pub const DeclareHead = union(enum) {
+    module: []const []const u8, // dotted path segments: "fs.open" -> &.{"fs", "open"}
+    core: struct { target: []const u8, key: []const u8 }, // "string:__index"
 };
 
 pub const Quasiquote = struct {
@@ -1318,6 +1340,7 @@ pub fn walkExpr(
         } }),
         .struct_def => |v| allocNode(allocator, expr.span, .{ .struct_def = .{
             .name = v.name,
+            .name_span = v.name_span,
             .items = blk: {
                 var out = try std.ArrayList(StructItem).initCapacity(allocator, v.items.len);
 
@@ -1349,7 +1372,9 @@ pub fn walkExpr(
         } }),
         .type_alias => |v| allocNode(allocator, expr.span, .{ .type_alias = .{
             .name = v.name,
+            .name_span = v.name_span,
             .type_expr = v.type_expr,
+            .doc = v.doc,
         } }),
         else => expr,
     };

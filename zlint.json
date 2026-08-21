@@ -5,7 +5,8 @@
 		"src/c",
 		"zig-pkg",
 		"src/std",
-		"src/main_wasm.zig"
+		"src/main_wasm.zig",
+		"examples"
 	],
 	"rules": {
 		"avoid-as": "warn",
@@ -16,7 +17,7 @@
 		"homeless-try": "error",
 		"no-catch-return": "warn",
 		"empty-file": "warn",
-		"line-length": "warn",
+		"line-length": "off",
 		"no-print": "off",
 		"returned-stack-reference": "off",
 		"duplicate-case": "off",

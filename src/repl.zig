@@ -96,13 +96,8 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
     const commands = &[_][]const u8{
         ":q",
         ":quit",
-        ":clear",
         ":features",
         ":h",
-        ":help",
-        ":doc",
-        ":apropos",
-        ":doctest",
     };
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, wslice)) {
@@ -236,6 +231,7 @@ pub const Session = struct {
     workspace: revo.lang.Workspace,
     source_acc: std.ArrayList(u8),
     project: revo.lang.Project = .{ .mode = .script, .root = "" },
+    last_file: ?revo.lang.FileId = null,
 
     pub fn init(vm: *VM, gpa: Allocator, io: ?std.Io) !Session {
         var workspace = try revo.lang.Workspace.initWithVm(vm, gpa);
@@ -261,17 +257,6 @@ pub const Session = struct {
         self.source_acc.deinit(self.gpa);
         self.workspace.deinit();
         self.project.deinit(self.gpa);
-    }
-
-    fn clear(self: *Session) void {
-        self.source_acc.clearRetainingCapacity();
-        self.vm.globals.clearRetainingCapacity();
-        self.vm.const_globals.clearRetainingCapacity();
-        // restore stdlib globals after clr
-        var it = self.vm.stdlib_globals.iterator();
-        while (it.next()) |entry| {
-            self.vm.globals.put(entry.key_ptr.*, entry.value_ptr.*) catch {};
-        }
     }
 
     fn clearSnippet(self: *Session) void {
@@ -301,27 +286,29 @@ pub const Session = struct {
         try out.writeAll(buf.written());
     }
 
-    fn runDocBuiltin(self: *Session, out: *std.Io.Writer, builtin_name: []const u8, topic: ?[]const u8) !void {
-        const callee = self.vm.getGlobal(builtin_name) orelse {
-            try out.print("missing builtin: {s}\n", .{builtin_name});
-            return;
-        };
-        const result = if (topic) |t| blk: {
-            const arg = try self.vm.ownDataString(t);
-            break :blk self.vm.callFunction(callee, &[_]revo.Data{arg}) catch |err| {
-                try out.print("{s} failed: {}\n", .{ builtin_name, err });
-                return;
-            };
-        } else self.vm.callFunction(callee, &[_]revo.Data{}) catch |err| {
-            try out.print("{s} failed: {}\n", .{ builtin_name, err });
-            return;
-        };
-
-        var rendered = std.Io.Writer.Allocating.init(self.gpa);
-        defer rendered.deinit();
-        try result.write(&rendered.writer, self.vm, .display);
-        try out.writeAll(rendered.written());
-        try out.writeAll("\n");
+    /// :h <name> - same info as editor hover: session decls first, then stdlib
+    fn helpTopic(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
+        if (self.last_file) |fid| {
+            if (try self.workspace.hoverByName(self.gpa, fid, name)) |text| {
+                defer self.gpa.free(text);
+                try out.writeAll(text);
+                try out.writeAll("\n");
+                return true;
+            }
+        }
+        if (revo.std_lib.api.find(name)) |spec| {
+            var buf = std.Io.Writer.Allocating.init(self.gpa);
+            defer buf.deinit();
+            try revo.std_lib.api.renderSignature(&buf.writer, spec.*);
+            try out.writeAll(buf.written());
+            try out.writeAll("\n");
+            if (spec.doc.len > 0) {
+                try out.writeAll(spec.doc);
+                try out.writeAll("\n");
+            }
+            return true;
+        }
+        return false;
     }
 
     pub fn step(self: *Session, out: *std.Io.Writer, raw_line: []const u8) !bool {
@@ -331,54 +318,21 @@ pub const Session = struct {
         if (line.len == 0) return true;
         if (std.mem.eql(u8, line, ":q") or std.mem.eql(u8, line, ":quit")) return false;
 
-        if (std.mem.eql(u8, line, ":clear")) {
-            self.clear();
-            try out.writeAll("session cleared\n");
-            return true;
-        }
-
         if (std.mem.eql(u8, line, ":features")) {
             try out.print("isocline={any}, lsp={any}\n", .{ build_options.isocline, build_options.lsp_enabled });
             return true;
         }
 
-        if (std.mem.eql(u8, line, ":h") or std.mem.eql(u8, line, ":help")) {
-            try self.runDocBuiltin(out, "help", null);
+        if (std.mem.eql(u8, line, ":h")) {
+            try out.writeAll("usage: :h <name>\n");
             return true;
         }
 
-        if (std.mem.startsWith(u8, line, ":help ")) {
-            try self.runDocBuiltin(out, "help", std.mem.trim(u8, line[6..], " \t"));
-            return true;
-        }
-
-        if (std.mem.startsWith(u8, line, ":doc ")) {
-            try self.runDocBuiltin(out, "doc", std.mem.trim(u8, line[5..], " \t"));
-            return true;
-        }
-
-        if (std.mem.eql(u8, line, ":doc")) {
-            try self.runDocBuiltin(out, "help", "doc");
-            return true;
-        }
-
-        if (std.mem.startsWith(u8, line, ":apropos ")) {
-            try self.runDocBuiltin(out, "apropos", std.mem.trim(u8, line[9..], " \t"));
-            return true;
-        }
-
-        if (std.mem.eql(u8, line, ":apropos")) {
-            try out.writeAll("usage: :apropos <term>\n");
-            return true;
-        }
-
-        if (std.mem.eql(u8, line, ":doctest")) {
-            try self.runDocBuiltin(out, "doctest", null);
-            return true;
-        }
-
-        if (std.mem.startsWith(u8, line, ":doctest ")) {
-            try self.runDocBuiltin(out, "doctest", std.mem.trim(u8, line[9..], " \t"));
+        if (std.mem.startsWith(u8, line, ":h ")) {
+            const topic = std.mem.trim(u8, line[3..], " \t");
+            if (!try self.helpTopic(out, topic)) {
+                try out.print("no docs for {s}\n", .{topic});
+            }
             return true;
         }
 
@@ -413,6 +367,7 @@ pub const Session = struct {
             try out.print("repl open error: {}\n", .{err});
             return true;
         };
+        self.last_file = file_id;
 
         var analysis = self.workspace.analyzeDetailed(self.gpa, file_id, .{}) catch |err| {
             try out.print("repl build error: {}\n", .{err});
@@ -465,7 +420,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     const writer = &out.interface;
 
     try writer.print(
-        "revo {s} repl -- type :q to exit, :clear to reset session\n",
+        "revo {s} repl -- type :q to exit, :h <name> for docs\n",
         .{build_options.version},
     );
     try writer.print("\x1b[0;95m# {s}\x1b[0m\n", .{
@@ -510,7 +465,8 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             sigint_received.store(false, .seq_cst);
             try writer.writeAll("\n");
             try writer.flush();
-            session.clear();
+            session.clearSnippet();
+            session.last_file = null;
             continue;
         }
 
@@ -600,17 +556,43 @@ test "repl handles commands" {
     const alloc = arena.allocator();
     var env = try initTestEnv(alloc);
 
-    try env.vm.globals.put(1, revo.Data.new.nil());
-    try env.vm.const_globals.put(2, {});
-    try env.session.source_acc.appendSlice(std.testing.allocator, "pending");
+    try std.testing.expect(try env.session.step(&env.out.writer, ":features"));
+    try std.testing.expect(std.mem.find(u8, env.out.written(), "isocline=") != null);
+    env.out.clearRetainingCapacity();
 
-    try std.testing.expect(try env.session.step(&env.out.writer, ":clear"));
-    try std.testing.expect(!env.vm.globals.contains(1));
-    try std.testing.expectEqual(@as(usize, 0), env.vm.const_globals.count());
-    try std.testing.expectEqual(@as(usize, 0), env.session.source_acc.items.len);
-    try std.testing.expect(std.mem.find(u8, env.out.written(), "session cleared") != null);
-    try std.testing.expect(try env.session.step(&env.out.writer, ":help"));
+    try std.testing.expect(try env.session.step(&env.out.writer, ":h"));
+    try std.testing.expect(std.mem.find(u8, env.out.written(), "usage: :h <name>") != null);
     try std.testing.expect(!(try env.session.step(&env.out.writer, ":q")));
+}
+
+test "repl :h shows docs like hover" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    _ = try env.session.step(&env.out.writer,
+        \\ #* asdf *#
+        \\ global hi = fn() 5
+    );
+    env.out.clearRetainingCapacity();
+
+    _ = try env.session.step(&env.out.writer, ":h hi");
+    const hi_help = env.out.written();
+    try std.testing.expect(std.mem.find(u8, hi_help, "fn hi()") != null);
+    try std.testing.expect(std.mem.find(u8, hi_help, "asdf") != null);
+}
+
+test "repl :h falls back to stdlib docs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    _ = try env.session.step(&env.out.writer, ":h print");
+    const help = env.out.written();
+    try std.testing.expect(std.mem.find(u8, help, "print(") != null);
+    try std.testing.expect(std.mem.find(u8, help, "prints values to stdout") != null);
 }
 
 test "repl keeps globals after runtime failure" {

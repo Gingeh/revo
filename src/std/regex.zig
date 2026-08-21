@@ -7,47 +7,12 @@ const api = @import("api.zig");
 const root = @import("root.zig");
 const NativeResult = root.NativeResult;
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "compile",
-        .placements = &.{api.mod("re")},
-        .params = &.{.{ "pattern", "string" }},
-        .ret = "table",
-        .doc = "compile a regex pattern into a reusable handle",
-        .f = root.define(&.{.string}, compileFn),
-    },
-    .{
-        .name = "is_match",
-        .placements = &.{api.mod("re")},
-        .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
-        .ret = "bool",
-        .doc = "test if regex matches anywhere in haystack; pass a string for one-shot compile",
-        .f = root.define(&.{ .any, .string }, isMatchFn),
-    },
-    .{
-        .name = "find",
-        .placements = &.{api.mod("re")},
-        .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
-        .ret = "string | :nil",
-        .doc = "return first match or nil; pass a string for one-shot compile",
-        .f = root.define(&.{ .any, .string }, findFn),
-    },
-    .{
-        .name = "find_all",
-        .placements = &.{api.mod("re")},
-        .params = &.{ .{ "regex", "table | string" }, .{ "haystack", "string" } },
-        .ret = "function",
-        .doc = "return an iterator over all matches; pass a string for one-shot compile",
-        .f = root.define(&.{ .any, .string }, findAllFn),
-    },
-    .{
-        .name = "free",
-        .placements = &.{api.mod("re")},
-        .params = &.{.{ "regex", "table" }},
-        .ret = ":nil",
-        .doc = "free a compiled regex handle",
-        .f = root.define(&.{.table}, freeFn),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "compile", .f = root.define(&.{.string}, compileFn) },
+    .{ .name = "is_match", .f = root.define(&.{ .any, .string }, isMatchFn) },
+    .{ .name = "find", .f = root.define(&.{ .any, .string }, findFn) },
+    .{ .name = "find_all", .f = root.define(&.{ .any, .string }, findAllFn) },
+    .{ .name = "free", .f = root.define(&.{.table}, freeFn) },
 };
 
 fn getRegexFromTable(val: Data, vm: *VM) !*mvzr.Regex {

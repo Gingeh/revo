@@ -35,13 +35,13 @@ x for done
     ```
   - [ ] doctests (like ex)
     ```ruby
-    ## @doc
+    #*
     > double(n: positive number) -> n * 2
     >> double(2)
     (:ok, 4)
     >> double("hi")
     (:err, "arg 0 is not a positive number")
-    ##
+    *#
     fn double(n: number) match n
     | x when x > 0 and number?(x) ok(x*2)
     | _ err("arg 0 is not a positive number")

@@ -1,39 +1,211 @@
-// stdlib as data. modules publish `pub const specs: []const FnSpec`
-// and `registerAll` installs everything in one walk so metatable
-// methods added by later specs merge into earlier ones
+// stdlib as data: sigs and docs live in `src/std/iface/*.d.rv`, one file
+// per group. `#* ... *#` blocks are markdown docs (bare ``` fences for
+// code), `pub declare <head> = fn(...) -> ret` lines are sigs, `#`/`##`
+// lines are editorial comments. heads may carry a `[T]` generic suffix; a
+// bare `__call`/`__index` head sets the core key. zig supplies impls only
+// (`pub const impls: []const api.Impl` per file).
+//
+// `loadAllSpecs` merges the two at boot; a missing or orphaned impl is a
+// hard error, so docs can't drift from the runtime. the primitive type
+// metatable *is* the module table: dynamic `x:method()` dispatch gets a
+// single direct `getRaw`, numeric indexing the one exception via the
+// `__index` native stashed inside the module table
 
 const std = @import("std");
 
 const revo = @import("../root.zig");
+const ast = @import("../lang/ast.zig");
 const Data = revo.Data;
 const root = @import("root.zig");
 const TypeSpec = root.TypeSpec;
 const NativeFunc = root.NativeFunc;
 
-pub const all_specs: []const []const FnSpec = &.{
-    @import("root.zig").root_specs,
-    @import("number.zig").specs,
-    @import("string.zig").specs,
-    @import("table.zig").specs,
-    @import("tuple.zig").specs,
-    @import("iter.zig").specs,
-    @import("math.zig").specs,
-    @import("json.zig").specs,
-    @import("time.zig").specs,
-    @import("net.zig").specs,
-    @import("fs.zig").specs,
-    @import("revo.zig").specs,
-    @import("compress.zig").specs,
-    @import("rng.zig").specs,
+pub const regex_on = @import("build_options").regex;
+
+pub const IfaceGroup = struct {
+    name: []const u8,
+    src: []const u8,
 };
 
-/// everything `register_stdlib` installs: all_specs plus the os-bound
-/// globals and the optional regex module. the single composition used by
-/// the runtime registration and the semantic checker alike
-pub const full_specs: []const []const FnSpec = if (@import("build_options").regex)
-    all_specs ++ [_][]const FnSpec{ @import("root.zig").root_specs_os, @import("root.zig").regex_specs }
-else
-    all_specs ++ [_][]const FnSpec{@import("root.zig").root_specs_os};
+pub const iface_groups: []const IfaceGroup = &.{
+    .{ .name = "root", .src = @embedFile("iface/root.d.rv") },
+    .{ .name = "os", .src = @embedFile("iface/os.d.rv") },
+    .{ .name = "re", .src = @embedFile("iface/re.d.rv") },
+    .{ .name = "number", .src = @embedFile("iface/number.d.rv") },
+    .{ .name = "string", .src = @embedFile("iface/string.d.rv") },
+    .{ .name = "table", .src = @embedFile("iface/table.d.rv") },
+    .{ .name = "tuple", .src = @embedFile("iface/tuple.d.rv") },
+    .{ .name = "iter", .src = @embedFile("iface/iter.d.rv") },
+    .{ .name = "math", .src = @embedFile("iface/math.d.rv") },
+    .{ .name = "json", .src = @embedFile("iface/json.d.rv") },
+    .{ .name = "time", .src = @embedFile("iface/time.d.rv") },
+    .{ .name = "net", .src = @embedFile("iface/net.d.rv") },
+    .{ .name = "fs", .src = @embedFile("iface/fs.d.rv") },
+    .{ .name = "revo", .src = @embedFile("iface/revo.d.rv") },
+    .{ .name = "compress", .src = @embedFile("iface/compress.d.rv") },
+    .{ .name = "rng", .src = @embedFile("iface/rng.d.rv") },
+};
+
+/// the zig side of one spec: registry key + implementation
+pub const Impl = struct {
+    name: []const u8,
+    f: NativeFunc,
+};
+
+pub const ImplGroup = struct {
+    name: []const u8,
+    impls: []const Impl,
+};
+
+/// the `re` group is dropped at comptime when regex is off so the
+/// mvzr/io chain never reaches targets like freestanding wasm
+pub const impl_groups: []const ImplGroup = if (regex_on) &.{
+    .{ .name = "root", .impls = @import("root.zig").root_impls },
+    .{ .name = "os", .impls = @import("root.zig").os_impls },
+    .{ .name = "re", .impls = @import("regex.zig").impls },
+    .{ .name = "number", .impls = @import("number.zig").impls },
+    .{ .name = "string", .impls = @import("string.zig").impls },
+    .{ .name = "table", .impls = @import("table.zig").impls },
+    .{ .name = "tuple", .impls = @import("tuple.zig").impls },
+    .{ .name = "iter", .impls = @import("iter.zig").impls },
+    .{ .name = "math", .impls = @import("math.zig").impls },
+    .{ .name = "json", .impls = @import("json.zig").impls },
+    .{ .name = "time", .impls = @import("time.zig").impls },
+    .{ .name = "net", .impls = @import("net.zig").impls },
+    .{ .name = "fs", .impls = @import("fs.zig").impls },
+    .{ .name = "revo", .impls = @import("revo.zig").impls },
+    .{ .name = "compress", .impls = @import("compress.zig").impls },
+    .{ .name = "rng", .impls = @import("rng.zig").impls },
+} else &.{
+    .{ .name = "root", .impls = @import("root.zig").root_impls },
+    .{ .name = "os", .impls = @import("root.zig").os_impls },
+    .{ .name = "number", .impls = @import("number.zig").impls },
+    .{ .name = "string", .impls = @import("string.zig").impls },
+    .{ .name = "table", .impls = @import("table.zig").impls },
+    .{ .name = "tuple", .impls = @import("tuple.zig").impls },
+    .{ .name = "iter", .impls = @import("iter.zig").impls },
+    .{ .name = "math", .impls = @import("math.zig").impls },
+    .{ .name = "json", .impls = @import("json.zig").impls },
+    .{ .name = "time", .impls = @import("time.zig").impls },
+    .{ .name = "net", .impls = @import("net.zig").impls },
+    .{ .name = "fs", .impls = @import("fs.zig").impls },
+    .{ .name = "revo", .impls = @import("revo.zig").impls },
+    .{ .name = "compress", .impls = @import("compress.zig").impls },
+    .{ .name = "rng", .impls = @import("rng.zig").impls },
+};
+
+/// merged, runtime view of the stdlib surface; built by `loadAllSpecs`
+pub var full_specs: []const []const FnSpec = &.{};
+
+const LiveSet = struct {
+    alloc: std.mem.Allocator,
+    groups: []const []const FnSpec,
+};
+
+/// every loaded set stays alive until its owning VM deinits, even when a
+/// newer load becomes the current `full_specs`; the registry keeps the
+/// memory findable for freeing without a global refcount
+var live: [1024]?LiveSet = .{null} ** 1024;
+
+fn registerSet(alloc: std.mem.Allocator, groups: []const []const FnSpec) !void {
+    for (&live) |*slot| {
+        if (slot.* == null) {
+            slot.* = .{ .alloc = alloc, .groups = groups };
+            return;
+        }
+    }
+    return error.SpecSetTableFull;
+}
+
+/// parse every iface group, pair each spec with its zig impl, and publish
+/// the result as the runtime `full_specs` for this process. the returned
+/// set is owned by the caller's VM; `VM.deinit` releases it again via
+/// `freeLoadedSpecs` (see below). a second load swaps `full_specs` without
+/// touching the previous owner's memory
+pub fn loadAllSpecs(alloc: std.mem.Allocator) ![]const []const FnSpec {
+    var groups = try std.ArrayList([]const FnSpec).initCapacity(alloc, impl_groups.len);
+    errdefer {
+        for (groups.items) |g| {
+            for (g) |s| s.deinit(alloc);
+            alloc.free(g);
+        }
+        groups.deinit(alloc);
+    }
+    for (impl_groups) |ig| {
+        const src = ifaceSrc(ig.name);
+        const specs = try parseGroup(alloc, src);
+        for (specs, 0..) |*s, i| {
+            var k: usize = 0;
+            if (i > 0) for (specs[0..i]) |other| {
+                if (std.mem.eql(u8, other.name, s.name)) k += 1;
+            };
+            s.f = implFor(ig.impls, s.name, k) orelse return error.StdlibImplMissing;
+        }
+        for (ig.impls) |imp| {
+            if (findIn(specs, imp.name) == null) return error.StdlibImplUnused;
+        }
+        try groups.append(alloc, specs);
+    }
+    const owned = try groups.toOwnedSlice(alloc);
+    try registerSet(alloc, owned);
+    full_specs = owned;
+    return owned;
+}
+
+/// drop the merged specs owned by one VM; `full_specs` falls back to the
+/// newest set still alive. called from `VM.deinit` so test allocators
+/// stay clean
+pub fn freeLoadedSpecs(alloc: std.mem.Allocator, owner: []const []const FnSpec) void {
+    if (owner.len == 0) return;
+    for (&live) |*slot| {
+        const ls = slot.* orelse continue;
+        if (ls.groups.ptr != owner.ptr) continue;
+        if (ls.alloc.ptr != alloc.ptr) return;
+        for (owner) |g| {
+            for (g) |s| {
+                s.deinit(alloc);
+            }
+            alloc.free(g);
+        }
+        alloc.free(owner);
+        slot.* = null;
+        full_specs = newestLive();
+        return;
+    }
+}
+
+fn newestLive() []const []const FnSpec {
+    var newest: []const []const FnSpec = &.{};
+    for (live) |slot| {
+        if (slot) |ls| newest = ls.groups;
+    }
+    return newest;
+}
+
+fn ifaceSrc(name: []const u8) []const u8 {
+    for (iface_groups) |ig| {
+        if (std.mem.eql(u8, ig.name, name)) return ig.src;
+    }
+    return "";
+}
+
+/// the k-th spec with this name takes the k-th impl with the same name
+fn implFor(impls: []const Impl, name: []const u8, k: usize) ?NativeFunc {
+    var seen: usize = 0;
+    for (impls) |imp| {
+        if (!std.mem.eql(u8, imp.name, name)) continue;
+        if (seen == k) return imp.f;
+        seen += 1;
+    }
+    return null;
+}
+
+fn findIn(specs: []const FnSpec, name: []const u8) ?*const FnSpec {
+    for (specs) |*s| {
+        if (std.mem.eql(u8, s.name, name)) return s;
+    }
+    return null;
+}
 
 /// first match wins
 pub fn find(name: []const u8) ?*const FnSpec {
@@ -43,50 +215,383 @@ pub fn find(name: []const u8) ?*const FnSpec {
     return null;
 }
 
-/// name(p1: t1, p2: t2) -> ret
+/// a sig is the rendered signature: `fs.open(path: string) -> !table`
 pub fn renderSignature(w: *std.Io.Writer, spec: FnSpec) !void {
-    try w.print("{s}(", .{spec.name});
-    for (spec.params, 0..) |p, i| {
-        if (i > 0) try w.writeAll(", ");
-        try w.print("{s}: {s}", .{ p[0], p[1] });
-    }
-    try w.writeAll(")");
-    if (spec.ret.len > 0) {
-        try w.print(" -> {s}", .{spec.ret});
-    }
+    try w.writeAll(spec.sig);
 }
 
 pub const Kind = enum { global, module, method };
 
-pub const Placement = struct {
+pub const Head = struct {
     kind: Kind,
     module: ?[]const u8 = null,
     target: ?TypeSpec = null,
 };
+
+/// the part of a sig before `(`, e.g. `tuple:len`, `fs.open`, or `len`.
+/// `head:name` is a metatable method on `head`, `head.name` a module fn.
+/// a generic `[T]` suffix on the name is stripped: `tuple:unwrap[T]` -> `tuple:unwrap`
+pub fn headOf(sig: []const u8) Head {
+    const end = std.mem.indexOfScalar(u8, sig, '(') orelse sig.len;
+    var head = sig[0..end];
+    if (std.mem.indexOfScalar(u8, head, '[')) |open| head = head[0..open];
+    if (std.mem.indexOfScalar(u8, head, ':')) |i| {
+        return .{ .kind = .method, .target = root.typeFromName(head[0..i]) };
+    }
+    if (std.mem.lastIndexOfScalar(u8, head, '.')) |i| {
+        return .{ .kind = .module, .module = head[0..i] };
+    }
+    return .{ .kind = .global };
+}
 
 /// (name, type-string)
 pub const Param = struct { []const u8, []const u8 };
 
 pub const FnSpec = struct {
     name: []const u8,
-    placements: []const Placement,
+    sig: []const u8,
     params: []const Param,
     ret: []const u8,
     doc: []const u8 = "",
     variadic: bool = false,
+    /// a plain value binding (`const width = 80`), not callable
+    is_value: bool = false,
     /// when set, the metatable key is this core atom (e.g. `__index`)
     /// instead of `internAtom(name)`. only `__index` uses it today
     core_key: ?revo.core_atoms = null,
     f: NativeFunc,
+
+    /// release one spec's owned strings, not the spec struct itself
+    pub fn deinit(self: *const FnSpec, alloc: std.mem.Allocator) void {
+        alloc.free(self.sig);
+        alloc.free(self.name);
+        for (self.params) |p| {
+            alloc.free(p[0]);
+            alloc.free(p[1]);
+        }
+        alloc.free(self.params);
+        alloc.free(self.ret);
+        alloc.free(self.doc);
+    }
 };
 
-pub const g: Placement = .{ .kind = .global };
-pub fn mod(comptime m: []const u8) Placement {
-    return .{ .kind = .module, .module = m };
+// -- [iface] -----------------------------------------------------------------
+
+/// parse one `.d.rv` group with the real language front-end and collect the
+/// `pub declare` decls. the source is ordinary revo - `#* ... *#` doc
+/// comments, `#`/`##` comments and `fn(...) -> t` type expressions all work - so the
+/// doc/sig extraction is just an AST walk, no string scanning
+fn parseGroup(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const parsed = try revo.lang.parseSourceReport(a, src);
+    const root_node = switch (parsed) {
+        .ok => |node| node,
+        .err => return error.IfaceParseFailed,
+    };
+
+    return collectSpecs(alloc, root_node, true);
 }
-pub fn method(comptime m: []const u8, t: TypeSpec) Placement {
-    return .{ .kind = .method, .module = m, .target = t };
+
+/// the spec surface of a parsed node: `pub declare` aliases, plus,outside
+/// iface files, `#* ... *#`-attributed plain fn bindings
+pub fn collectSpecs(alloc: std.mem.Allocator, node: *const revo.lang.Node, iface: bool) ![]FnSpec {
+    var specs = std.ArrayList(FnSpec).empty;
+    errdefer specs.deinit(alloc);
+
+    const items: []const *const revo.lang.Node = if (node.expr != .block) &.{node} else node.expr.block;
+    for (items) |item| {
+        // method-style `fn math:twice(x)` parses to a bare assign_expr, no
+        // decl wrapper - only docgen collects these
+        if (item.expr == .assign_expr) {
+            if (iface) continue;
+            const v = item.expr.assign_expr.value;
+            if (v.expr != .fn_expr) continue;
+            if (v.expr.fn_expr.doc == null) continue;
+            try specs.append(alloc, try specFromAssign(alloc, item.expr.assign_expr, v.expr.fn_expr.doc));
+            continue;
+        }
+        if (item.expr != .decl) continue;
+        const d = item.expr.decl;
+        switch (d.inner.expr) {
+            .type_alias => |t| {
+                if (d.kind != .declare_decl) continue;
+                try specs.append(alloc, try specFromDecl(alloc, t, iface));
+            },
+            .binding => |b| {
+                if (iface) continue;
+                if (b.doc == null) continue;
+                if (b.target.expr != .ident) continue;
+                if (b.value.expr == .fn_expr) {
+                    try specs.append(alloc, try specFromBinding(alloc, b));
+                } else {
+                    try specs.append(alloc, try specFromConst(alloc, b.target.expr.ident, b.doc));
+                }
+            },
+            else => {},
+        }
+    }
+    return specs.toOwnedSlice(alloc);
 }
+
+/// a `#* ... *#`-attributed `fn obj:name(...)` assignment, spec'd like a
+/// declare: head is the `obj:name` text so headOf types it as a method
+fn specFromAssign(alloc: std.mem.Allocator, ae: anytype, doc: ?[]const u8) !FnSpec {
+    const t = ae.value.expr.fn_expr;
+    const ix = switch (ae.target.expr) {
+        .index => |x| x,
+        else => return error.IfaceBadBindingTarget,
+    };
+    if (ix.object.expr != .ident) return error.IfaceBadBindingTarget;
+    const key: []const u8 = switch (ix.key.expr) {
+        .hash => |h| h,
+        .ident => |n| n,
+        else => return error.IfaceBadBindingTarget,
+    };
+    const head = try std.fmt.allocPrint(alloc, "{s}:{s}", .{ ix.object.expr.ident, key });
+    defer alloc.free(head);
+    return specFromFn(alloc, head, head, t.params, t.return_type, doc, false);
+}
+
+/// a `#* ... *#`-attributed `const f = fn(...)` binding, spec'd like a declare
+fn specFromBinding(alloc: std.mem.Allocator, b: ast.Binding) !FnSpec {
+    const t = b.value.expr.fn_expr;
+    return specFromFn(alloc, b.target.expr.ident, b.target.expr.ident, t.params, t.return_type, b.doc, false);
+}
+
+/// a `#* ... *#`-attributed non-fn binding (`const a = 5`): named value with
+/// no call signature, so the spec's sig is just the name
+fn specFromConst(alloc: std.mem.Allocator, name: []const u8, doc: ?[]const u8) !FnSpec {
+    var doc_buf = std.ArrayList(u8).empty;
+    defer doc_buf.deinit(alloc);
+    if (doc) |d| {
+        try doc_buf.appendSlice(alloc, d);
+        try docFromMarkdown(alloc, &doc_buf);
+    }
+    return .{
+        .name = try alloc.dupe(u8, name),
+        .sig = try alloc.dupe(u8, name),
+        .params = &.{},
+        .ret = "",
+        .doc = try alloc.dupe(u8, std.mem.trimEnd(u8, doc_buf.items, "\n")),
+        .is_value = true,
+        .f = undefined,
+    };
+}
+
+pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, strict: bool) !FnSpec {
+    const tps = if (alias.declare_tps.len > 0) blk: {
+        const joined = try std.mem.join(alloc, ", ", alias.declare_tps);
+        defer alloc.free(joined);
+        break :blk try std.fmt.allocPrint(alloc, "[{s}]", .{joined});
+    } else "";
+
+    var name: []const u8 = alias.name;
+    const head = if (alias.declare_head) |head|
+        switch (head) {
+            .module => |segs| blk: {
+                name = segs[segs.len - 1];
+                const joined = try std.mem.join(alloc, ".", segs);
+                defer alloc.free(joined);
+                break :blk try std.fmt.allocPrint(alloc, "{s}{s}", .{ joined, tps });
+            },
+            .core => |c| blk: {
+                name = c.key;
+                break :blk try std.fmt.allocPrint(alloc, "{s}:{s}{s}", .{ c.target, c.key, tps });
+            },
+        }
+    else
+        try std.fmt.allocPrint(alloc, "{s}{s}", .{ alias.name, tps });
+    defer alloc.free(head);
+    if (tps.len > 0) alloc.free(tps);
+
+    const fn_type = switch (alias.type_expr.kind) {
+        .function => |f| f,
+        else => return error.IfaceDeclNotAFunction,
+    };
+
+    return specFromFn(alloc, name, head, fn_type.params, fn_type.return_type, alias.doc, strict);
+}
+
+/// shared assembly: params, sig text, doc normalization, core key. `strict`
+/// iface sources require every param typed; plain fn bindings may skip
+pub fn specFromFn(
+    alloc: std.mem.Allocator,
+    name: []const u8,
+    head: []const u8,
+    params_in: []const ast.FnParam,
+    return_type: ?*ast.TypeExpr,
+    doc: ?[]const u8,
+    strict: bool,
+) !FnSpec {
+    var params = try std.ArrayList(Param).initCapacity(alloc, params_in.len);
+    errdefer params.deinit(alloc);
+    var variadic = false;
+    var rendered = std.ArrayList(u8).empty;
+    defer rendered.deinit(alloc);
+    for (params_in) |p| {
+        rendered.clearRetainingCapacity();
+        if (p.type_name) |tn| {
+            try renderType(alloc, &rendered, tn);
+        } else if (strict) {
+            return error.IfaceParamNotTyped;
+        }
+        if (p.variadic) {
+            variadic = true;
+            try rendered.append(alloc, '.');
+            try rendered.append(alloc, '.');
+            try rendered.append(alloc, '.');
+        }
+        try params.append(alloc, .{ try alloc.dupe(u8, p.name), try alloc.dupe(u8, rendered.items) });
+    }
+
+    var args = std.ArrayList(u8).empty;
+    defer args.deinit(alloc);
+    for (params.items, 0..) |p, i| {
+        if (i > 0) try args.appendSlice(alloc, ", ");
+        try args.appendSlice(alloc, p[0]);
+        if (p[1].len > 0) {
+            try args.appendSlice(alloc, ": ");
+            try args.appendSlice(alloc, p[1]);
+        }
+    }
+
+    var ret = std.ArrayList(u8).empty;
+    defer ret.deinit(alloc);
+    if (return_type) |r| try renderType(alloc, &ret, r);
+
+    const sig = if (ret.items.len > 0)
+        try std.fmt.allocPrint(alloc, "{s}({s}) -> {s}", .{ head, args.items, ret.items })
+    else
+        try std.fmt.allocPrint(alloc, "{s}({s})", .{ head, args.items });
+
+    var doc_buf = std.ArrayList(u8).empty;
+    defer doc_buf.deinit(alloc);
+    if (doc) |d| {
+        try doc_buf.appendSlice(alloc, d);
+        try docFromMarkdown(alloc, &doc_buf);
+    }
+
+    var core_key: ?revo.core_atoms = null;
+    if (std.mem.startsWith(u8, name, "__")) {
+        if (std.meta.stringToEnum(revo.core_atoms, name)) |atom| {
+            core_key = atom;
+        } else if (headOf(head).kind != .global) {
+            // a __-name on a target must be a real metatable slot; bare
+            // unknown __names are plain globals (__internal_dotest etc)
+            return error.BadCoreKey;
+        }
+    }
+
+    return .{
+        .name = try alloc.dupe(u8, name),
+        .sig = sig,
+        .params = try params.toOwnedSlice(alloc),
+        .ret = try alloc.dupe(u8, ret.items),
+        .doc = try alloc.dupe(u8, std.mem.trimEnd(u8, doc_buf.items, "\n")),
+        .variadic = variadic,
+        .core_key = core_key,
+        .f = undefined,
+    };
+}
+
+/// type expr back to the compact sig text: `number|atom`, `table?`,
+/// `(:err, T)`, `!table`. `?`-suffixed idents come back from the parser as
+/// a 2-union ending in `:nil` and are re-rendered with the `?` for docgen
+fn renderType(alloc: std.mem.Allocator, out: *std.ArrayList(u8), te: *const ast.TypeExpr) !void {
+    switch (te.kind) {
+        .named => |name| try out.appendSlice(alloc, name),
+        .atom => |name| try out.appendSlice(alloc, name),
+        .tuple => |items| {
+            try out.append(alloc, '(');
+            for (items, 0..) |it, i| {
+                if (i > 0) try out.appendSlice(alloc, ", ");
+                try renderType(alloc, out, it);
+            }
+            try out.append(alloc, ')');
+        },
+        .union_of => |variants| {
+            if (variants.len == 2 and variants[1].kind == .atom and
+                std.mem.eql(u8, variants[1].kind.atom, ":nil"))
+            {
+                try renderType(alloc, out, variants[0]);
+                try out.append(alloc, '?');
+            } else for (variants, 0..) |v, i| {
+                if (i > 0) try out.append(alloc, '|');
+                try renderType(alloc, out, v);
+            }
+        },
+        .function => |f| {
+            try out.appendSlice(alloc, "fn(");
+            for (f.params, 0..) |p, i| {
+                if (i > 0) try out.appendSlice(alloc, ", ");
+                try out.appendSlice(alloc, p.name);
+                if (p.type_name) |t| {
+                    try out.append(alloc, ':');
+                    try renderType(alloc, out, t);
+                }
+                if (p.variadic) try out.appendSlice(alloc, "...");
+            }
+            try out.append(alloc, ')');
+            if (f.return_type) |r| {
+                try out.appendSlice(alloc, " -> ");
+                try renderType(alloc, out, r);
+            }
+        },
+        .parameterized => |p| {
+            try out.appendSlice(alloc, p.name);
+            try out.append(alloc, '<');
+            for (p.params, 0..) |it, i| {
+                if (i > 0) try out.appendSlice(alloc, ", ");
+                try renderType(alloc, out, it);
+            }
+            try out.append(alloc, '>');
+        },
+        .error_union => |inner| {
+            try out.append(alloc, '!');
+            try renderType(alloc, out, inner);
+        },
+    }
+}
+
+/// markdown is the authoring form; strip fences and dedent the code block
+/// so docgen keeps rendering the prose/code shape it already knows
+fn docFromMarkdown(alloc: std.mem.Allocator, doc: *std.ArrayList(u8)) !void {
+    const raw = try alloc.dupe(u8, doc.items);
+    defer alloc.free(raw);
+    const fence = std.mem.indexOf(u8, raw, "```") orelse return;
+    const code_rest = raw[fence + 3 ..];
+    const code_start: usize = if (code_rest.len > 0 and code_rest[0] == '\n') 1 else 0;
+    const code_body = code_rest[code_start..];
+    const close = std.mem.indexOf(u8, code_body, "```") orelse return error.BadDoc;
+    const code = code_body[0..close];
+    const prose = std.mem.trimEnd(u8, raw[0..fence], "\n");
+
+    var min_indent: usize = std.math.maxInt(usize);
+    {
+        var it = std.mem.splitScalar(u8, code, '\n');
+        while (it.next()) |l| {
+            if (l.len == 0) continue;
+            var n: usize = 0;
+            while (n < l.len and l[n] == ' ') n += 1;
+            if (n < min_indent) min_indent = n;
+        }
+    }
+    if (min_indent == std.math.maxInt(usize)) min_indent = 0;
+
+    doc.clearRetainingCapacity();
+    try doc.appendSlice(alloc, prose);
+    try doc.appendSlice(alloc, "\n\n");
+    var it = std.mem.splitScalar(u8, code, '\n');
+    while (it.next()) |l| {
+        if (l.len >= min_indent) try doc.appendSlice(alloc, l[min_indent..]);
+        if (it.peek() != null) try doc.append(alloc, '\n');
+    }
+}
+
+// -- [register] --------------------------------------------------------------
 
 /// returns a Data value to anchor the metatable at `target`. the
 /// value itself is discarded; only the metatable slot matters
@@ -99,7 +604,7 @@ pub fn registerAll(
 ) !void {
     var module_funcs: std.StringHashMapUnmanaged(std.ArrayList(ModuleEntry)) = .empty;
     var module_calls: std.StringHashMapUnmanaged(revo.memory.FunctionID) = .empty;
-    var methods_by_target: std.AutoHashMapUnmanaged(TypeSpec, std.ArrayList(MethodEntry)) = .empty;
+    var indexers: std.AutoHashMapUnmanaged(TypeSpec, revo.memory.FunctionID) = .empty;
     var global_funcs: std.ArrayList(GlobalEntry) = .empty;
 
     defer {
@@ -107,34 +612,30 @@ pub fn registerAll(
         while (mit.next()) |e| e.value_ptr.deinit(vm.runtime.alloc);
         module_funcs.deinit(vm.runtime.alloc);
         module_calls.deinit(vm.runtime.alloc);
-        var tit = methods_by_target.iterator();
-        while (tit.next()) |e| e.value_ptr.deinit(vm.runtime.alloc);
-        methods_by_target.deinit(vm.runtime.alloc);
+        indexers.deinit(vm.runtime.alloc);
         global_funcs.deinit(vm.runtime.alloc);
     }
 
     for (groups) |specs| {
         for (specs) |spec| {
+            const head = headOf(spec.sig);
             const fn_id = try vm.installNative(spec.name, spec.f);
-            for (spec.placements) |p| switch (p.kind) {
+            switch (head.kind) {
                 .global => try global_funcs.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id }),
                 .module => {
                     if (spec.core_key == .__call) {
-                        try module_calls.put(vm.runtime.alloc, p.module.?, fn_id);
+                        try module_calls.put(vm.runtime.alloc, head.module.?, fn_id);
                     } else {
-                        const gop = try module_funcs.getOrPutValue(vm.runtime.alloc, p.module.?, .empty);
+                        const gop = try module_funcs.getOrPutValue(vm.runtime.alloc, head.module.?, .empty);
                         try gop.value_ptr.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id });
                     }
                 },
-                .method => {
-                    const gop = try methods_by_target.getOrPutValue(vm.runtime.alloc, p.target.?, .empty);
-                    try gop.value_ptr.append(vm.runtime.alloc, .{
-                        .name = spec.name,
-                        .fn_id = fn_id,
-                        .core_atom = spec.core_key,
-                    });
+                .method => if (spec.core_key == .__index) {
+                    try indexers.put(vm.runtime.alloc, head.target.?, fn_id);
+                } else {
+                    return error.SpecMethodUnplaceable;
                 },
-            };
+            }
         }
     }
 
@@ -155,22 +656,32 @@ pub fn registerAll(
     }
 
     {
-        var it = methods_by_target.iterator();
-        while (it.next()) |entry| {
-            const target = entry.key_ptr.*;
-            const methods = entry.value_ptr.items;
-            const proto = try prototype(target, vm);
-            const mt_id = try vm.tables.create();
-            for (methods) |m| {
-                if (m.core_atom) |core| {
-                    try vm.putInTableAtom(mt_id, @intFromEnum(core), m.fn_id);
-                } else {
-                    try vm.putInTable(mt_id, m.name, m.fn_id);
-                }
+        // the type metatable for each primitive iS its module table, so a
+        // dynamic `x:method()` resolves in one `getRaw`. the numeric-indexing
+        // natives are the only `__index` holders and live inside the module
+        // table, keeping the fallback path identical for all four targets
+        const primitives = [_]TypeSpec{ .number, .string, .tuple, .table };
+        for (primitives) |target| {
+            const module_tid = moduleTableFor(vm, target) orelse continue;
+            if (indexers.get(target)) |fn_id| {
+                try vm.putInTableAtom(module_tid, @intFromEnum(revo.core_atoms.__index), fn_id);
             }
-            try vm.setMetatable(proto, mt_id);
+            try vm.setMetatable(try prototype(target, vm), module_tid);
         }
     }
+}
+
+/// the module table for a primitive target, if one is registered
+fn moduleTableFor(vm: *revo.VM, target: TypeSpec) ?revo.memory.TableID {
+    const name = switch (target) {
+        .number => "number",
+        .string => "string",
+        .tuple => "tuple",
+        .table => "table",
+        else => return null,
+    };
+    const val = vm.stdlib_globals.get(vm.internAtom(name) catch return null) orelse return null;
+    return val.asTable();
 }
 
 const ModuleEntry = struct {
@@ -181,8 +692,86 @@ const GlobalEntry = struct {
     name: []const u8,
     fn_id: revo.memory.FunctionID,
 };
-const MethodEntry = struct {
-    name: []const u8,
-    fn_id: revo.memory.FunctionID,
-    core_atom: ?revo.core_atoms,
-};
+
+// -- [test] ------------------------------------------------------------------
+
+const testing = @import("std").testing;
+
+test "parseGroup round trip: sig, params, doc, variadic, core key" {
+    const src =
+        \\# random comment is skipped
+        \\#* single-line doc *#
+        \\pub declare iter.range = fn(bound: number, rest: number...) -> function
+        \\
+        \\#*
+        \\finds first occurrence
+        \\with a second line
+        \\*#
+        \\pub declare string:__index = fn(self: string, idx: any) -> string
+        \\#*
+        \\converts value
+        \\
+        \\```
+        \\fizz(1) => 2
+        \\```
+        \\*#
+        \\pub declare number.__call = fn(value: any) -> number
+        \\
+        \\#* generic suffix *#
+        \\pub declare tuple.unwrap_err[T] = fn(self: (:err, T)) -> T
+        \\
+        \\#* escaped "quotes" *#
+        \\pub declare debug = fn() -> table
+    ;
+    const specs = try parseGroup(testing.allocator, src);
+    defer {
+        for (specs) |s| s.deinit(testing.allocator);
+        testing.allocator.free(specs);
+    }
+    try testing.expectEqual(@as(usize, 5), specs.len);
+
+    const range = specs[0];
+    try testing.expectEqualStrings("range", range.name);
+    try testing.expectEqualStrings("iter.range(bound: number, rest: number...) -> function", range.sig);
+    try testing.expectEqual(@as(usize, 2), range.params.len);
+    try testing.expectEqualStrings("bound", range.params[0][0]);
+    try testing.expectEqualStrings("number", range.params[0][1]);
+    try testing.expectEqualStrings("rest", range.params[1][0]);
+    try testing.expectEqualStrings("number...", range.params[1][1]);
+    try testing.expect(range.variadic);
+    try testing.expectEqualStrings("single-line doc", range.doc);
+
+    const idx = specs[1];
+    try testing.expectEqualStrings("__index", idx.name);
+    try testing.expectEqual(revo.core_atoms.__index, idx.core_key.?);
+    try testing.expectEqualStrings("finds first occurrence\nwith a second line", idx.doc);
+
+    const call = specs[2];
+    try testing.expectEqualStrings("number.__call(value: any) -> number", call.sig);
+    try testing.expectEqual(revo.core_atoms.__call, call.core_key.?);
+    try testing.expectEqualStrings("converts value\n\nfizz(1) => 2", call.doc);
+
+    const unwrap_err = specs[3];
+    try testing.expectEqualStrings("tuple.unwrap_err[T](self: (:err, T)) -> T", unwrap_err.sig);
+    try testing.expectEqualStrings("unwrap_err", unwrap_err.name);
+    try testing.expectEqualStrings("(:err, T)", unwrap_err.params[0][1]);
+    try testing.expectEqualStrings("T", unwrap_err.ret);
+    try testing.expect(!unwrap_err.variadic);
+
+    const debug = specs[4];
+    try testing.expectEqualStrings("debug() -> table", debug.sig);
+    try testing.expectEqual(@as(usize, 0), debug.params.len);
+    try testing.expectEqualStrings("escaped \"quotes\"", debug.doc);
+}
+
+test "loadAllSpecs pairs every spec with its impl" {
+    const groups = try loadAllSpecs(testing.allocator);
+    var count: usize = 0;
+    for (full_specs) |g| for (g) |*s| {
+        try testing.expect(s.sig.len > 0);
+        count += 1;
+    };
+    try testing.expect(count > 100);
+    try testing.expectEqualStrings("floor", find("floor").?.name);
+    freeLoadedSpecs(testing.allocator, groups);
+}

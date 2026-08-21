@@ -187,7 +187,8 @@ pub export fn revo_foreign_ptr(val: Data) callconv(.c) ?*anyopaque {
     return val.asForeign();
 }
 
-/// load a shared library and register its revo_bindings as c functions
+/// register a shared lib's revo_bindings into the module table; types come
+/// from the sibling `<stem>.d.rv` manifest (`extensionManifestFor`)
 pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
     if (builtin.target.os.tag == .windows) {
         std.debug.print("error: dynamic library loading is not supported on windows\n", .{});
@@ -206,13 +207,9 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
 
     var i: usize = 0;
     while (@as(?[*:0]const u8, bindings_ptr[i].name) != null) : (i += 1) {
-        const b = bindings_ptr[i];
-        const name = std.mem.span(b.name);
-        const fn_ptr: CFnPtr = @ptrCast(@alignCast(b.fn_ptr));
-
         try registered.append(vm_ptr.runtime.alloc, .{
-            .name = name,
-            .fn_ptr = fn_ptr,
+            .name = std.mem.span(bindings_ptr[i].name),
+            .fn_ptr = @ptrCast(@alignCast(bindings_ptr[i].fn_ptr)),
         });
     }
 

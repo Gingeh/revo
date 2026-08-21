@@ -1,0 +1,12 @@
+# interface manifest for extension.so
+#
+# import "extension.so" picks this file up (same stem) and types all calls
+# against it - sigs in the .so itself are ignored while this exists
+#
+pub declare greet = fn(name: string) -> string
+pub declare add = fn(a: number, b: number) -> number
+pub declare echo = fn(s: string) -> string
+pub declare strlen = fn(s: string) -> number
+pub declare typ = fn(v: any) -> number
+pub declare regex = fn(pattern: string, text: string) -> bool
+pub declare concat = fn(parts: tuple, sep: string) -> string

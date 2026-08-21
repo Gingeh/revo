@@ -70,6 +70,7 @@ pub const TokenType = enum {
     kw_proc,
     kw_orelse,
     kw_pub,
+    kw_declare,
     plus,
     minus,
     star,
@@ -109,6 +110,7 @@ pub const TokenType = enum {
     lsquiggly,
     rsquiggly,
     comment,
+    doc_comment,
     eof,
     attribute,
 
@@ -117,9 +119,10 @@ pub const TokenType = enum {
             .number => .number,
             .string, .multiline_string, .backtick_string => .string,
             .hash => .enum_member,
-            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub => .keyword,
+            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub, .kw_declare => .keyword,
             .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
+            .doc_comment => .comment,
             .ident, .eof => null,
         };
     }
@@ -166,6 +169,7 @@ pub const TokenType = enum {
         .{ "shr", .kw_shr },
         .{ "orelse", .kw_orelse },
         .{ "pub", .kw_pub },
+        .{ "declare", .kw_declare },
         // maybe TODO:
         //
         // .{ "🐗", .kw_bor },
@@ -527,6 +531,30 @@ fn lexComment(self: *Lexer) !Token {
     const line = self.line;
     const column = self.column;
     _ = self.advance(); // consume first #
+    if (self.peek() == '*') {
+        _ = self.advance(); // consume *
+        var body_start = self.pos;
+        self.pending_error_span = .{
+            .start = start,
+            .end = self.pos,
+            .line = line,
+            .column = column,
+        };
+        while (!self.atEnd()) {
+            if (self.peek() == '*' and self.peekN(1) == '#') {
+                self.pending_error_span = null;
+                // body on its own line: drop the leading newline, like
+                // multiline strings
+                if (body_start < self.pos and self.source[body_start] == '\n') body_start += 1;
+                const body_end = self.pos;
+                _ = self.advance();
+                _ = self.advance();
+                return self.makeToken(.doc_comment, body_start, body_end, line, column);
+            }
+            _ = self.advance();
+        }
+        return error.UnterminatedComment;
+    }
     if (self.peek() == '#') {
         _ = self.advance(); // consume second #
         self.pending_error_span = .{
@@ -1344,6 +1372,37 @@ test "lexes comments" {
     });
 }
 
+test "lexes doc comments, body text between the delimiters" {
+    try t.expectTypes(
+        \\#* one line doc *# const x = 1
+        \\#* multi
+        \\   line doc *# fn f() 1
+        \\#* a *# #* b *# const y = 2
+    , &.{
+        .doc_comment,
+        .kw_const,
+        .ident,
+        .assign,
+        .number,
+        .doc_comment,
+        .kw_fn,
+        .ident,
+        .lparen,
+        .rparen,
+        .number,
+        .doc_comment,
+        .doc_comment,
+        .kw_const,
+        .ident,
+        .assign,
+        .number,
+        .eof,
+    });
+    const toks = try lexAt(std.testing.allocator, "#* body text *#", .{});
+    defer std.testing.allocator.free(toks);
+    try std.testing.expectEqualStrings(" body text ", toks[0].text);
+}
+
 test "lexes ident with special symbols" {
     try t.expectTypes(
         \\ one? two!
@@ -1357,6 +1416,7 @@ test "lexes ident with special symbols" {
 test "lexer reports unterminated strings comments and unexpected characters" {
     try std.testing.expectError(error.UnterminatedString, lexAt(std.testing.allocator, "\"unterminated", .{}));
     try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "## never closed", .{}));
+    try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "#* never closed", .{}));
     try std.testing.expectError(error.UnexpectedCharacter, lexAt(std.testing.allocator, "@", .{}));
     {
         const toks = try lexAt(std.testing.allocator, "!", .{});
@@ -1527,4 +1587,14 @@ test "lexes string with unknown escape passed through" {
 
 test "lexes pub keyword" {
     try testing.expectTypes("pub const x = 1", &.{ .kw_pub, .kw_const, .ident, .assign, .number, .eof });
+}
+
+test "lexes declare keyword" {
+    try testing.expectTypes(
+        "declare ring = fn(volume: number, label: string) -> bool",
+        &.{
+            .kw_declare, .ident,  .assign, .kw_fn, .lparen, .ident, .colon, .ident, .comma, .ident, .colon,
+            .ident,      .rparen, .arrow,  .ident, .eof,
+        },
+    );
 }

@@ -12,9 +12,9 @@
 
 #include "revo.h"
 #include <regex.h>
+#include <stdlib.h>
 #include <string.h>
 
-/// > greet(name: string) -> string
 static void greet_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   if (argc < 1 || !revo_is_string(argv[0])) {
     *out_result = revo_nil();
@@ -34,7 +34,6 @@ static void greet_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
   *out_result = revo_string(sid);
 }
 
-/// > add(a: number, b: number) -> number
 static void add_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   (void)vm;
   if (argc < 2 || !revo_is_number(argv[0]) || !revo_is_number(argv[1])) {
@@ -44,7 +43,6 @@ static void add_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) 
   *out_result = revo_num(revo_num_value(argv[0]) + revo_num_value(argv[1]));
 }
 
-/// > echo(s: string) -> string
 static void echo_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   (void)vm;
   if (argc < 1 || !revo_is_string(argv[0])) {
@@ -55,7 +53,6 @@ static void echo_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result)
   *out_result = revo_string(revo_string_id(argv[0]));
 }
 
-/// > strlen(s: string) -> number
 static void strlen_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   if (argc < 1 || !revo_is_string(argv[0])) {
     *out_result = revo_num(0);
@@ -64,8 +61,55 @@ static void strlen_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_resul
   *out_result = revo_num((double)revo_string_length(vm, revo_string_id(argv[0])));
 }
 
-/// > typ(x) -> number
-/// returns the RevoType tag of the value
+static void concat_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
+  if (argc < 2 || !revo_is_tuple(argv[0]) || !revo_is_string(argv[1])) {
+    *out_result = revo_nil();
+    return;
+  }
+  uint64_t tid = revo_tuple_id(argv[0]);
+  size_t n = revo_tuple_len(vm, tid);
+  const char *sep = (const char *)revo_string_data(vm, revo_string_id(argv[1]));
+  size_t seplen = revo_string_length(vm, revo_string_id(argv[1]));
+
+  // two passes: first sum the lengths (also validates elements), then fill
+  size_t total = 1;
+  for (size_t i = 0; i < n; i++) {
+    RevoData el = revo_tuple_get(vm, tid, i);
+    if (!revo_is_string(el)) {
+      *out_result = revo_nil();
+      return;
+    }
+    total += revo_string_length(vm, revo_string_id(el));
+    if (i > 0) total += seplen;
+  }
+  if (total > 8192) {
+    *out_result = revo_nil();
+    return;
+  }
+
+  char *buf = (char *)malloc(total);
+  if (!buf) {
+    *out_result = revo_nil();
+    return;
+  }
+  size_t off = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (i > 0) {
+      memcpy(buf + off, sep, seplen);
+      off += seplen;
+    }
+    RevoData el = revo_tuple_get(vm, tid, i);
+    size_t elen = revo_string_length(vm, revo_string_id(el));
+    memcpy(buf + off, revo_string_data(vm, revo_string_id(el)), elen);
+    off += elen;
+  }
+  buf[off] = '\0';
+
+  uint64_t sid = revo_intern(vm, (uint64_t)(uintptr_t)buf, off);
+  free(buf);
+  *out_result = revo_string(sid);
+}
+
 static void typ_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   (void)vm;
   if (argc < 1) {
@@ -75,10 +119,9 @@ static void typ_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) 
   *out_result = revo_num((double)revo_type(argv[0]));
 }
 
-/// > regex(pattern: string, text: string) -> bool
 static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   if (argc < 2 || !revo_is_string(argv[0]) || !revo_is_string(argv[1])) {
-    *out_result = revo_num(0);
+    *out_result = revo_bool(0);
     return;
   }
 
@@ -89,7 +132,7 @@ static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
     const char *p = (const char *)revo_string_data(vm, revo_string_id(argv[0]));
     size_t plen = revo_string_length(vm, revo_string_id(argv[0]));
     if (plen >= sizeof(pattern)) {
-      *out_result = revo_num(0);
+      *out_result = revo_bool(0);
       return;
     }
     memcpy(pattern, p, plen);
@@ -98,7 +141,7 @@ static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
     const char *t = (const char *)revo_string_data(vm, revo_string_id(argv[1]));
     size_t tlen = revo_string_length(vm, revo_string_id(argv[1]));
     if (tlen >= sizeof(text)) {
-      *out_result = revo_num(0);
+      *out_result = revo_bool(0);
       return;
     }
     memcpy(text, t, tlen);
@@ -108,7 +151,7 @@ static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
   regex_t regex;
   if (regcomp(&regex, pattern, REG_EXTENDED | REG_NOSUB) != 0) {
     regfree(&regex);
-    *out_result = revo_num(0);
+    *out_result = revo_bool(0);
     return;
   }
 
@@ -118,6 +161,8 @@ static void regex_fn(void *vm, size_t argc, RevoData *argv, RevoData *out_result
   *out_result = revo_bool(match == 0);
 }
 
+// the type interface lives in the sibling extension.d.rv manifest, not here.
+// every binding lands in this module's table at import time
 __attribute__((visibility("default"))) const RevoBinding revo_bindings[] = {
   {"greet", greet_fn},
   {"add", add_fn},
@@ -125,5 +170,6 @@ __attribute__((visibility("default"))) const RevoBinding revo_bindings[] = {
   {"strlen", strlen_fn},
   {"typ", typ_fn},
   {"regex", regex_fn},
+  {"concat", concat_fn},
   {NULL, NULL},
 };

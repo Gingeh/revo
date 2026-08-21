@@ -1,71 +1,10 @@
-pub const specs: []const api.FnSpec = &.{
-    // net module
-    .{
-        .name = "connect",
-        .placements = &.{api.mod("net")},
-        .params = &.{
-            .{ "host", "string" },
-            .{ "port", "number" },
-        },
-        .ret = "!table",
-        .doc = "connects to a remote host and port, returns a socket handle",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .string, .number }) else root.define(&.{ .string, .number }, connect_fn),
-    },
-    .{
-        .name = "listen",
-        .placements = &.{api.mod("net")},
-        .params = &.{
-            .{ "port", "number" },
-            .{ "backlog", "number?" },
-        },
-        .ret = "!table",
-        .doc = "listens for incoming connections on the given port, returns server socket",
-        .variadic = true,
-        .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{.number}) else root.defineVariadic(&.{.number}, listen_fn),
-    },
-    // socket module (used as __index for socket handle mts)
-    .{
-        .name = "accept",
-        .placements = &.{api.mod("socket")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!table",
-        .doc = "accepts an incoming client connection on a server socket",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, accept_fn),
-    },
-    .{
-        .name = "send",
-        .placements = &.{api.mod("socket")},
-        .params = &.{
-            .{ "self", "table" },
-            .{ "data", "string" },
-        },
-        .ret = "!number",
-        .doc = "sends data over the socket, returns number of bytes sent",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .string }) else root.define(&.{ .table, .string }, send_fn),
-    },
-    .{
-        .name = "recv",
-        .placements = &.{api.mod("socket")},
-        .params = &.{
-            .{ "self", "table" },
-            .{ "opts", "table" },
-        },
-        .ret = "!string",
-        .doc = "receives data according to opts.mode (:read_some | :read_all | :read_line)",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .table }) else root.define(&.{ .table, .table }, recv),
-    },
-    .{
-        .name = "close",
-        .placements = &.{api.mod("socket")},
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "!atom",
-        .doc = "closes the socket",
-        .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, socket_close_fn),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "connect", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .string, .number }) else root.define(&.{ .string, .number }, connect_fn) },
+    .{ .name = "listen", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{.number}) else root.defineVariadic(&.{.number}, listen_fn) },
+    .{ .name = "accept", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, accept_fn) },
+    .{ .name = "send", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .string }) else root.define(&.{ .table, .string }, send_fn) },
+    .{ .name = "recv", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{ .table, .table }) else root.define(&.{ .table, .table }, recv) },
+    .{ .name = "close", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.table}) else root.define(&.{.table}, socket_close_fn) },
 };
 
 pub const SocketEntry = union(enum) {

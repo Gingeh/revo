@@ -295,6 +295,8 @@ pub fn predeclareTypeAliases(self: *Compiler, exprs: []const *Node) !void {
     for (exprs) |expr| switch (expr.expr) {
         .decl => |decl| switch (decl.inner.expr) {
             .type_alias => |t| {
+                // declares are values, not type aliases - do not pollute type space
+                if (decl.kind == .declare_decl) continue;
                 if (self.type_aliases.contains(t.name)) continue;
                 const type_info = try type_parser.evalTypeExpr(self, t.type_expr);
                 try self.type_aliases.put(t.name, type_info);

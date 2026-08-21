@@ -781,6 +781,13 @@ pub const Compiler = struct {
                         };
                         return try self.compileBinding(b.*, kind);
                     },
+                    .type_alias => |t| {
+                        _ = t;
+                        if (d.kind == .declare_decl) {
+                            try self.pushNil();
+                            return;
+                        }
+                    },
                     else => {},
                 }
                 return self.compile(d.inner, true);
@@ -874,7 +881,7 @@ pub const Compiler = struct {
                     defer self.alloc.free(test_label);
                     try self.emit(
                         .load_global,
-                        try self.vm.internAtom("@dotest"),
+                        try self.vm.internAtom("__internal_dotest"),
                     );
                     try self.@"const"(
                         try self.vm.ownDataString(test_label),
@@ -891,7 +898,7 @@ pub const Compiler = struct {
                     defer self.alloc.free(suite_label);
                     try self.emit(
                         .load_global,
-                        try self.vm.internAtom("@dosuite"),
+                        try self.vm.internAtom("__internal_dosuite"),
                     );
                     try self.@"const"(
                         try self.vm.ownDataString(suite_label),

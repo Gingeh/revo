@@ -68,130 +68,19 @@ fn makeVariadic(comptime cmp: fn (f64, f64) bool) root.NativeFn {
     }.apply;
 }
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "abs",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "absolute value",
-        .f = root.define(&.{.number}, makeUnary(MathOps.abs)),
-    },
-    .{
-        .name = "floor",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "floor of x",
-        .f = root.define(&.{.number}, makeUnary(MathOps.floor)),
-    },
-    .{
-        .name = "ceil",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "ceiling of x",
-        .f = root.define(&.{.number}, makeUnary(MathOps.ceil)),
-    },
-    .{
-        .name = "sqrt",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "square root, errors if x is negative",
-        .f = root.define(&.{.number}, makeUnaryChecked(MathOps.sqrt, Pred.nonNegative, "non-negative number")),
-    },
-    .{
-        .name = "pow",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "base", "number" },
-            .{ "exponent", "number" },
-        },
-        .ret = "number",
-        .doc = "base raised to exponent",
-        .f = root.define(&.{ .number, .number }, makeBinary(MathOps.pow)),
-    },
-    .{
-        .name = "min",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "args", "number..." },
-        },
-        .ret = "number",
-        .doc = "min of all arguments",
-        .variadic = true,
-        .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.less)),
-    },
-    .{
-        .name = "max",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "args", "number..." },
-        },
-        .ret = "number",
-        .doc = "max of all arguments",
-        .variadic = true,
-        .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.greater)),
-    },
-    .{
-        .name = "sin",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "sine of x (x in radians)",
-        .f = root.define(&.{.number}, makeUnary(MathOps.sin)),
-    },
-    .{
-        .name = "cos",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "cosine of x (x in radians)",
-        .f = root.define(&.{.number}, makeUnary(MathOps.cos)),
-    },
-    .{
-        .name = "tan",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "tangent of x (x in radians)",
-        .f = root.define(&.{.number}, makeUnary(MathOps.tan)),
-    },
-    .{
-        .name = "log",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "natural logarithm, panics if x <= 0",
-        .f = root.define(&.{.number}, makeUnaryChecked(MathOps.log, Pred.positive, "positive number")),
-    },
-    .{
-        .name = "exp",
-        .placements = &.{api.mod("math")},
-        .params = &.{
-            .{ "x", "number" },
-        },
-        .ret = "number",
-        .doc = "e raised to x",
-        .f = root.define(&.{.number}, makeUnary(MathOps.exp)),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "abs", .f = root.define(&.{.number}, makeUnary(MathOps.abs)) },
+    .{ .name = "floor", .f = root.define(&.{.number}, makeUnary(MathOps.floor)) },
+    .{ .name = "ceil", .f = root.define(&.{.number}, makeUnary(MathOps.ceil)) },
+    .{ .name = "sqrt", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.sqrt, Pred.nonNegative, "non-negative number")) },
+    .{ .name = "pow", .f = root.define(&.{ .number, .number }, makeBinary(MathOps.pow)) },
+    .{ .name = "min", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.less)) },
+    .{ .name = "max", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.greater)) },
+    .{ .name = "sin", .f = root.define(&.{.number}, makeUnary(MathOps.sin)) },
+    .{ .name = "cos", .f = root.define(&.{.number}, makeUnary(MathOps.cos)) },
+    .{ .name = "tan", .f = root.define(&.{.number}, makeUnary(MathOps.tan)) },
+    .{ .name = "log", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.log, Pred.positive, "positive number")) },
+    .{ .name = "exp", .f = root.define(&.{.number}, makeUnary(MathOps.exp)) },
 };
 
 test "math library" {

@@ -1,0 +1,40 @@
+##!
+ numeric math: rounding, roots, powers, min and max, trig, logarithms
+!##
+
+#* absolute value *#
+pub declare math.abs = fn(x: number) -> number
+
+#* floor of x *#
+pub declare math.floor = fn(x: number) -> number
+
+#* ceiling of x *#
+pub declare math.ceil = fn(x: number) -> number
+
+#* square root, errors if x is negative *#
+pub declare math.sqrt = fn(x: number) -> number
+
+#* base raised to exponent *#
+pub declare math.pow = fn(base: number, exponent: number) -> number
+
+#* min of all arguments, at least one required *#
+pub declare math.min = fn(first: number, args: number...) -> number
+
+#* max of all arguments, at least one required *#
+pub declare math.max = fn(first: number, args: number...) -> number
+
+#* sine of x (x in radians) *#
+pub declare math.sin = fn(x: number) -> number
+
+#* cosine of x (x in radians) *#
+pub declare math.cos = fn(x: number) -> number
+
+#* tangent of x (x in radians) *#
+pub declare math.tan = fn(x: number) -> number
+
+#* natural logarithm, panics if x <= 0 *#
+pub declare math.log = fn(x: number) -> number
+
+#* e raised to x *#
+pub declare math.exp = fn(x: number) -> number
+

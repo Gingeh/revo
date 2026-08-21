@@ -20,10 +20,40 @@ pub fn parseTypeString(ctx: anytype, s: []const u8) !TypeInfo {
     return try evalTypeExpr(ctx, te);
 }
 
+/// shared shim for parseTypeString callers that work against raw spec strings
+pub const BareCtx = struct {
+    alloc: std.mem.Allocator,
+    pub fn isTypeParam(_: @This(), _: []const u8) bool {
+        return false;
+    }
+    pub fn resolveTypeAlias(_: @This(), _: []const u8) ?types.TypeInfo {
+        return null;
+    }
+};
+
 /// advances pos past the consumed tokens
 pub fn parse(tokens: []const Token, pos: *usize, alloc: std.mem.Allocator) !*ast.TypeExpr {
     var p = Parser{ .tokens = tokens, .pos = pos, .alloc = alloc };
     return try p.parseExpr();
+}
+
+/// type params declared in a generic sig head, e.g. `tuple:unwrap[T](self: (:err, T)) -> T`
+/// -> @["T"]. names borrow the sig string; empty when the head has no `[...]`
+pub fn sigTypeParams(alloc: std.mem.Allocator, sig: []const u8) ![]const []const u8 {
+    const head_end = std.mem.indexOfScalar(u8, sig, '(') orelse sig.len;
+    const head = sig[0..head_end];
+    const open = std.mem.indexOfScalar(u8, head, '[') orelse return &.{};
+    const close = std.mem.indexOfScalar(u8, head[open + 1 ..], ']') orelse return &.{};
+    const body = head[open + 1 .. open + 1 + close];
+    var out = try std.ArrayList([]const u8).initCapacity(alloc, 2);
+    errdefer out.deinit(alloc);
+    var it = std.mem.splitScalar(u8, body, ',');
+    while (it.next()) |p| {
+        const t = std.mem.trim(u8, p, " ");
+        if (t.len == 0) continue;
+        try out.append(alloc, t);
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 const Parser = struct {
@@ -31,6 +61,9 @@ const Parser = struct {
     pos: *usize,
     alloc: std.mem.Allocator,
     fn peek(self: *Parser) Token {
+        while (self.pos.* < self.tokens.len and self.tokens[self.pos.*].type == .comment) {
+            self.pos.* += 1;
+        }
         return self.tokens[self.pos.*];
     }
     fn advance(self: *Parser) Token {
@@ -61,6 +94,7 @@ const Parser = struct {
     /// * "int | string"  "number? | :nil"  "int"
     fn parseExpr(self: *Parser) anyerror!*ast.TypeExpr {
         const left = try self.parseAtom();
+        var result = left;
         if (self.match(.pipe)) {
             var variants = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);
             errdefer variants.deinit(self.alloc);
@@ -68,9 +102,12 @@ const Parser = struct {
             try flattenUnion(self.alloc, &variants, try self.parseAtom());
             while (self.match(.pipe))
                 try flattenUnion(self.alloc, &variants, try self.parseAtom());
-            return try ast.allocTypeExpr(self.alloc, left.span, .{ .union_of = try variants.toOwnedSlice(self.alloc) });
+            result = try ast.allocTypeExpr(self.alloc, left.span, .{ .union_of = try variants.toOwnedSlice(self.alloc) });
         }
-        return left;
+        // `!any/:ExpectFailed` - a `/`-tagged error atom after the type; the
+        // runtime reads only the union, so claim and drop the tag here too
+        if (self.match(.slash)) _ = try self.parseAtom();
+        return result;
     }
 
     /// atomic type expression with no union operators
@@ -84,7 +121,7 @@ const Parser = struct {
     fn parseAtom(self: *Parser) !*ast.TypeExpr {
         const tok = self.peek();
         switch (tok.type) {
-            .ident => {
+            .ident, .kw_type, .kw_import => {
                 const start = self.advance();
                 const text = start.text;
                 // "number?" -> optional; lexer treats ? as ident-char, so it splits here
@@ -154,9 +191,15 @@ const Parser = struct {
         var params = try std.ArrayList(ast.FnParam).initCapacity(self.alloc, 4);
         errdefer params.deinit(self.alloc);
         while (!self.check(.rparen) and !self.check(.eof)) {
-            const name = try self.expect(.ident);
+            // param names may be contextual keywords (`fn`, `end`)
+            const name = self.peek();
+            if (name.type != .ident and !std.mem.startsWith(u8, @tagName(name.type), "kw_"))
+                return error.UnexpectedToken;
+            self.pos.* += 1;
             const type_name = if (self.match(.colon)) try self.parseExpr() else null;
-            try params.append(self.alloc, .{ .name = name.text, .type_name = type_name });
+            // `...` lexes as `..` + `.`; claimed only here in type position
+            const variadic = self.match(.dotdot) and self.match(.dot);
+            try params.append(self.alloc, .{ .name = name.text, .type_name = type_name, .variadic = variadic });
             if (!self.match(.comma)) break;
         }
         return try params.toOwnedSlice(self.alloc);

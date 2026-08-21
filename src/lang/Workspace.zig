@@ -42,7 +42,6 @@ const CacheEntry = struct {
 pub const FnSig = struct {
     params: []ParamInfo,
     return_type: ?types.TypeInfo = null,
-    doc: ?[]const u8,
 };
 
 // cache for inspectDetailed (quick inspect)
@@ -53,6 +52,18 @@ const InspectCacheEntry = struct {
     dependencies: []FileId,
     diagnostics: ?lang.Error = null,
     sig_map: std.StringHashMapUnmanaged(FnSig) = .empty,
+    /// declared name -> doc text, from the semantic pass
+    docs: std.StringHashMap([]const u8),
+
+    fn deinit(self: *InspectCacheEntry, alloc: std.mem.Allocator) void {
+        if (self.sig_map.size > 0) freeSigMap(alloc, &self.sig_map);
+        var dit = self.docs.iterator();
+        while (dit.next()) |e| {
+            alloc.free(e.key_ptr.*);
+            alloc.free(e.value_ptr.*);
+        }
+        self.docs.deinit();
+    }
 };
 
 pub const Analysis = struct {
@@ -449,7 +460,7 @@ pub fn analyzeDetailed(
     }
 
     const root = parsed.ok.root;
-    const symbols = try self.collectSymbolsFromParsed(root);
+    const symbols = try self.collectSymbolsFromParsed(root, snap.text);
     defer freeSymbols(self.alloc, symbols);
     const deps = try self.collectDepsFromParsed(snap, root);
     errdefer self.alloc.free(deps);
@@ -586,7 +597,7 @@ pub fn hover(
             const text = try buf.toOwnedSlice();
             return .{
                 .text = text,
-                .range = .{
+                .range = wordRangeAt(snap.text, pos) orelse .{
                     .start = pos,
                     .end = .{
                         .line = pos.line,
@@ -594,6 +605,44 @@ pub fn hover(
                     },
                 },
             };
+        }
+        // member of an imported module: `mod.member` - show its definition
+        if (moduleMemberAt(snap.text, pos)) |mod_name| {
+            const mod_syms = self.importedModuleSymbols(alloc, id, mod_name) catch null;
+            if (mod_syms) |ms| {
+                defer freeSymbols(alloc, @constCast(ms));
+                for (ms) |s| {
+                    if (!std.mem.eql(u8, s.name, name)) continue;
+                    const mod_id = blk: {
+                        const deps = self.dependencyClosure(alloc, id) catch break :blk null;
+                        defer alloc.free(deps);
+                        for (deps) |dep_id| {
+                            const dep_snap = self.snapshot(dep_id) orelse continue;
+                            if (moduleFileNameMatches(dep_snap.name, mod_name))
+                                break :blk dep_id;
+                        }
+                        break :blk null;
+                    };
+                    const fid = mod_id orelse id;
+                    const sym_tn = if (s.type_name) |ti| try ti.formatType(alloc) else "";
+                    defer if (sym_tn.len > 0) alloc.free(sym_tn);
+                    const display = try renderDefinition(alloc, name, sym_tn, self, fid);
+                    defer alloc.free(display);
+                    var buf = std.Io.Writer.Allocating.init(alloc);
+                    defer buf.deinit();
+                    try buf.writer.print("```revo\n{s}\n```", .{display});
+                    return .{
+                        .text = try buf.toOwnedSlice(),
+                        .range = wordRangeAt(snap.text, pos) orelse .{
+                            .start = pos,
+                            .end = .{
+                                .line = pos.line,
+                                .character = pos.character + @as(u32, @intCast(name.len)),
+                            },
+                        },
+                    };
+                }
+            }
         }
         return null;
     }
@@ -620,10 +669,11 @@ pub fn hover(
             }
         }
     }
+    defer if (type_name.len > 0) alloc.free(type_name);
 
     // for import modules, show exported symbols with full signatures
     if (self.importedModuleSymbols(alloc, id, name) catch null) |mod_syms| {
-        defer alloc.free(mod_syms);
+        defer freeSymbols(alloc, @constCast(mod_syms));
         if (mod_syms.len > 0) {
             // find the dep file id so fnSig can look up each export's params
             const mod_id = blk: {
@@ -631,20 +681,21 @@ pub fn hover(
                 defer alloc.free(deps);
                 for (deps) |dep_id| {
                     const dep_snap = self.snapshot(dep_id) orelse continue;
-                    const stem = std.fs.path.stem(dep_snap.name);
-                    if (std.mem.eql(u8, stem, name)) break :blk dep_id;
+                    if (moduleFileNameMatches(dep_snap.name, name)) break :blk dep_id;
                 }
                 break :blk null;
             };
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
-            try buf.writer.print("module `{s}`\n\n", .{name});
+            try buf.writer.print("module `{s}`\n\n```revo\n", .{name});
             for (mod_syms) |s| {
                 const fid = mod_id orelse id;
-                try buf.writer.writeAll("- `");
                 if (try self.fnSig(alloc, fid, s.name) != null) {
                     const sym_tn = if (s.type_name) |ti| try ti.formatType(alloc) else "";
-                    try buf.writer.writeAll(try renderDefinition(alloc, s.name, sym_tn, self, fid));
+                    defer if (sym_tn.len > 0) alloc.free(sym_tn);
+                    const display = try renderDefinition(alloc, s.name, sym_tn, self, fid);
+                    defer alloc.free(display);
+                    try buf.writer.writeAll(display);
                 } else {
                     if (self.snapshot(fid)) |ss| {
                         var line = sourceLine(ss.text, s.range.start.line);
@@ -655,8 +706,9 @@ pub fn hover(
                         try buf.writer.writeAll(s.name);
                     }
                 }
-                try buf.writer.writeAll("`\n");
+                try buf.writer.writeByte('\n');
             }
+            try buf.writer.writeAll("```");
             return .{
                 .text = try buf.toOwnedSlice(),
                 .range = def.range,
@@ -665,21 +717,17 @@ pub fn hover(
     }
 
     var doc_text: []const u8 = "";
-    const display = if (try self.fnSig(alloc, def.file_id, name)) |sig| blk: {
-        if (sig.doc) |d| doc_text = d;
-        break :blk try renderDefinition(alloc, name, type_name, self, def.file_id);
-    } else blk: {
-        if (self.snapshot(def.file_id)) |ss| {
-            var line = sourceLine(ss.text, def.range.start.line);
-            line = std.mem.trim(u8, line, " \t\r");
-            line = stripPub(line);
-            if (type_name.len > 0 and std.mem.indexOf(u8, line, type_name) == null) {
-                break :blk try std.fmt.allocPrint(alloc, "{s}\n(type = {s})", .{ line, type_name });
-            }
-            break :blk try alloc.dupe(u8, line);
-        }
+    if (self.inspect_cache.getPtr(def.file_id)) |cache| {
+        if (cache.docs.get(name)) |d| doc_text = d;
+    }
+    const display = blk: {
+        if (try self.fnSig(alloc, def.file_id, name) != null)
+            break :blk try renderDefinition(alloc, name, type_name, self, def.file_id);
+        if (self.snapshot(def.file_id)) |ss|
+            break :blk try renderBindingLine(alloc, ss.text, def.range, type_name);
         break :blk try renderDefinition(alloc, name, type_name, self, def.file_id);
     };
+    defer alloc.free(display);
     var buf = std.Io.Writer.Allocating.init(alloc);
     defer buf.deinit();
     try buf.writer.writeAll("```revo\n");
@@ -688,9 +736,14 @@ pub fn hover(
     if (doc_text.len > 0) {
         try buf.writer.print("\n\n{s}", .{doc_text});
     }
+    // cross-file defs: their range is meaningless in this file
+    const range: Range = if (def.file_id == id)
+        def.range
+    else
+        (wordRangeAt(snap.text, pos) orelse def.range);
     return .{
         .text = try buf.toOwnedSlice(),
-        .range = def.range,
+        .range = range,
     };
 }
 
@@ -710,6 +763,22 @@ fn sourceLine(text: []const u8, line: u32) []const u8 {
 fn stripPub(line: []const u8) []const u8 {
     if (std.mem.startsWith(u8, line, "pub ")) return line[4..];
     return line;
+}
+
+/// a value binding's source line, pub-stripped, `(type = t)` appended if
+/// the inferred type isn't visible in it
+fn renderBindingLine(
+    alloc: std.mem.Allocator,
+    text: []const u8,
+    def_range: Range,
+    type_name: []const u8,
+) ![]const u8 {
+    var line = sourceLine(text, def_range.start.line);
+    line = std.mem.trim(u8, line, " \t\r");
+    line = stripPub(line);
+    if (type_name.len > 0 and std.mem.indexOf(u8, line, type_name) == null)
+        return std.fmt.allocPrint(alloc, "{s}\n(type = {s})", .{ line, type_name });
+    return alloc.dupe(u8, line);
 }
 
 /// format a definition line: fn name(p1: t1, ...) -> ret when fnSig
@@ -767,16 +836,7 @@ pub fn signatureHelp(
             errdefer alloc.free(params);
             for (spec.params, 0..) |p, i| {
                 const pt = if (p[1].len > 0) pt: {
-                    const StdlibCtx = struct {
-                        alloc: std.mem.Allocator,
-                        pub fn isTypeParam(_: @This(), _: []const u8) bool {
-                            return false;
-                        }
-                        pub fn resolveTypeAlias(_: @This(), _: []const u8) ?types.TypeInfo {
-                            return null;
-                        }
-                    };
-                    break :pt try type_parser.parseTypeString(StdlibCtx{ .alloc = alloc }, p[1]);
+                    break :pt try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, p[1]);
                 } else null;
                 params[i] = .{
                     .name = try alloc.dupe(u8, p[0]),
@@ -785,16 +845,7 @@ pub fn signatureHelp(
             }
 
             const ret: ?types.TypeInfo = if (spec.ret.len > 0) ret: {
-                const RetCtx = struct {
-                    alloc: std.mem.Allocator,
-                    pub fn isTypeParam(_: @This(), _: []const u8) bool {
-                        return false;
-                    }
-                    pub fn resolveTypeAlias(_: @This(), _: []const u8) ?types.TypeInfo {
-                        return null;
-                    }
-                };
-                break :ret try type_parser.parseTypeString(RetCtx{ .alloc = alloc }, spec.ret);
+                break :ret try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, spec.ret);
             } else null;
 
             const doc: ?[]const u8 = if (spec.doc.len > 0) try alloc.dupe(u8, spec.doc) else null;
@@ -827,7 +878,11 @@ pub fn signatureHelp(
         };
     }
     const ret_copy = if (sig.return_type) |rt| try types.clone(rt, alloc) else null;
-    const doc_copy = if (sig.doc) |d| try alloc.dupe(u8, d) else null;
+    // docs come from the semantic layer, not the sig
+    const doc_copy: ?[]const u8 = if (self.inspect_cache.getPtr(def.file_id)) |dc|
+        if (dc.docs.get(call_info.name)) |d| try alloc.dupe(u8, d) else null
+    else
+        null;
     errdefer if (doc_copy) |d| alloc.free(d);
 
     return SignatureHelp{
@@ -871,13 +926,7 @@ pub fn prepareRename(
 ) !?Range {
     _ = try self.definition(alloc, id, pos, opts) orelse return null;
     const snap = self.snapshot(id) orelse return null;
-    const offset = positionToOffset(snap.text, pos) orelse return null;
-    var start = offset;
-    while (start > 0 and isWordChar(snap.text[start - 1])) start -= 1;
-    var end = offset;
-    while (end < snap.text.len and isWordChar(snap.text[end])) end += 1;
-    if (end <= start) return null;
-    return .{ .start = offsetToPosition(snap.text, start), .end = offsetToPosition(snap.text, end) };
+    return wordRangeAt(snap.text, pos);
 }
 
 // quick inspection via inspect cache (no full compile)
@@ -905,7 +954,7 @@ pub fn inspectDetailed(
     }
 
     const root = parsed.ok.root;
-    const symbols = try self.collectSymbolsFromParsed(root);
+    const symbols = try self.collectSymbolsFromParsed(root, snap.text);
     defer freeSymbols(self.alloc, symbols);
     const deps = try self.collectDepsFromParsed(snap, root);
     errdefer self.alloc.free(deps);
@@ -954,6 +1003,16 @@ pub fn inspectDetailed(
         .project_root = project_root,
     };
 
+    var docs = std.StringHashMap([]const u8).init(self.alloc);
+    errdefer {
+        var dit = docs.iterator();
+        while (dit.next()) |e| {
+            self.alloc.free(e.key_ptr.*);
+            self.alloc.free(e.value_ptr.*);
+        }
+        docs.deinit();
+    }
+
     const semantic_error = try semantic.analyze(
         alloc,
         root,
@@ -962,6 +1021,7 @@ pub fn inspectDetailed(
         known_globals,
         &type_map,
         &type_annotations,
+        &docs,
         .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve },
     );
 
@@ -981,6 +1041,24 @@ pub fn inspectDetailed(
     var sig_map: std.StringHashMapUnmanaged(FnSig) = .empty;
     errdefer if (sig_map.size > 0) freeSigMap(self.alloc, &sig_map);
     self.collectSigsFromParsed(root, &sig_map);
+
+    // doc strings live in the request arena; re-own them for the cache
+    var cache_docs = std.StringHashMap([]const u8).init(self.alloc);
+    errdefer {
+        var cit = cache_docs.iterator();
+        while (cit.next()) |e| {
+            self.alloc.free(e.key_ptr.*);
+            self.alloc.free(e.value_ptr.*);
+        }
+        cache_docs.deinit();
+    }
+    var doc_it = docs.iterator();
+    while (doc_it.next()) |e| {
+        try cache_docs.put(
+            try self.alloc.dupe(u8, e.key_ptr.*),
+            try self.alloc.dupe(u8, e.value_ptr.*),
+        );
+    }
 
     // annotate param and return types from type_map where not explicitly set
     var sig_it = sig_map.iterator();
@@ -1005,7 +1083,7 @@ pub fn inspectDetailed(
     errdefer freeSymbols(self.alloc, cache_symbols);
     const cache_deps = try self.copyDeps(self.alloc, id);
     errdefer self.alloc.free(cache_deps);
-    try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps, cache_diag, sig_map);
+    try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps, cache_diag, sig_map, cache_docs);
 
     if (semantic_error) |err| {
         return .{
@@ -1069,11 +1147,57 @@ pub fn inlayHints(
 }
 
 /// lookup a function signature from the inspect cache for file `id`
-/// returns null if file hasn't been inspected, or name isn't in sig_map
 pub fn fnSig(self: *Workspace, alloc: std.mem.Allocator, id: FileId, name: []const u8) !?FnSig {
     _ = try self.inspectDetailed(alloc, id, .{});
     const cache = self.inspect_cache.getPtr(id) orelse return null;
     return cache.sig_map.get(name);
+}
+
+/// hover rendering for a name declared in file `id`, null if not declared there
+pub fn hoverByName(
+    self: *Workspace,
+    alloc: std.mem.Allocator,
+    id: FileId,
+    name: []const u8,
+) !?[]const u8 {
+    _ = try self.inspectDetailed(alloc, id, .{});
+    const cache = self.inspect_cache.getPtr(id) orelse return null;
+
+    const doc = cache.docs.get(name);
+    const sig = cache.sig_map.get(name);
+
+    var sym_range: ?Range = null;
+    var type_name: []const u8 = "";
+    defer if (type_name.len > 0) alloc.free(type_name);
+    for (cache.symbols) |sym| {
+        if (!std.mem.eql(u8, sym.name, name)) continue;
+        sym_range = sym.range; // last binding wins
+        if (sym.type_name) |ti| {
+            if (type_name.len > 0) alloc.free(type_name);
+            type_name = try ti.formatType(alloc);
+        }
+    }
+    if (doc == null and sig == null and sym_range == null) return null;
+
+    var buf = std.Io.Writer.Allocating.init(alloc);
+    defer buf.deinit();
+    if (sig != null) {
+        const display = try renderDefinition(alloc, name, type_name, self, id);
+        defer alloc.free(display);
+        try buf.writer.writeAll(display);
+    } else if (sym_range) |def_range| {
+        if (self.snapshot(id)) |ss| {
+            const line = try renderBindingLine(alloc, ss.text, def_range, type_name);
+            defer alloc.free(line);
+            try buf.writer.writeAll(line);
+        } else {
+            try buf.writer.writeAll(name);
+        }
+    } else {
+        try buf.writer.writeAll(name);
+    }
+    if (doc) |d| try buf.writer.print("\n\n{s}", .{d});
+    return try buf.toOwnedSlice();
 }
 
 /// check inspect cache and return cached Analysis if valid
@@ -1123,7 +1247,7 @@ fn inspectParseError(
     const empty_deps = try self.alloc.alloc(FileId, 0);
     errdefer self.alloc.free(empty_deps);
 
-    try self.putInspectCache(id, snap.version, opts, empty_syms, empty_deps, cache_diag, .empty);
+    try self.putInspectCache(id, snap.version, opts, empty_syms, empty_deps, cache_diag, .empty, .init(self.alloc));
     return .{
         .snapshot = snap,
         .diagnostics = parse_error,
@@ -1181,7 +1305,8 @@ fn invalidateCacheImpl(
         freeSymbols(self.alloc, kv.value.symbols);
         self.alloc.free(kv.value.dependencies);
         if (kv.value.diagnostics) |diag| lang.deinitError(self.alloc, diag);
-        if (kv.value.sig_map.size > 0) freeSigMap(self.alloc, &kv.value.sig_map);
+        var e = kv.value;
+        e.deinit(self.alloc);
     }
 
     if (self.reverse_deps.get(id)) |dependents| {
@@ -1215,7 +1340,7 @@ fn resolveImportPath(
     self: *Workspace,
     source_name: []const u8,
     raw_path: []const u8,
-) ?[]u8 {
+) ?[]const u8 {
     const base_dir = std.fs.path.dirname(source_name) orelse ".";
     // strip leading ./ from relative paths so join produces a clean path
     var clean = raw_path;
@@ -1224,13 +1349,30 @@ fn resolveImportPath(
         self.alloc.dupe(u8, clean) catch return null
     else
         std.fs.path.join(self.alloc, &.{ base_dir, clean }) catch return null;
-    if (std.fs.path.extension(joined).len != 0) return joined;
+    const ext = std.fs.path.extension(joined);
+    if (ext.len != 0 and isLibExtension(ext)) {
+        // a shared library import is described by its sibling manifest
+        const manifest = revo.extensionManifestPath(self.alloc, joined) catch {
+            self.alloc.free(joined);
+            return null;
+        };
+        self.alloc.free(joined);
+        return manifest;
+    }
+    if (ext.len != 0) return joined;
     const with_ext = std.fmt.allocPrint(self.alloc, "{s}.rv", .{joined}) catch {
         self.alloc.free(joined);
         return null;
     };
     self.alloc.free(joined);
     return with_ext;
+}
+
+/// shared library extensions; the type interface for these is a sibling manifest
+fn isLibExtension(ext: []const u8) bool {
+    return std.mem.eql(u8, ext, ".so") or
+        std.mem.eql(u8, ext, ".dylib") or
+        std.mem.eql(u8, ext, ".dll");
 }
 
 /// given a file and the name of an import binding, return the symbols
@@ -1246,8 +1388,7 @@ pub fn importedModuleSymbols(
     defer alloc.free(deps);
     for (deps) |dep_id| {
         const dep_snap = self.snapshot(dep_id) orelse continue;
-        const stem = std.fs.path.stem(dep_snap.name);
-        if (std.mem.eql(u8, stem, name)) {
+        if (moduleFileNameMatches(dep_snap.name, name)) {
             var dep_analysis = try self.inspectDetailed(alloc, dep_id, .{});
             defer dep_analysis.deinit(alloc);
             const src = dep_analysis.symbols;
@@ -1266,8 +1407,8 @@ pub fn importedModuleSymbols(
     return &.{};
 }
 
-/// resolve an import and open the file from disk if not already open
-/// returns null if the file can't be found or read
+/// resolve an import and open the file from disk if not already open, checking
+/// both the source dir and project root; returns null if not found or unreadable
 fn resolveOpenImportOrOpen(
     self: *Workspace,
     source_name: []const u8,
@@ -1275,14 +1416,15 @@ fn resolveOpenImportOrOpen(
     mode: lang.RunMode,
     project_root: []const u8,
 ) ?FileId {
-    if (self.resolveOpenImport(source_name, raw_path, mode, project_root)) |id| return id;
     if (self.resolveImportPath(source_name, raw_path)) |resolved| {
         defer self.alloc.free(resolved);
+        if (self.file_names.get(resolved)) |id| return id;
         if (self.openFromDisk(resolved)) |id| return id;
     }
     if (mode == .project and project_root.len > 0) {
         if (self.resolveImportPath(project_root, raw_path)) |resolved| {
             defer self.alloc.free(resolved);
+            if (self.file_names.get(resolved)) |id| return id;
             if (self.openFromDisk(resolved)) |id| return id;
         }
     }
@@ -1400,7 +1542,8 @@ fn clearCache(self: *Workspace) void {
         if (entry.value_ptr.diagnostics) |diag| {
             lang.deinitError(self.alloc, diag);
         }
-        if (entry.value_ptr.sig_map.size > 0) freeSigMap(self.alloc, &entry.value_ptr.sig_map);
+        var e = entry.value_ptr.*;
+        e.deinit(self.alloc);
     }
 }
 
@@ -1428,6 +1571,7 @@ fn putInspectCache(
     dependencies: []FileId,
     diag: ?lang.Error,
     sig_map: std.StringHashMapUnmanaged(FnSig),
+    docs: std.StringHashMap([]const u8),
 ) !void {
     const entry = InspectCacheEntry{
         .version = version,
@@ -1436,12 +1580,13 @@ fn putInspectCache(
         .dependencies = dependencies,
         .diagnostics = diag,
         .sig_map = sig_map,
+        .docs = docs,
     };
     if (self.inspect_cache.getPtr(id)) |slot| {
         freeSymbols(self.alloc, slot.symbols);
         self.alloc.free(slot.dependencies);
         if (slot.diagnostics) |cached_d| lang.deinitError(self.alloc, cached_d);
-        if (slot.sig_map.size > 0) freeSigMap(self.alloc, &slot.sig_map);
+        slot.deinit(self.alloc);
         slot.* = entry;
     } else {
         try self.inspect_cache.put(id, entry);
@@ -1478,10 +1623,10 @@ fn collectDependencyClosure(
 }
 
 /// walk AST and collect bindings, functions, structs, type aliases
-fn collectSymbolsFromParsed(self: *Workspace, root: *lang.Node) ![]Symbol {
+fn collectSymbolsFromParsed(self: *Workspace, root: *lang.Node, text: []const u8) ![]Symbol {
     var out = try std.ArrayList(Symbol).initCapacity(self.alloc, 8);
     errdefer out.deinit(self.alloc);
-    var visitor = SymbolVisitor{ .alloc = self.alloc, .out = &out };
+    var visitor = SymbolVisitor{ .alloc = self.alloc, .out = &out, .text = text };
     visitor.visit(root);
     return out.toOwnedSlice(self.alloc);
 }
@@ -1507,6 +1652,37 @@ const SigVisitor = struct {
 
     pub fn visit(self: *@This(), node: *const lang.Node) void {
         switch (node.expr) {
+            .type_alias => |t| {
+                switch (t.type_expr.kind) {
+                    .function => |f| {
+                        const name = t.name;
+
+                        const params = self.alloc.alloc(ParamInfo, f.params.len) catch return;
+                        errdefer self.alloc.free(params);
+                        for (f.params, params) |src, *dst| {
+                            dst.* = .{
+                                .name = self.alloc.dupe(u8, src.name) catch return,
+                                .type_name = if (src.type_name) |te|
+                                    type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, te) catch null
+                                else
+                                    null,
+                            };
+                        }
+
+                        const return_type: ?types.TypeInfo = if (f.return_type) |rt|
+                            type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, rt) catch null
+                        else
+                            null;
+
+                        const name_owned = self.alloc.dupe(u8, name) catch return;
+                        self.sig_map.put(self.alloc, name_owned, .{
+                            .params = params,
+                            .return_type = return_type,
+                        }) catch return;
+                    },
+                    else => {},
+                }
+            },
             .binding => |b| {
                 if (b.target.expr != .ident) return;
                 if (b.value.expr != .fn_expr) return;
@@ -1522,17 +1698,37 @@ const SigVisitor = struct {
                     };
                 }
 
-                const return_type: ?types.TypeInfo = null;
-                const doc = if (fn_expr.doc) |d|
-                    self.alloc.dupe(u8, d) catch return
-                else
-                    null;
+                const name_owned = self.alloc.dupe(u8, name) catch return;
+                self.sig_map.put(self.alloc, name_owned, .{
+                    .params = params,
+                    .return_type = null,
+                }) catch return;
+            },
+            .assign_expr => |ae| {
+                if (ae.value.expr != .fn_expr) return;
+                const fn_expr = ae.value.expr.fn_expr;
+                if (fn_expr.doc == null) return;
 
+                const name: []const u8 = switch (ae.target.expr) {
+                    .field => |f| f.name,
+                    .ident => |i| i,
+                    else => return,
+                };
+
+                const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return;
+                errdefer self.alloc.free(params);
+                for (fn_expr.params, params) |src, *dst| {
+                    dst.* = .{
+                        .name = self.alloc.dupe(u8, src.name) catch return,
+                        .type_name = null,
+                    };
+                }
+
+                const return_type: ?types.TypeInfo = null;
                 const name_owned = self.alloc.dupe(u8, name) catch return;
                 self.sig_map.put(self.alloc, name_owned, .{
                     .params = params,
                     .return_type = return_type,
-                    .doc = doc,
                 }) catch return;
             },
             else => lang.ast.walkAST(@This(), self, node),
@@ -1803,7 +1999,6 @@ fn freeSigMap(alloc: std.mem.Allocator, map: *const std.StringHashMapUnmanaged(F
         }
         alloc.free(entry.value_ptr.params);
         if (entry.value_ptr.return_type) |*rt| types.deinitType(rt, alloc);
-        if (entry.value_ptr.doc) |d| alloc.free(d);
     }
     const mut = @constCast(map);
     mut.deinit(alloc);
@@ -1871,7 +2066,41 @@ fn positionToOffset(text: []const u8, pos: Position) ?usize {
 }
 
 fn isWordChar(c: u8) bool {
-    return std.ascii.isAlphanumeric(c) or c == '_';
+    // `?`/`!` suffix names (`exists?`) are single identifiers
+    return std.ascii.isAlphanumeric(c) or c == '_' or c == '?' or c == '!';
+}
+
+/// the whole word under pos, wherever the cursor sits inside it
+fn wordRangeAt(text: []const u8, pos: Position) ?Range {
+    const offset = positionToOffset(text, pos) orelse return null;
+    if (offset >= text.len) return null;
+    var start = offset;
+    while (start > 0 and isWordChar(text[start - 1])) start -= 1;
+    var end = offset;
+    while (end < text.len and isWordChar(text[end])) end += 1;
+    if (end <= start) return null;
+    return .{
+        .start = offsetToPosition(text, start),
+        .end = offsetToPosition(text, end),
+    };
+}
+
+/// if the word at pos is a member of an import binding (`mod.member`),
+/// return the module name
+fn moduleMemberAt(text: []const u8, pos: Position) ?[]const u8 {
+    const offset = positionToOffset(text, pos) orelse return null;
+    var start = offset;
+    while (start > 0 and isWordChar(text[start - 1])) start -= 1;
+    if (start >= offset) return null;
+    var i = start;
+    while (i > 0 and (text[i - 1] == ' ' or text[i - 1] == '\t')) i -= 1;
+    if (i == 0 or text[i - 1] != '.') return null;
+    i -= 1;
+    while (i > 0 and (text[i - 1] == ' ' or text[i - 1] == '\t')) i -= 1;
+    var mod_start = i;
+    while (mod_start > 0 and isWordChar(text[mod_start - 1])) mod_start -= 1;
+    if (mod_start >= i) return null;
+    return text[mod_start..i];
 }
 
 /// result from text scan for a call at cursor
@@ -1928,7 +2157,10 @@ fn findCallAtPosition(text: []const u8, pos: Position) ?CallAtPos {
 const SymbolVisitor = struct {
     alloc: std.mem.Allocator,
     out: *std.ArrayList(Symbol),
+    text: []const u8,
     in_decl: bool = false,
+    /// a binding like `const x = import "foo"` names the module itself
+    import_named: bool = false,
 
     pub fn visit(self: *@This(), node: *const lang.Node) void {
         switch (node.expr) {
@@ -1937,22 +2169,30 @@ const SymbolVisitor = struct {
                 defer self.in_decl = false;
                 switch (d.inner.expr) {
                     .binding => |b| self.addBinding(b),
-                    .struct_def => |def| self.addName(def.name, .struct_type, node.span),
-                    .type_alias => |t| self.addName(t.name, .type_alias, node.span),
+                    .struct_def => |def| self.addName(def.name, .struct_type, def.name_span),
+                    .type_alias => |t| self.addName(t.name, .type_alias, t.name_span),
                     else => {},
                 }
+                self.import_named = false;
                 // walkAST would re-visit d.inner; it's already handled above
             },
             .binding => |b| if (!self.in_decl) self.addBinding(b),
-            .struct_def => |def| if (!self.in_decl) self.addName(def.name, .struct_type, node.span),
-            .type_alias => |t| if (!self.in_decl) self.addName(t.name, .type_alias, node.span),
-            .import_stmt => |is| if (!self.in_decl) self.addName(is.name, .binding, node.span),
+            .struct_def => |def| if (!self.in_decl) self.addName(def.name, .struct_type, def.name_span),
+            .type_alias => |t| if (!self.in_decl) self.addName(t.name, .type_alias, t.name_span),
+            .import_stmt => |is| if (!self.in_decl) {
+                if (self.import_named) {
+                    self.import_named = false;
+                } else {
+                    self.addName(is.name, .binding, self.importNameSpan(node, is.name));
+                }
+            },
             else => {},
         }
         if (node.expr != .decl) lang.ast.walkAST(SymbolVisitor, self, node);
     }
 
     fn addBinding(self: *@This(), b: lang.ast.Binding) void {
+        self.import_named = b.value.expr == .import_stmt;
         switch (b.target.expr) {
             .ident => |name| self.addName(name, .binding, b.target.span),
             .tuple_pattern => |items| {
@@ -1963,6 +2203,29 @@ const SymbolVisitor = struct {
             },
             else => {},
         }
+    }
+
+    /// module name = right after the path's opening quote; fall back to the
+    /// whole statement (subdir paths, table form)
+    fn importNameSpan(self: *@This(), node: *const lang.Node, name: []const u8) lang.Span {
+        var q = node.span.start;
+        while (q < node.span.end and self.text[q] != '\'' and self.text[q] != '"') q += 1;
+        const start = q + 1;
+        if (q >= node.span.end or start + name.len > node.span.end) return node.span;
+        if (!std.mem.eql(u8, self.text[start .. start + name.len], name)) return node.span;
+        if (start + name.len < node.span.end and isWordChar(self.text[start + name.len])) return node.span;
+        var line = node.span.line;
+        var column = node.span.column;
+        var i = node.span.start;
+        while (i < start) : (i += 1) {
+            if (self.text[i] == '\n') {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        return .{ .start = start, .end = start + name.len, .line = line, .column = column };
     }
 
     fn addName(self: *@This(), name: []const u8, kind: SymbolKind, span: lang.Span) void {
@@ -1982,6 +2245,17 @@ fn containsId(items: []const FileId, id: FileId) bool {
     for (items) |item|
         if (item == id) return true;
 
+    return false;
+}
+
+/// does a dep file serve as the module named `name`? plain modules match by
+/// stem (`foo.rv` -> `foo`), lib manifests by `<name>.d.rv`
+fn moduleFileNameMatches(snap_name: []const u8, name: []const u8) bool {
+    const base = std.fs.path.basename(snap_name);
+    const ext = std.fs.path.extension(snap_name);
+    if (std.mem.eql(u8, std.fs.path.stem(snap_name), name)) return true;
+    if (ext.len > 0 and std.mem.endsWith(u8, base, ".d.rv") and
+        std.mem.eql(u8, base[0 .. base.len - 5], name)) return true;
     return false;
 }
 
@@ -2185,6 +2459,59 @@ test "workspace query surface" {
     try std.testing.expect(std.mem.find(u8, hov.?.text, "```revo") != null);
 }
 
+test "workspace hover over lib import manifest" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const query_opts: lang.BuildOptions = .{
+        .include_default_macros = false,
+        .install_debug_info = false,
+        .test_mode = true,
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "extension.so", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "extension.d.rv", .data =
+        \\pub declare add = fn(a: number, b: number) -> number
+        \\pub declare concat = fn(parts: tuple, sep: string) -> string
+    });
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_n = try tmp.dir.realPath(std.testing.io, &dir_buf);
+    const dir_path = dir_buf[0..dir_n];
+
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
+    defer vm.deinit();
+    var ws = try Workspace.initWithVm(&vm, alloc);
+    defer ws.deinit();
+
+    const script = try std.fmt.allocPrint(alloc, "{s}/app.rv", .{dir_path});
+    defer alloc.free(script);
+    const id = try ws.open(script,
+        \\import "extension.so"
+        \\print(extension.concat (("a", "b"), "-"))
+    , .{});
+
+    var hov = try ws.hover(alloc, id, .{ .line = 1, .character = 11 }, query_opts);
+    defer if (hov) |*h| h.deinit(alloc);
+    try std.testing.expect(hov != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "module `extension`") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "concat") != null);
+    // range covers just the module name inside the import statement
+    try std.testing.expectEqual(@as(u32, 1), hov.?.range.start.line);
+    try std.testing.expectEqual(@as(u32, 9), hov.?.range.start.character);
+    try std.testing.expectEqual(@as(u32, 18), hov.?.range.end.character);
+
+    var hov2 = try ws.hover(alloc, id, .{ .line = 2, .character = 22 }, query_opts);
+    defer if (hov2) |*h| h.deinit(alloc);
+    try std.testing.expect(hov2 != null);
+    try std.testing.expect(std.mem.find(u8, hov2.?.text, "fn concat(parts: tuple, sep: string) -> string") != null);
+    // member def lives in the manifest; the range must be the call-site word
+    try std.testing.expectEqual(@as(u32, 2), hov2.?.range.start.line);
+    try std.testing.expectEqual(@as(u32, 17), hov2.?.range.start.character);
+    try std.testing.expectEqual(@as(u32, 23), hov2.?.range.end.character);
+}
+
 test "workspace diagnostics query" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2228,7 +2555,6 @@ test "workspace diagnostics warn on missing return arrow" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
-
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
@@ -2336,4 +2662,25 @@ test "workspace cross-file symbol index" {
     const xs2 = try ws.findSymbols(alloc, "x");
     defer alloc.free(xs2);
     try std.testing.expectEqual(@as(usize, 2), xs2.len);
+}
+
+test "workspace hover over bare fn definition" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const query_opts: lang.BuildOptions = .{
+        .include_default_macros = false,
+        .install_debug_info = false,
+        .test_mode = true,
+    };
+
+    var ws = try Workspace.init(alloc);
+    defer ws.deinit();
+
+    const id = try ws.open("<test>", "let x = 42\n\nfn say_hi(name) do\n  print(\"hello \" + name)\nend\n", .{});
+    _ = try ws.inspectDetailed(alloc, id, query_opts);
+
+    var hov = try ws.hover(alloc, id, .{ .line = 3, .character = 5 }, query_opts);
+    defer if (hov) |*h| h.deinit(alloc);
+    try std.testing.expect(hov != null);
 }

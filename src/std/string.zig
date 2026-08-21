@@ -4,264 +4,29 @@
 // one spec per registration entry. registration happens in root.zig
 // via api.registerAll
 
-pub const specs: []const api.FnSpec = &.{
-    .{
-        .name = "len",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "number",
-        .doc = "returns length of string",
-        .f = root.define(&.{.string}, len_f),
-    },
-    .{
-        .name = "upper",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "string",
-        .doc = "converts string to uppercase",
-        .f = root.define(&.{.string}, upper_f),
-    },
-    .{
-        .name = "lower",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "string",
-        .doc = "converts string to lowercase",
-        .f = root.define(&.{.string}, lower_f),
-    },
-    .{
-        .name = "sub",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "start", "number" },
-            .{ "length", "number" },
-        },
-        .ret = "string",
-        .doc = "extracts substring from start with given length",
-        .f = root.define(&.{ .string, .number, .number }, sub_f),
-    },
-    .{
-        .name = "find",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "needle", "string" },
-        },
-        .ret = "number|atom",
-        .doc =
-        \\finds first occurrence of needle in string
-        \\returns index or :missing if not found
-        ,
-        .f = root.define(&.{ .string, .string }, find_f),
-    },
-    .{
-        .name = "replace",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "old", "string" },
-            .{ "new", "string" },
-        },
-        .ret = "string",
-        .doc = "replaces all occurrences of old with new",
-        .f = root.define(&.{ .string, .string, .string }, replace_f),
-    },
-    .{
-        .name = "split",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "delim", "string" },
-        },
-        .ret = "table",
-        .doc = "splits string by delimiter into table",
-        .f = root.define(&.{ .string, .string }, split_f),
-    },
-    .{
-        .name = "trim",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "string",
-        .doc = "trims whitespace from both ends",
-        .f = root.define(&.{.string}, trim_f),
-    },
-    .{
-        .name = "starts_with?",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "prefix", "string" },
-        },
-        .ret = "bool",
-        .doc = "checks if string starts with prefix",
-        .f = root.define(&.{ .string, .string }, starts_with_f),
-    },
-    .{
-        .name = "ends_with?",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "suffix", "string" },
-        },
-        .ret = "bool",
-        .doc = "checks if string ends with suffix",
-        .f = root.define(&.{ .string, .string }, ends_with_f),
-    },
-    .{
-        .name = "reverse",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "string",
-        .doc = "reverses the string",
-        .f = root.define(&.{.string}, reverse_f),
-    },
-    .{
-        .name = "with",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "idx", "number" },
-            .{ "char", "string|number" },
-        },
-        .ret = "string",
-        .doc =
-        \\replaces character at index with given char or byte
-        \\index is 0-based
-        ,
-        .f = root.define(&.{ .string, .number, .string }, set),
-    },
-    .{
-        .name = "table",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "table",
-        .doc =
-        \\converts string to table of characters
-        \\
-        \\  "asdf":table() => {"a", "s", "d", "f"}
-        ,
-        .f = root.define(&.{.string}, to_table),
-    },
-    .{
-        .name = "ascii",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-        },
-        .ret = "number",
-        .doc =
-        \\returns ASCII code of first character
-        \\
-        \\  "a":ascii() => 97
-        ,
-        .f = root.define(&.{.string}, ascii_f),
-    },
-    .{
-        .name = "contains?",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "substr", "string" },
-        },
-        .ret = "bool",
-        .doc = "checks if string contains substring",
-        .f = root.define(&.{ .string, .string }, contains),
-    },
-    .{
-        .name = "index_of",
-        .placements = &.{ api.mod("string"), api.method("string", .string) },
-        .params = &.{
-            .{ "self", "string" },
-            .{ "substr", "string" },
-        },
-        .ret = "number|:nil",
-        .doc = "ret 0-based index of substring or nil",
-        .f = root.define(&.{ .string, .string }, index_of),
-    },
-    .{
-        .name = "__index",
-        .placements = &.{api.method("string", .string)},
-        .params = &.{
-            .{ "self", "string" },
-            .{ "idx", "number" },
-        },
-        .ret = "string",
-        .doc = "returns character at index as single-char string",
-        .f = root.define(&.{ .string, .number }, index_f),
-        .core_key = revo.core_atoms.__index,
-    },
-    .{
-        .name = "add",
-        .placements = &.{api.method("string", .string)},
-        .params = &.{
-            .{ "self", "string" },
-            .{ "other", "string" },
-        },
-        .ret = "string",
-        .doc = "concatenates two strings",
-        .f = root.define(&.{ .string, .string }, add_f),
-    },
-    .{
-        .name = "mul",
-        .placements = &.{api.method("string", .string)},
-        .params = &.{
-            .{ "self", "string" },
-            .{ "n", "number" },
-        },
-        .ret = "string",
-        .doc = "repeats string n times",
-        .f = root.define(&.{ .string, .number }, mul_f),
-    },
-    .{
-        .name = "of_ascii",
-        .placements = &.{api.mod("string")},
-        .params = &.{
-            .{ "code", "number" },
-        },
-        .ret = "string",
-        .doc =
-        \\ creates string from ASCII code(s)
-        \\
-        \\   of_ascii(97) => "a"
-        ,
-        .f = root.define(&.{.number}, of_ascii),
-    },
-    // module-only (not in the metatable)
-    .{
-        .name = "join",
-        .placements = &.{api.mod("string")},
-        .params = &.{
-            .{ "table", "table" },
-            .{ "sep", "string" },
-        },
-        .ret = "string",
-        .doc = "joins table elements into string with separator",
-        .f = root.define(&.{ .table, .string }, join),
-    },
-    .{
-        .name = "__call",
-        .placements = &.{api.mod("string")},
-        .params = &.{
-            .{ "value", "any" },
-        },
-        .ret = "string",
-        .doc = "converts value to string: string(x)",
-        .core_key = revo.core_atoms.__call,
-        .f = root.define(&.{ .any, .any }, string_call),
-    },
+pub const impls: []const api.Impl = &.{
+    .{ .name = "len", .f = root.define(&.{.string}, len_f) },
+    .{ .name = "upper", .f = root.define(&.{.string}, upper_f) },
+    .{ .name = "lower", .f = root.define(&.{.string}, lower_f) },
+    .{ .name = "sub", .f = root.define(&.{ .string, .number, .number }, sub_f) },
+    .{ .name = "find", .f = root.define(&.{ .string, .string }, find_f) },
+    .{ .name = "replace", .f = root.define(&.{ .string, .string, .string }, replace_f) },
+    .{ .name = "split", .f = root.define(&.{ .string, .string }, split_f) },
+    .{ .name = "trim", .f = root.define(&.{.string}, trim_f) },
+    .{ .name = "starts_with?", .f = root.define(&.{ .string, .string }, starts_with_f) },
+    .{ .name = "ends_with?", .f = root.define(&.{ .string, .string }, ends_with_f) },
+    .{ .name = "reverse", .f = root.define(&.{.string}, reverse_f) },
+    .{ .name = "with", .f = root.define(&.{ .string, .number, .any }, set) },
+    .{ .name = "table", .f = root.define(&.{.string}, to_table) },
+    .{ .name = "ascii", .f = root.define(&.{.string}, ascii_f) },
+    .{ .name = "contains?", .f = root.define(&.{ .string, .string }, contains) },
+    .{ .name = "index_of", .f = root.define(&.{ .string, .string }, index_of) },
+    .{ .name = "__index", .f = root.define(&.{ .string, .any }, index_f) },
+    .{ .name = "add", .f = root.define(&.{ .string, .string }, add_f) },
+    .{ .name = "mul", .f = root.define(&.{ .string, .number }, mul_f) },
+    .{ .name = "of_ascii", .f = root.define(&.{.number}, of_ascii) },
+    .{ .name = "join", .f = root.define(&.{ .table, .string }, join) },
+    .{ .name = "__call", .f = root.define(&.{ .any, .any }, string_call) },
 };
 
 //
@@ -314,10 +79,10 @@ fn len_f(args: []const Data, vm: *VM) !NativeResult {
 /// returns character at index as single-char string
 fn index_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
-    const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.Data.new.core(.missing) } else return .errType(1, "number", root.typeof(args[1], vm));
-    if (idx >= str.len) return .{ .ok = revo.Data.new.core(.missing) };
+    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.typeof(args[1], vm));
+    if (idx >= str.len) return .okData(revo.Data.new.core(.missing));
     const result = try vm.ownDataStringNoDedup(str[idx .. idx + 1]);
-    return .{ .ok = result };
+    return .okData(result);
 }
 
 /// > string + other: string -> string
