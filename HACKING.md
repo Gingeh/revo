@@ -125,3 +125,20 @@ notable steps
 - `zig build release` - build release binaries for all targets in `release_targets`
 
 `src/lang/tests.zig` are the integration tests
+
+# docs
+
+plaintext docs can be generated via `revo --docs`, but the documentation we have for the website needs html. this is what `revo --docs --docs-html` is for
+
+it will normally spit out the html source directly, but it can also paste into a template, replacing all that is
+between `<!-- docgen:start -->` and `<!-- docgen:end -->`
+
+they will also generate documentation for a whole directory of scripts if pointed at one
+
+this is a fish script i use for regenerating docs
+
+```fish
+set STDOCPATH ~/projects/web/revo-web/content/std.md
+revo --docs --docs-html ./src/std/iface < "$STDOCPATH" > ./std.md
+mv ./std.md $STDOCPATH 
+```

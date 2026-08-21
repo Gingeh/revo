@@ -21,7 +21,21 @@ pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
         .err => return error.IfaceParseFailed,
     };
 
-    return api.collectSpecs(alloc, root_node, false);
+    const specs = try api.collectSpecs(alloc, root_node, false);
+    errdefer freeSpecs(alloc, specs);
+
+    // `__internal*` decls are runtime plumbing, not reference material
+    var kept = std.ArrayList(FnSpec).empty;
+    errdefer kept.deinit(alloc);
+    for (specs) |s| {
+        if (std.mem.startsWith(u8, s.name, "__internal")) {
+            s.deinit(alloc);
+            continue;
+        }
+        try kept.append(alloc, s);
+    }
+    alloc.free(specs);
+    return kept.toOwnedSlice(alloc);
 }
 
 pub fn freeSpecs(alloc: std.mem.Allocator, specs: []const FnSpec) void {
@@ -207,9 +221,13 @@ fn renderFn(w: *Writer, p: Planned) !void {
 
     try w.print("#### {s}\n\n", .{spec.name});
 
-    try w.writeAll("```ruby\n");
-    try w.writeAll(spec.sig);
-    try w.writeAll("\n```\n\n");
+    if (spec.is_value) {
+        try w.writeAll("(value)\n\n");
+    } else {
+        try w.writeAll("```ruby\n");
+        try w.writeAll(spec.sig);
+        try w.writeAll("\n```\n\n");
+    }
 
     if (spec.core_key) |k| try w.print("metatable key: `{s}`\n\n", .{@tagName(k)});
 
@@ -409,6 +427,9 @@ test "renderMarkdown emits docgen sections" {
     try put(alloc, &list, "floor", "floor(n: number) -> number", "rounds down");
     try put(alloc, &list, "iter.range", "iter.range(bound: number) -> function", "yields numbers");
     try put(alloc, &list, "string.len", "string.len(self: string) -> int", "counts chars");
+    try put(alloc, &list, "width", "width", "how wide");
+    // SAFETY: renderMarkdown never mutates specs
+    @constCast(list.items[3]).is_value = true;
 
     var buf = Writer.Allocating.init(alloc);
     defer buf.deinit();
@@ -420,4 +441,7 @@ test "renderMarkdown emits docgen sections" {
     try testing.expect(std.mem.indexOf(u8, out, "#### string.len") != null);
     try testing.expect(std.mem.indexOf(u8, out, "```ruby\nfloor(n: number) -> number\n```") != null);
     try testing.expect(std.mem.indexOf(u8, out, "[floor](#floor)") != null);
+
+    // values get a marker instead of a fn signature block
+    try testing.expect(std.mem.indexOf(u8, out, "#### width\n\n(value)") != null);
 }
