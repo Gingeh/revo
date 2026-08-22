@@ -199,6 +199,7 @@ pub const StructField = struct {
     name_span: Span,
     type_name: ?*TypeExpr = null,
     default_value: ?*Node = null,
+    doc: ?[]const u8 = null,
 };
 
 pub const StructItem = union(enum) {
@@ -221,6 +222,7 @@ pub const DeclNode = struct {
     inner: *Node,
     kind: DeclKind,
     pub_: bool = false,
+    doc: ?[]const u8 = null,
 };
 
 pub const MatchMatcher = union(enum) {

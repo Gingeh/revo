@@ -545,10 +545,10 @@ const SemanticChecker = struct {
 
     fn analyzeNode(self: *SemanticChecker, node: *const ast.Node) anyerror!types_mod.TypeInfo {
         return switch (node.expr) {
-            .binding => |b| try self.analyzeBinding(b, node.span),
+            .binding => |b| try self.analyzeBinding(b, null, node.span),
             .decl => |d| try self.analyzeDecl(d, node.span),
             .struct_def => |def| try self.analyzeStruct(def, node.span),
-            .type_alias => |alias| try self.analyzeTypeAlias(alias, node.span),
+            .type_alias => |alias| try self.analyzeTypeAlias(alias, null, node.span),
             .fn_expr => |fn_expr| try self.analyzeFnExpr(fn_expr, node.span),
             .block => |exprs| blk: {
                 // synthetic blocks (e.g. from multi-import) don't create a scope
@@ -743,17 +743,17 @@ const SemanticChecker = struct {
     fn analyzeDecl(self: *SemanticChecker, decl: ast.DeclNode, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
         if (decl.kind == .declare_decl and decl.inner.expr == .type_alias) {
-            return try self.analyzeDeclare(decl.inner.expr.type_alias);
+            return try self.analyzeDeclare(decl.inner.expr.type_alias, decl.doc);
         }
         return switch (decl.inner.expr) {
-            .binding => |b| try self.analyzeBinding(b, decl.inner.span),
-            .type_alias => |alias| try self.analyzeTypeAlias(alias, decl.inner.span),
+            .binding => |b| try self.analyzeBinding(b, decl.doc, decl.inner.span),
+            .type_alias => |alias| try self.analyzeTypeAlias(alias, decl.doc, decl.inner.span),
             .struct_def => |def| try self.analyzeStruct(def, decl.inner.span),
             else => try self.analyzeNode(decl.inner),
         };
     }
 
-    fn analyzeDeclare(self: *SemanticChecker, alias: anytype) !types_mod.TypeInfo {
+    fn analyzeDeclare(self: *SemanticChecker, alias: anytype, doc: ?[]const u8) !types_mod.TypeInfo {
         // init pushes the module scope, the file body is the next scope in
         if (self.scopes.items.len != 2) {
             try self.appendError("declare must be a top-level statement", alias.type_expr.span, "declare scope");
@@ -765,9 +765,9 @@ const SemanticChecker = struct {
             return .any;
         }
         const t = type_parser.evalTypeExpr(self, alias.type_expr) catch .any;
-        try self.declare(alias.name, t, alias.doc);
+        try self.declare(alias.name, t, doc orelse alias.doc);
         // also usable in type positions: `const x: MAX_ITEMS = 5`
-        try self.type_aliases.put(alias.name, .{ .info = t, .doc = alias.doc });
+        try self.type_aliases.put(alias.name, .{ .info = t, .doc = doc orelse alias.doc });
         // host-contract sigs are as trustworthy as stdlib sigs: trust the
         // return type at call sites
         if (t == .function) {
@@ -776,10 +776,10 @@ const SemanticChecker = struct {
         return .any;
     }
 
-    fn analyzeTypeAlias(self: *SemanticChecker, alias: anytype, span: ast.Span) !types_mod.TypeInfo {
+    fn analyzeTypeAlias(self: *SemanticChecker, alias: anytype, doc: ?[]const u8, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
         const t = type_parser.evalTypeExpr(self, alias.type_expr) catch .any;
-        try self.type_aliases.put(alias.name, .{ .info = t, .doc = alias.doc });
+        try self.type_aliases.put(alias.name, .{ .info = t, .doc = doc orelse alias.doc });
         return .any;
     }
 
@@ -817,7 +817,7 @@ const SemanticChecker = struct {
                 });
             },
             .binding => |b| {
-                _ = try self.analyzeBinding(b, b.target.span);
+                _ = try self.analyzeBinding(b, null, b.target.span);
             },
         };
 
@@ -844,7 +844,7 @@ const SemanticChecker = struct {
         return self.analyzeFnBody(fn_expr, sig);
     }
 
-    fn analyzeBinding(self: *SemanticChecker, binding: ast.Binding, _: ast.Span) !types_mod.TypeInfo {
+    fn analyzeBinding(self: *SemanticChecker, binding: ast.Binding, decl_doc: ?[]const u8, _: ast.Span) !types_mod.TypeInfo {
         if (binding.target.expr != .ident) {
             if (binding.target.expr == .tuple_pattern) {
                 _ = try self.analyzeNode(binding.value);
@@ -853,8 +853,8 @@ const SemanticChecker = struct {
             return .any;
         }
         const name = binding.target.expr.ident;
-        // docs ride on the binding; ident values inherit the source's doc
-        const doc: ?[]const u8 = binding.doc orelse if (binding.value.expr == .ident)
+        // docs ride on the decl wrapper; ident values inherit the source's doc
+        const doc: ?[]const u8 = decl_doc orelse binding.doc orelse if (binding.value.expr == .ident)
             if (self.lookupEntry(binding.value.expr.ident)) |src| src.doc else null
         else
             null;

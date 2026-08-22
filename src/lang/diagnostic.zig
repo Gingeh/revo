@@ -741,7 +741,8 @@ fn renderBoxSpanBlock(
 
     const first_line = lines_view[0];
     const last_line = lines_view[lines_view.len - 1];
-    // display widths of the shared indent — tabs make it wider than its byte count
+    // display widths of the shared indent
+    // tabs make it wider than its byte count
     const first_trim_w = displayWidth(first_line.text[0..@min(display_trim, first_line.text.len)], 0);
     const last_trim_w = displayWidth(last_line.text[0..@min(display_trim, last_line.text.len)], 0);
     // marker rows sit one column further left than code rows

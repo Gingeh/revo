@@ -567,20 +567,13 @@ fn parseDocAttr(self: *Parser, doc_token: Token) anyerror!*Node {
 
 fn applyDocAttr(node: *Node, doc_text: []const u8) anyerror!*Node {
     switch (node.expr) {
-        // the doc belongs to the declared thing, not the decl wrapper
-        .decl => |d| {
-            _ = try applyDocAttr(d.inner, doc_text);
-            return node;
-        },
-        .binding => |*b| {
-            b.doc = doc_text;
-            return node;
-        },
-        .type_alias => |*t| {
-            t.doc = doc_text;
+        // every decl kind gets docs through this one slot
+        .decl => |*d| {
+            d.doc = doc_text;
             return node;
         },
         .assign_expr => {
+            // method-style `fn obj:name` isn't a decl wrapper, doc rides the fn
             const value = node.expr.assign_expr.value;
             if (value.expr != .fn_expr) return error.UnexpectedToken;
             value.expr.fn_expr.doc = doc_text;
@@ -1286,6 +1279,13 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
     var end_span = name.span();
 
     while (!self.check(.rsquiggly) and !self.check(.eof)) {
+        // pending doc comment attaches to whatever item comes next
+        var pending_doc: ?[]const u8 = null;
+        if (self.check(.doc_comment)) {
+            const doc_token = self.advance();
+            pending_doc = std.mem.trim(u8, doc_token.text, " \t\n\r");
+        }
+
         // branch const/let
         if (self.check(.kw_const) or self.check(.kw_let)) {
             const binding_start = self.advance();
@@ -1297,7 +1297,10 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
             end_span = binding_expr.span;
             switch (binding_expr.expr) {
                 .decl => |decl| switch (decl.inner.expr) {
-                    .binding => |binding| try items.append(self.alloc, .{ .binding = binding }),
+                    .binding => |*binding| {
+                        if (pending_doc) |doc| binding.doc = doc;
+                        try items.append(self.alloc, .{ .binding = binding.* });
+                    },
                     else => return error.UnexpectedToken,
                 },
                 else => return error.UnexpectedToken,
@@ -1316,6 +1319,7 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
             const binding: ast.Binding = .{
                 .target = target,
                 .value = fn_expr,
+                .doc = pending_doc,
             };
             try items.append(self.alloc, .{ .binding = binding });
             if (!self.match(.comma)) break;
@@ -1324,7 +1328,7 @@ fn parseStruct(self: *Parser, start: Token) anyerror!*Node {
 
         // branch field: name: type = default
         const field_name = try self.expectIdent();
-        var field: ast.StructField = .{ .name = field_name.text, .name_span = field_name.span() };
+        var field: ast.StructField = .{ .name = field_name.text, .name_span = field_name.span(), .doc = pending_doc };
         if (self.match(.colon)) field.type_name = try self.parseTypeExpr();
         if (self.match(.assign)) field.default_value = try self.parseStatementExpression(0);
         end_span = if (field.default_value) |value| value.span else field_name.span();
@@ -2239,7 +2243,7 @@ test "parses doc comment on function declaration" {
     try std.testing.expect(root.expr.decl.inner.expr == .binding);
     const b = root.expr.decl.inner.expr.binding;
     try std.testing.expect(b.value.expr == .fn_expr);
-    try std.testing.expectEqualStrings("adds", b.doc.?);
+    try std.testing.expectEqualStrings("adds", root.expr.decl.doc.?);
 }
 
 test "doc comment attaches to non-fn const binding" {
@@ -2256,7 +2260,7 @@ test "doc comment attaches to non-fn const binding" {
     try std.testing.expect(root.expr == .decl);
     const b = root.expr.decl.inner.expr.binding;
     try std.testing.expect(b.value.expr == .number);
-    try std.testing.expectEqualStrings("a plain value", b.doc.?);
+    try std.testing.expectEqualStrings("a plain value", root.expr.decl.doc.?);
 }
 
 test "parses @native annotation on function declaration" {
@@ -2290,7 +2294,7 @@ test "parses @native with a doc comment" {
     const b = root.expr.decl.inner.expr.binding;
     try std.testing.expect(b.value.expr == .fn_expr);
     try std.testing.expect(b.value.expr.fn_expr.native);
-    try std.testing.expectEqualStrings("adds two numbers", b.doc.?);
+    try std.testing.expectEqualStrings("adds two numbers", root.expr.decl.doc.?);
 }
 
 test "unknown attribute is a parse error" {
@@ -2464,7 +2468,7 @@ test "declare fn doc comment attaches to the decl" {
     try std.testing.expect(root.expr == .decl);
     try std.testing.expectEqualStrings(
         "lights the lamp loudness",
-        root.expr.decl.inner.expr.type_alias.doc.?,
+        root.expr.decl.doc.?,
     );
 }
 
@@ -2475,7 +2479,7 @@ test "doc comment attaches to any decl, docs land on the declared thing" {
 
     const tokens = try lexer.lexAt(alloc, "#* a doc *# const x = 42", .{});
     const root = try parseTokens(alloc, tokens);
-    try std.testing.expectEqualStrings("a doc", root.expr.decl.inner.expr.binding.doc.?);
+    try std.testing.expectEqualStrings("a doc", root.expr.decl.doc.?);
 }
 
 test "declare defaults to pub" {
@@ -2487,3 +2491,4 @@ test "declare defaults to pub" {
     const root = try parseTokens(alloc, tokens);
     try std.testing.expect(root.expr.decl.pub_);
 }
+

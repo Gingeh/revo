@@ -318,17 +318,22 @@ pub fn collectSpecs(alloc: std.mem.Allocator, node: *const revo.lang.Node, iface
         switch (d.inner.expr) {
             .type_alias => |t| {
                 if (d.kind != .declare_decl) continue;
-                try specs.append(alloc, try specFromDecl(alloc, t, iface));
+                try specs.append(alloc, try specFromDecl(alloc, t, d.doc orelse t.doc, iface));
             },
             .binding => |b| {
+                const doc = d.doc orelse b.doc;
                 if (iface) continue;
-                if (b.doc == null) continue;
+                if (doc == null) continue;
                 if (b.target.expr != .ident) continue;
                 if (b.value.expr == .fn_expr) {
-                    try specs.append(alloc, try specFromBinding(alloc, b));
+                    try specs.append(alloc, try specFromBinding(alloc, b, doc));
                 } else {
-                    try specs.append(alloc, try specFromConst(alloc, b.target.expr.ident, b.doc));
+                    try specs.append(alloc, try specFromConst(alloc, b.target.expr.ident, doc));
                 }
+            },
+            .struct_def => |s| {
+                if (d.doc == null) continue;
+                try specs.append(alloc, try specFromStruct(alloc, s, d.doc.?));
             },
             else => {},
         }
@@ -356,9 +361,9 @@ fn specFromAssign(alloc: std.mem.Allocator, ae: anytype, doc: ?[]const u8) !FnSp
 }
 
 /// a `#* ... *#`-attributed `const f = fn(...)` binding, spec'd like a declare
-fn specFromBinding(alloc: std.mem.Allocator, b: ast.Binding) !FnSpec {
+fn specFromBinding(alloc: std.mem.Allocator, b: ast.Binding, doc: ?[]const u8) !FnSpec {
     const t = b.value.expr.fn_expr;
-    return specFromFn(alloc, b.target.expr.ident, b.target.expr.ident, t.params, t.return_type, b.doc, false);
+    return specFromFn(alloc, b.target.expr.ident, b.target.expr.ident, t.params, t.return_type, doc, false);
 }
 
 /// a `#* ... *#`-attributed non-fn binding (`const a = 5`): named value with
@@ -381,7 +386,7 @@ fn specFromConst(alloc: std.mem.Allocator, name: []const u8, doc: ?[]const u8) !
     };
 }
 
-pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, strict: bool) !FnSpec {
+pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8, strict: bool) !FnSpec {
     const tps = if (alias.declare_tps.len > 0) blk: {
         const joined = try std.mem.join(alloc, ", ", alias.declare_tps);
         defer alloc.free(joined);
@@ -412,7 +417,41 @@ pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, strict: bool
         else => return error.IfaceDeclNotAFunction,
     };
 
-    return specFromFn(alloc, name, head, fn_type.params, fn_type.return_type, alias.doc, strict);
+    return specFromFn(alloc, name, head, fn_type.params, fn_type.return_type, doc orelse alias.doc, strict);
+}
+
+fn specFromStruct(alloc: std.mem.Allocator, s: anytype, doc: []const u8) !FnSpec {
+    var doc_buf = std.ArrayList(u8).empty;
+    defer doc_buf.deinit(alloc);
+    try doc_buf.appendSlice(alloc, doc);
+
+    for (s.items) |item| {
+        switch (item) {
+            .field => |f| {
+                const fdoc = f.doc orelse continue;
+                try doc_buf.appendSlice(alloc, "\n\n- `");
+                try doc_buf.appendSlice(alloc, f.name);
+                if (f.type_name) |tn| {
+                    try doc_buf.appendSlice(alloc, ": ");
+                    try renderType(alloc, &doc_buf, tn);
+                }
+                try doc_buf.appendSlice(alloc, "` - ");
+                try doc_buf.appendSlice(alloc, fdoc);
+            },
+            // struct fns ride along as method specs via their binding docs
+            .binding => {},
+        }
+    }
+
+    return .{
+        .name = try alloc.dupe(u8, s.name),
+        .sig = try alloc.dupe(u8, s.name),
+        .params = &.{},
+        .ret = "",
+        .doc = try alloc.dupe(u8, std.mem.trimEnd(u8, doc_buf.items, "\n")),
+        .is_value = true,
+        .f = undefined,
+    };
 }
 
 /// shared assembly: params, sig text, doc normalization, core key. `strict`
