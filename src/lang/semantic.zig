@@ -136,6 +136,8 @@ const SemanticChecker = struct {
     /// known globals rebound by user code (shadowed by a local binding)
     shadowed_globals: std.StringHashMap(void),
     current_type_params: []const []const u8 = &.{},
+    /// > 0 while inside a fn body; gates type_map/docs exports
+    fn_nesting: usize = 0,
     import_fn_sigs: std.StringHashMap(std.ArrayList(lang.pipeline.ImportFnMeta)),
     dep_asts: std.ArrayList(*const ast.Node),
 
@@ -267,17 +269,24 @@ const SemanticChecker = struct {
             try self.shadowed_globals.put(name, {});
         }
 
+        // module surface: top-level re-declarations shadow (newest wins);
+        // fn-local bindings only fill names the surface doesn't have yet
         if (export_type) {
             if (self.type_map) |tm| {
-                if (!tm.contains(name)) {
+                if (self.fn_nesting == 0) {
+                    if (tm.contains(name)) _ = tm.remove(name);
+                    try tm.put(try self.alloc.dupe(u8, name), t);
+                } else if (!tm.contains(name)) {
                     try tm.put(try self.alloc.dupe(u8, name), t);
                 }
             }
-            if (doc) |d| {
-                if (self.docs) |dm| {
-                    const key = try self.alloc.dupe(u8, name);
-                    errdefer self.alloc.free(key);
-                    try dm.put(key, d);
+            if (self.fn_nesting == 0) {
+                if (doc) |d| {
+                    if (self.docs) |dm| {
+                        const key = try self.alloc.dupe(u8, name);
+                        errdefer self.alloc.free(key);
+                        try dm.put(key, d);
+                    }
                 }
             }
         }
@@ -514,6 +523,9 @@ const SemanticChecker = struct {
     fn analyzeFnBody(self: *SemanticChecker, fn_expr: anytype, sig: *FnSig) !types_mod.TypeInfo {
         try self.return_types.append(self.alloc, sig.return_type);
         defer _ = self.return_types.pop();
+
+        self.fn_nesting += 1;
+        defer self.fn_nesting -= 1;
 
         try self.pushScope();
         defer self.popScope();
@@ -879,6 +891,17 @@ const SemanticChecker = struct {
         if (binding.value.expr == .table) {
             var fields = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
             for (binding.value.expr.table) |entry| {
+                // `fn name(self) ...` - a method definition, keyless entry
+                if (entry.key == null and entry.value.expr == .decl and
+                    entry.value.expr.decl.inner.expr == .binding)
+                {
+                    const mb = entry.value.expr.decl.inner.expr.binding;
+                    if (mb.target.expr == .ident and mb.value.expr == .fn_expr) {
+                        const ft = try self.analyzeNode(entry.value);
+                        try fields.put(mb.target.expr.ident, ft);
+                        continue;
+                    }
+                }
                 if (entry.key) |key| {
                     if (key.expr == .ident) {
                         const field_type = try self.analyzeNode(entry.value);

@@ -1151,42 +1151,27 @@ pub fn inlayHints(
 
         const line = sourceLine(snap.text, sym.range.start.line);
 
+        // fn declarations get `-> ret` after the params; aliases fall
+        // through to the generic `: type` hint below
         if (ti == .function) {
             const decl_needle = try std.fmt.allocPrint(alloc, "fn {s}(", .{sym.name});
             defer alloc.free(decl_needle);
-            const is_decl = std.mem.indexOf(u8, line, decl_needle) != null;
+            if (std.mem.indexOf(u8, line, decl_needle) != null) {
+                if (std.mem.indexOf(u8, line, "->") != null or ti.function.return_type == .any) continue;
+                const ret = try ti.function.return_type.formatType(alloc);
+                defer alloc.free(ret);
 
-            if (!is_decl) {
-                // alias like `const z = yo`
-                const tn = try ti.formatType(alloc);
-                defer alloc.free(tn);
-                const needle = try std.fmt.allocPrint(alloc, ": {s}", .{tn});
-                defer alloc.free(needle);
-                if (std.mem.indexOf(u8, line, needle) != null) continue;
+                var paren = sym.range.end.character;
+                while (paren < line.len and line[paren] != ')') paren += 1;
+                if (paren >= line.len) continue;
+
                 try hints.append(alloc, .{
-                    .position = sym.range.end,
-                    .label = try std.fmt.allocPrint(alloc, ": {s}", .{tn}),
+                    .position = .{ .line = sym.range.start.line, .character = paren + 1 },
+                    .label = try std.fmt.allocPrint(alloc, " -> {s}", .{ret}),
                     .kind = .type,
                 });
                 continue;
             }
-
-            // declaration: `-> ret` after the params, unless annotated
-            if (std.mem.indexOf(u8, line, "->") != null) continue;
-            if (ti.function.return_type == .any) continue;
-            const ret = try ti.function.return_type.formatType(alloc);
-            defer alloc.free(ret);
-
-            var paren = sym.range.end.character;
-            while (paren < line.len and line[paren] != ')') paren += 1;
-            if (paren >= line.len) continue;
-
-            try hints.append(alloc, .{
-                .position = .{ .line = sym.range.start.line, .character = paren + 1 },
-                .label = try std.fmt.allocPrint(alloc, " -> {s}", .{ret}),
-                .kind = .type,
-            });
-            continue;
         }
 
         const tn = try ti.formatType(alloc);
@@ -1202,7 +1187,67 @@ pub fn inlayHints(
         });
     }
 
+    try appendParamHints(self, alloc, &hints, id, snap.text);
+
     return hints.toOwnedSlice(alloc);
+}
+
+/// local fns via the sig map, stdlib globals as fallback
+const ParamHintVisitor = struct {
+    ws: *Workspace,
+    id: FileId,
+    hints: *std.ArrayList(InlayHint),
+    alloc: std.mem.Allocator,
+
+    pub fn visit(self: *@This(), node: *const lang.Node) void {
+        switch (node.expr) {
+            .call => |c| if (c.callee.expr == .ident and !c.implicit_self and c.args.len > 0) {
+                const names = self.paramNames(c.callee.expr.ident);
+                for (c.args, 0..) |arg, i| {
+                    if (i >= names.len) break;
+                    self.hints.append(self.alloc, .{
+                        .position = .{ .line = arg.span.line, .character = arg.span.column },
+                        .label = names[i],
+                        .kind = .parameter,
+                    }) catch return;
+                }
+            },
+            else => {},
+        }
+        lang.ast.walkAST(@This(), self, node);
+    }
+
+    fn paramNames(self: *@This(), name: []const u8) []const []const u8 {
+        if (self.ws.inspect_cache.getPtr(self.id)) |cache| {
+            if (cache.sig_map.get(name)) |sig| {
+                var out = std.ArrayList([]const u8).empty;
+                for (sig.params) |p| out.append(self.alloc, p.name) catch return &.{};
+                return out.toOwnedSlice(self.alloc) catch &.{};
+            }
+        }
+        if (revo.std_lib.api.find(name)) |spec| {
+            var out = std.ArrayList([]const u8).empty;
+            for (spec.params) |p| out.append(self.alloc, p[0]) catch return &.{};
+            return out.toOwnedSlice(self.alloc) catch &.{};
+        }
+        return &.{};
+    }
+};
+
+fn appendParamHints(
+    ws: *Workspace,
+    alloc: std.mem.Allocator,
+    hints: *std.ArrayList(InlayHint),
+    id: FileId,
+    text: []const u8,
+) !void {
+    const parsed = lang.parseSourceReport(alloc, text) catch return;
+    const root = switch (parsed) {
+        .ok => |r| r,
+        .err => return,
+    };
+    var visitor = ParamHintVisitor{ .ws = ws, .id = id, .hints = hints, .alloc = alloc };
+    visitor.visit(root);
 }
 
 /// lookup a function signature from the inspect cache for file `id`
@@ -1709,6 +1754,21 @@ const SigVisitor = struct {
     sig_map: *std.StringHashMapUnmanaged(FnSig),
     alloc: std.mem.Allocator,
 
+    fn paramInfos(self: *@This(), fn_expr: anytype) ?[]ParamInfo {
+        const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return null;
+        errdefer self.alloc.free(params);
+        for (fn_expr.params, params) |src, *dst| {
+            dst.* = .{
+                .name = self.alloc.dupe(u8, src.name) catch return null,
+                .type_name = if (src.type_name) |te|
+                    type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, te) catch null
+                else
+                    null,
+            };
+        }
+        return params;
+    }
+
     pub fn visit(self: *@This(), node: *const lang.Node) void {
         switch (node.expr) {
             .type_alias => |t| {
@@ -1748,14 +1808,7 @@ const SigVisitor = struct {
                 const fn_expr = b.value.expr.fn_expr;
                 const name = b.target.expr.ident;
 
-                const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return;
-                errdefer self.alloc.free(params);
-                for (fn_expr.params, params) |src, *dst| {
-                    dst.* = .{
-                        .name = self.alloc.dupe(u8, src.name) catch return,
-                        .type_name = null,
-                    };
-                }
+                const params = self.paramInfos(fn_expr) orelse return;
 
                 const name_owned = self.alloc.dupe(u8, name) catch return;
                 self.sig_map.put(self.alloc, name_owned, .{
@@ -1774,14 +1827,7 @@ const SigVisitor = struct {
                     else => return,
                 };
 
-                const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return;
-                errdefer self.alloc.free(params);
-                for (fn_expr.params, params) |src, *dst| {
-                    dst.* = .{
-                        .name = self.alloc.dupe(u8, src.name) catch return,
-                        .type_name = null,
-                    };
-                }
+                const params = self.paramInfos(fn_expr) orelse return;
 
                 const return_type: ?types.TypeInfo = null;
                 const name_owned = self.alloc.dupe(u8, name) catch return;

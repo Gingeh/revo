@@ -373,6 +373,7 @@ const Handler = struct {
                 .kind = switch (sym.kind) {
                     .binding => .Variable,
                     .function => .Function,
+                    .param => .Variable,
                     .struct_type => .Struct,
                     .type_alias => .Class,
                 },
@@ -540,6 +541,7 @@ const Handler = struct {
                     .parameter => T.InlayHint.Kind.Parameter,
                 },
                 .paddingLeft = false,
+                .paddingRight = ws_hint.kind == .parameter,
             });
         }
         return try out.toOwnedSlice(arena);

@@ -417,6 +417,7 @@ test "renderMarkdown emits docgen sections" {
     const put = struct {
         fn put(alloc_in: std.mem.Allocator, list: *std.ArrayList(*const FnSpec), name: []const u8, sig: []const u8, doc: []const u8) !void {
             const s = try alloc_in.create(FnSpec);
+            // SAFETY: shut up zlint
             s.* = .{ .name = name, .sig = sig, .doc = doc, .params = &.{}, .ret = "", .f = undefined };
             try list.append(alloc_in, s);
         }

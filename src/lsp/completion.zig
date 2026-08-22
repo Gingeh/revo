@@ -211,7 +211,7 @@ fn addGeneralCompletions(
                 .function => .Function,
                 .struct_type => .Struct,
                 .type_alias => .Class,
-                .binding => .Variable,
+                .binding, .param => .Variable,
             };
             // avoid exact dupes with globals (prefer local)
             var duped = false;

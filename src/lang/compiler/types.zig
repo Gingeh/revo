@@ -593,6 +593,13 @@ fn inferTableType(ctx: anytype, entries: []const ast.TableEntry) TypeInfo {
     var saw_implicit_key = false;
 
     for (entries) |entry| {
+        // method definitions carry no value type
+        if (entry.key == null and entry.value.expr == .decl and
+            entry.value.expr.decl.inner.expr == .binding and
+            entry.value.expr.decl.inner.expr.binding.value.expr == .fn_expr)
+        {
+            continue;
+        }
         value_type = mergeInferredType(value_type, inferExprType(ctx, entry.value));
         if (entry.key) |key| {
             const inferred_key = inferTableKeyType(ctx, key, entry.computed);
