@@ -332,8 +332,35 @@ pub fn collectSpecs(alloc: std.mem.Allocator, node: *const revo.lang.Node, iface
                 }
             },
             .struct_def => |s| {
-                if (d.doc == null) continue;
-                try specs.append(alloc, try specFromStruct(alloc, s, d.doc.?));
+                if (iface) continue;
+                if (d.doc != null) try specs.append(alloc, try specFromStruct(alloc, s, d.doc.?));
+                // documented struct fns become method specs under the type
+                for (s.items) |si| switch (si) {
+                    .binding => |b| {
+                        const bdoc = b.doc orelse continue;
+                        if (b.target.expr != .ident) continue;
+                        var v = b.value;
+                        while (v.expr == .decl) v = v.expr.decl.inner;
+                        if (v.expr != .fn_expr) continue;
+                        const f = v.expr.fn_expr;
+                        const head = try std.fmt.allocPrint(
+                            alloc,
+                            "{s}:{s}",
+                            .{ s.name, b.target.expr.ident },
+                        );
+                        defer alloc.free(head);
+                        try specs.append(alloc, try specFromFn(
+                            alloc,
+                            head,
+                            head,
+                            f.params,
+                            f.return_type,
+                            bdoc,
+                            false,
+                        ));
+                    },
+                    .field => {},
+                };
             },
             else => {},
         }
@@ -412,10 +439,28 @@ pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]cons
     defer alloc.free(head);
     if (tps.len > 0) alloc.free(tps);
 
-    const fn_type = switch (alias.type_expr.kind) {
-        .function => |f| f,
-        else => return error.IfaceDeclNotAFunction,
-    };
+    if (alias.type_expr.kind != .function) {
+        // non-function alias: a named type, documented like a value
+        var doc_buf = std.ArrayList(u8).empty;
+        defer doc_buf.deinit(alloc);
+        try doc_buf.appendSlice(alloc, "alias for `");
+        try renderType(alloc, &doc_buf, alias.type_expr);
+        try doc_buf.appendSlice(alloc, "`");
+        if (doc) |d| {
+            try doc_buf.appendSlice(alloc, "\n\n");
+            try doc_buf.appendSlice(alloc, d);
+        }
+        return .{
+            .name = try alloc.dupe(u8, name),
+            .sig = try alloc.dupe(u8, head),
+            .params = &.{},
+            .ret = "",
+            .doc = try alloc.dupe(u8, std.mem.trimEnd(u8, doc_buf.items, "\n")),
+            .is_value = true,
+            .f = undefined,
+        };
+    }
+    const fn_type = alias.type_expr.kind.function;
 
     return specFromFn(alloc, name, head, fn_type.params, fn_type.return_type, doc orelse alias.doc, strict);
 }

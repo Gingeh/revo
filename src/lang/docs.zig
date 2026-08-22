@@ -9,8 +9,21 @@ const headOf = api.headOf;
 
 // -- [extract] ---------------------------------------------------------------
 
-/// `#* ... *#`-attributed fn bindings and `pub declare` aliases
-pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
+pub const Extracted = struct {
+    specs: []FnSpec,
+    module_doc: []const u8 = "",
+};
+
+/// a `##! ... !##` block before any code is the module's own doc
+fn moduleDoc(src: []const u8) []const u8 {
+    const rest = std.mem.trim(u8, src, " \t\r\n");
+    if (!std.mem.startsWith(u8, rest, "##!")) return "";
+    const end = std.mem.indexOfPos(u8, rest, 3, "!##") orelse return "";
+    return std.mem.trim(u8, rest[3..end], " \t\r\n");
+}
+
+/// `#* ... *#`-attributed decls and a leading `##! ... !##` module doc
+pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) !Extracted {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const a = arena.allocator();
@@ -24,9 +37,9 @@ pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
     const specs = try api.collectSpecs(alloc, root_node, false);
     errdefer freeSpecs(alloc, specs);
 
-    // `__internal*` decls are runtime plumbing, not reference material
     var kept = std.ArrayList(FnSpec).empty;
     errdefer kept.deinit(alloc);
+
     for (specs) |s| {
         if (std.mem.startsWith(u8, s.name, "__internal")) {
             s.deinit(alloc);
@@ -34,8 +47,9 @@ pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
         }
         try kept.append(alloc, s);
     }
+
     alloc.free(specs);
-    return kept.toOwnedSlice(alloc);
+    return .{ .specs = try kept.toOwnedSlice(alloc), .module_doc = moduleDoc(src) };
 }
 
 pub fn freeSpecs(alloc: std.mem.Allocator, specs: []const FnSpec) void {
@@ -63,12 +77,24 @@ pub fn spliceMarkdown(alloc: std.mem.Allocator, old: []const u8, body: []const u
     });
 }
 
-/// render the stdlib reference: `globals`/`modules`/`methods` sections
-/// with per-fn anchors, toc links, `<details>` collapsibles, and the
-/// prose/code doc split. hugo-goldmark-compatible slugs
-pub fn renderMarkdown(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec) !void {
+/// optional module intro,
+/// then `globals`/`modules`/`methods` sections with per-fn anchors,
+/// toc links,
+/// `<details>` collapsibles,
+/// and the prose/code doc split
+/// hugo-goldmark-compatible
+pub fn renderMarkdown(
+    alloc: std.mem.Allocator,
+    w: *Writer,
+    specs: []*const FnSpec,
+    module_doc: []const u8,
+) !void {
     var slugs = SlugSet{};
     defer slugs.deinit(alloc);
+    if (module_doc.len > 0) {
+        try w.writeAll(module_doc);
+        try w.writeAll("\n\n");
+    }
     try renderGlobals(alloc, w, specs, &slugs);
     try renderModules(alloc, w, specs, &slugs);
     try renderMethods(alloc, w, specs, &slugs);
@@ -353,8 +379,9 @@ test "docsExtract specs plain fn bindings" {
         \\
         \\const hidden = fn() 1
     ;
-    const specs = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, specs);
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    const specs = extracted.specs;
     try testing.expectEqual(@as(usize, 2), specs.len);
     try testing.expectEqualStrings("add", specs[0].name);
     try testing.expectEqualStrings("add(a: int, b: int)", specs[0].sig);
@@ -373,13 +400,81 @@ test "docsExtract specs documented non-fn bindings" {
         \\#* typed *#
         \\const b: number = 1
     ;
-    const specs = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, specs);
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    const specs = extracted.specs;
     try testing.expectEqual(@as(usize, 3), specs.len);
     try testing.expectEqualStrings("a", specs[0].name);
     try testing.expectEqualStrings("a", specs[0].sig);
     try testing.expectEqualStrings("a plain constant", specs[0].doc);
     try testing.expectEqualStrings("b", specs[2].name);
+}
+
+test "docsExtract lifts a ##! module doc" {
+    const src =
+        \\##!
+        \\ things about numbers
+        \\!##
+        \\
+        \\#* doubles *#
+        \\const twice = fn(n: number) -> number n * 2
+    ;
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    try testing.expectEqualStrings("things about numbers", extracted.module_doc);
+    try testing.expectEqual(@as(usize, 1), extracted.specs.len);
+}
+
+test "docsExtract skips module doc when code comes first" {
+    const src =
+        \\const x = 1
+        \\
+        \\##!
+        \\ too late
+        \\!##
+    ;
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    try testing.expectEqualStrings("", extracted.module_doc);
+}
+
+test "docsExtract specs non-function declares" {
+    const src =
+        \\#* an id *#
+        \\pub declare id = number|string
+    ;
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    try testing.expectEqual(@as(usize, 1), extracted.specs.len);
+    const s = extracted.specs[0];
+    try testing.expectEqualStrings("id", s.name);
+    try testing.expect(s.is_value);
+    try testing.expect(std.mem.indexOf(u8, s.doc, "alias for `number|string`") != null);
+    try testing.expect(std.mem.indexOf(u8, s.doc, "an id") != null);
+}
+
+test "docsExtract specs struct fns as methods" {
+    const src =
+        \\#* a point in space *#
+        \\struct Point {
+        \\  #* horizontal *#
+        \\  x: number,
+        \\  #* distance from origin *#
+        \\  fn len(self) -> number do
+        \\    return 0
+        \\  end
+        \\}
+    ;
+    const extracted = try docsExtract(testing.allocator, src);
+    defer freeSpecs(testing.allocator, extracted.specs);
+    try testing.expectEqual(@as(usize, 2), extracted.specs.len);
+    try testing.expectEqualStrings("Point", extracted.specs[0].name);
+    try testing.expect(extracted.specs[0].is_value);
+    const m = extracted.specs[1];
+    try testing.expectEqualStrings("Point:len", m.name);
+    try testing.expectEqualStrings("Point:len(self) -> number", m.sig);
+    try testing.expectEqualStrings("distance from origin", m.doc);
+    try testing.expect(!m.is_value);
 }
 
 test "spliceMarkdown round trips through the markers" {
@@ -434,7 +529,7 @@ test "renderMarkdown emits docgen sections" {
 
     var buf = Writer.Allocating.init(alloc);
     defer buf.deinit();
-    try renderMarkdown(alloc, &buf.writer, list.items);
+    try renderMarkdown(alloc, &buf.writer, list.items, "");
     const out = buf.written();
     try testing.expect(std.mem.indexOf(u8, out, "## globals") != null);
     try testing.expect(std.mem.indexOf(u8, out, "## modules") != null);

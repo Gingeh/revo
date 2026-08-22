@@ -443,13 +443,14 @@ fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Con
     defer owned.deinit(arena);
     var flat = std.ArrayList(*const docs.FnSpec).empty;
     defer flat.deinit(arena);
+    var module_doc: []const u8 = "";
 
     const target: []const u8 = blk: {
         if (config.script_path) |path| {
             if (isDir(init, path)) {
                 try collectAll(init, gpa, arena, path, &owned, &flat);
             } else {
-                try addDocsFromPath(init, gpa, arena, path, &owned, &flat);
+                module_doc = try addDocsFromPath(init, gpa, arena, path, &owned, &flat);
             }
             break :blk path;
         } else if (splice or stdin_tty) {
@@ -461,12 +462,12 @@ fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Con
             break :blk t;
         } else {
             // `--docs-html`/`--docs` piped a revo source on stdin
-            try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
+            module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
             break :blk "<stdin>";
         }
     };
 
-    try emitDocs(init, gpa, arena, target, flat.items, html, splice);
+    try emitDocs(init, gpa, arena, target, flat.items, module_doc, html, splice);
     for (owned.items) |s| docs.freeSpecs(gpa, s);
 }
 
@@ -493,7 +494,7 @@ fn collectAll(
             printError(init, "reading {s} - {}", .{ f, err });
             return error.FileError;
         };
-        addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
+        _ = addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
             error.IfaceParseFailed,
             error.IfaceParamNotTyped,
             error.IfaceBadBindingTarget,
@@ -506,7 +507,8 @@ fn collectAll(
     }
 }
 
-/// read one source and extract its docs; a parse failure is fatal
+/// read one source and extract its docs; a parse failure is fatal.
+/// returns the module's own doc, if the file carries one
 fn addDocsFromPath(
     init: std.process.Init,
     gpa: Allocator,
@@ -514,7 +516,7 @@ fn addDocsFromPath(
     path: []const u8,
     owned: *std.ArrayList([]docs.FnSpec),
     flat: *std.ArrayList(*const docs.FnSpec),
-) !void {
+) ![]const u8 {
     const source = std.Io.Dir.cwd().readFileAlloc(
         init.io,
         path,
@@ -524,7 +526,7 @@ fn addDocsFromPath(
         printError(init, "reading {s} - {}", .{ path, err });
         return error.FileError;
     };
-    addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
+    return addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
         error.IfaceParseFailed => {
             printError(init, "parse error while extracting docs", .{});
             return error.CompilationError;
@@ -533,16 +535,19 @@ fn addDocsFromPath(
     };
 }
 
+/// extract docs from one in-memory source; returns the module doc, which
+/// borrows from `source`
 fn addDocsFromSource(
     gpa: Allocator,
     arena: Allocator,
     source: []const u8,
     owned: *std.ArrayList([]docs.FnSpec),
     flat: *std.ArrayList(*const docs.FnSpec),
-) !void {
-    const specs = try docs.docsExtract(gpa, source);
-    try owned.append(arena, specs);
-    for (specs) |*s| try flat.append(arena, s);
+) ![]const u8 {
+    const extracted = try docs.docsExtract(gpa, source);
+    try owned.append(arena, extracted.specs);
+    for (extracted.specs) |*s| try flat.append(arena, s);
+    return extracted.module_doc;
 }
 
 /// recursive walk for `*.rv` sources, skipping hidden dirs and build dirs
@@ -584,15 +589,16 @@ fn emitDocs(
     arena: Allocator,
     target: []const u8,
     flat: []*const docs.FnSpec,
+    module_doc: []const u8,
     html: bool,
     splice: bool,
 ) !void {
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
     if (html) {
-        try docs.renderMarkdown(gpa, &buf.writer, flat);
+        try docs.renderMarkdown(gpa, &buf.writer, flat, module_doc);
     } else {
-        try renderPlain(&buf.writer, target, flat);
+        try renderPlain(&buf.writer, target, flat, module_doc);
     }
 
     const body = std.mem.trim(u8, buf.written(), "\n");
@@ -616,8 +622,14 @@ fn emitDocs(
 }
 
 /// plain listing: name/arity plus the doc text, documented specs only
-fn renderPlain(w: *std.Io.Writer, target: []const u8, specs: []*const docs.FnSpec) !void {
+fn renderPlain(
+    w: *std.Io.Writer,
+    target: []const u8,
+    specs: []*const docs.FnSpec,
+    module_doc: []const u8,
+) !void {
     try w.print("# docs for {s}\n", .{target});
+    if (module_doc.len > 0) try w.print("\n{s}\n", .{module_doc});
     var count: usize = 0;
     for (specs) |s| {
         if (s.doc.len == 0) continue;
