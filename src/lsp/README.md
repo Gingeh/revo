@@ -9,28 +9,21 @@ the server builds on the great work done by the zls team, being [lsp-kit][#refer
 
 ## installation
 
-release builds of `revo` bundle the LSP! run `revo --lsp` to start it.
+the LSP bundles into the `revo` binary itself - there is no standalone server binary.
+run `revo lsp` to start it.
 
 note: omit `lsp` from `-Dfeatures` to exclude it from any build
-
-to build the standalone server binary:
-
-```bash
-zig build lsp
-```
-
-the binary is then gonna be at `zig-out/bin/revolt`
 
 if you know how to add an lsp to emacs/zed/vscode/flow/whatever, please make a pull request!
 
 ### neovim
 
-compile the binary and put it somewhere in your path
+compile `revo` and put it somewhere in your path
 if you don't want to do so, just change the cmd field to wherever it is
 
 ```lua
 vim.lsp.config('revolt', {
-  cmd = { 'revolt' },
+  cmd = { 'revo', 'lsp' },
   filetypes = { 'rv' },
   root_markers = { 'lib.json', 'exe.json', '.git' },
 })
@@ -68,7 +61,8 @@ language-servers = [ "revolt" ]
 scope = "source.revo"
 
 [language-server.revolt]
-command = "revolt"
+command = "revo"
+args = ["lsp"]
 ```
 
 you might want to add a grammar entry for syntax highlighting
@@ -99,16 +93,16 @@ you might want to add a grammar entry for syntax highlighting
 
 ## server logs
 
-revolt logs to stderr at `debug` level. to see the raw LSP traffic, run
-the server manually:
+the server logs to stderr at `debug` level. to see the raw LSP traffic, run
+it manually:
 
 ```bash
-revolt --log-level=debug 2> /tmp/revolt.log
+revo lsp 2> /tmp/revo-lsp.log
 ```
 
 ### testing
 
-tests are in `src/lsp/test.py` using `pytest-lsp`. they spin up a real revolt process and
+tests are in `src/lsp/test.py` using `pytest-lsp`. they spin up a real lsp process and
 talk to it over stdio
 
 to run them:
@@ -121,7 +115,7 @@ pip install pytest pytest-lsp lsprotocol
 python -m pytest test.py -vs --tb=short
 ```
 
-the test fixture hardcodes the server path to `zig-out/bin/revolt` so build the server first
+the test fixture hardcodes the server path to `zig-out/bin/revo` (run with the `lsp` command) so build first
 
 the rest of the architecture docs are going to be in `src/lsp/readme.org`
 
@@ -132,7 +126,7 @@ my only expertise in LSP development is reading through the spec, so any help is
 ### testing
 
 the test suite is not gonna build it automatically or try to find it in your path
-it's hardcoded to `../../zig-out/bin/revolt`
+it's hardcoded to `../../zig-out/bin/revo` (started with the `lsp` command)
 
 ```bash
 source .venv/bin/activate # maybe .fish or .ps1 

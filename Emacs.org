@@ -32,7 +32,7 @@ however, if you get some lsp features but not the newer ones (like highlighting)
   (add-to-list 'auto-mode-alist '("\\.revo\\'" . revo-mode))
 
   (with-eval-after-load 'eglot
-    (add-to-list 'eglot-server-programs '(revo-mode . ("revo" "--lsp"))))
+    (add-to-list 'eglot-server-programs '(revo-mode . ("revo" "lsp"))))
 
   (add-hook 'revo-mode-hook #'eglot-ensure)
 #+END_SRC
@@ -130,8 +130,8 @@ then, you'll forever be able to press ~<C-c><C-c>~ over blocks like these:
 
 and put any args in the header:
 
-- =--bench[n]= for benchmarks and =-D= for debug output
-#+BEGIN_SRC revo :args -D --bench1000
+- =bench[n]= for benchmarks and =-D= for debug output (the command goes first)
+#+BEGIN_SRC revo :args bench1000 -D
   let acc = 1
   for i in ..10000
   acc += i
@@ -148,8 +148,8 @@ and put any args in the header:
 : | p95     0.141ms / 141000ns
 : | worst   0.335ms / 335000ns
 
-- =--dis= for disassembly
-#+BEGIN_SRC revo :args --dis
+- =dis= for disassembly
+#+BEGIN_SRC revo :args dis
 print("hello world")
 #+END_SRC
 
@@ -174,7 +174,7 @@ this one diffs the assembly output for two blocks. pipes are equivalent to norma
 
 
 #+NAME: revo-block-1
-#+BEGIN_SRC revo :args --dis
+#+BEGIN_SRC revo :args dis
   "hello world"
 #+END_SRC
 
@@ -182,7 +182,7 @@ this one diffs the assembly output for two blocks. pipes are equivalent to norma
 : hello world
 
 #+NAME: revo-block-2
-#+BEGIN_SRC revo :args --dis
+#+BEGIN_SRC revo :args dis
   "hello revo"
 #+END_SRC
 

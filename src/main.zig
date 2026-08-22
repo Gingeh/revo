@@ -17,46 +17,59 @@ test {
 
 const USAGE =
     \\usage: revo [options] [script [args...]]
+    \\       revo <command> [options]
     \\
     \\options:
     \\  -e code          run code
-    \\  -i               enter interactive mode after executing
-    \\  -d,-D            output the last value the program evaluated in display/debug mode
-    \\  -b               compile script to bytecode (.rvo)
-    \\  -o path          output path for -b (default: input with .rvo extension)
-    \\  --test           run test blocks
-    \\  --bench[n]       run with performance counters ([n] iterations, 1 if not specified)
-    \\  --dis            show bytecode disassembly instead of running
-    \\  --docs           extract doc comments from a file, dir, or the pwd workspace
-    \\  --docs-html      same extraction, docgen markdown reference format;
-    \\                   splices output into markdown piped on stdin with a
-    \\                   target arg, or --docs-splice forces splicing
-    \\  --docs-splice    with --docs-html, splice into piped stdin even without
-    \\                   a target arg (walks the pwd workspace)
+    \\  -i               enter repl after executing
+    \\  -d,-D            output the last evaluated value of the program in display/debug mode
+    \\  --test           run with test blocks
     \\  -h, --help       show this help message
     \\  --version        show version
-++
-    (if (lsp_enabled)
-        \\
-        \\  --lsp            start the language server
-    else
-        "") ++
+    \\
+    \\commands:
+    \\  compile          compile script to bytecode instead of running
+    \\                   runs only the comp/proc blocks
+    \\  repl             start repl (default with no args)
+    \\
+++ (if (lsp_enabled)
+    \\  lsp              start the lsp
+    \\
+else
+    "") ++
+    \\  dis              show bytecode disassembly instead of running
+    \\  bench[n]         run with performance counters ([n] iterations, 1 if not specified)
+    \\  docs             extract doc comments from a file, dir, or the pwd workspace
+    \\                   --html    render as docgen markdown reference format
+    \\                   --splice  splice output into markdown piped on stdin
+    \\                             (implied by --html with a target arg)
+    \\
+    \\if the first argument is a command that exists, it gets ran;
+    \\otherwise, it's treated as a script path
     \\
     \\examples:
-    \\  revo                           start interactive REPL
-    \\  revo script.rv                 run script
-    \\  revo -e "1 + 2"                run inline code
-    \\  revo -e "1 + 2" -i             run inline code and enter REPL
-    \\  revo -b script.rv              compile script to bytecode
-    \\  revo -b -o output.rvo script   compile script with custom output path
-    \\  revo --bench script.rv         run with performance counters
-    \\  revo --dis script.rv           show bytecode disassembly
-    \\  revo --docs script.rv          print extracted docs without running code
-    \\  revo --docs-html src/std/iface  render the stdlib reference as markdown
-    \\  revo --docs-html src/std/iface < std.md > std.new   splice into a doc page
+    \\  revo                              start repl
+    \\  revo script.rv                    run script
+    \\  revo compile script.rv            compile script
+    \\  revo compile script.rv out.rvo    compile script with custom output path
+    \\  revo -e "1 + 2"                   run inline code
+    \\  revo -e "1 + 2" -i                run inline code and enter REPL
+    \\  revo bench script.rv              run with performance counters
+    \\  revo dis script.rv                show bytecode disassembly
+    \\  revo docs script.rv               print extracted docs without running code
+    \\  revo docs --html src/std/iface    render the stdlib reference as markdown
+    \\  revo docs --html src/std/iface < std.md > std.new   splice into a doc page
+    \\
+++ (if (lsp_enabled)
+    \\  revo lsp                          start the language server
+    \\
+else
+    "") ++
+    \\  revo repl                         start repl explicitly
+    \\  revo lsp.rv                       run a script literally named lsp.rv
 ;
 
-const ExecutionMode = enum { run, bench, disassemble, compile, docs, docs_html, lsp };
+const ExecutionMode = enum { run, repl, bench, disassemble, compile, docs, docs_html, lsp };
 
 const Config = struct {
     mode: ExecutionMode = .run,
@@ -118,7 +131,7 @@ fn handleSource(
             defer gpa.free(artifact.spans);
             try revo.vm.debug.printDisassembly(&vm, artifact, source);
         },
-        .lsp => unreachable,
+        .repl, .lsp => unreachable,
     }
 }
 
@@ -156,6 +169,12 @@ fn runMain(init: std.process.Init) !void {
     }
 
     const config = try parseArgs(init, args);
+
+    if (config.mode == .repl) {
+        var vm = try initVM(init, init.gpa, config.argv);
+        defer vm.deinit();
+        return try repl.run(&vm, init.gpa, init);
+    }
 
     if (config.mode == .lsp) {
         var project = revo.lang.Project.detectFromCwd(init.io, init.gpa);
@@ -222,7 +241,7 @@ fn runMain(init: std.process.Init) !void {
                         printError(init, "cannot extract docs from bytecode files", .{});
                         return error.InvalidArgs;
                     },
-                    .lsp => unreachable,
+                    .repl, .lsp => unreachable,
                 }
             } else {
                 try handleSource(init, init.gpa, arena, path, source, config);
@@ -345,14 +364,43 @@ fn runCompiledArtifact(
     }
 }
 
+/// cli options only appear before the script name; the first bare word is
+/// either a command (`compile`, `dis`, `docs`, ...) or the script path -
+/// everything past it flows into the runtime's argv untouched
 fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     var config: Config = .{};
     var i: usize = 1;
 
     var argv: std.ArrayList([:0]const u8) = .empty;
 
-    while (i < args.len) {
+    // leading command word
+    if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) blk: {
+        const cmd = args[i];
+        if (std.mem.eql(u8, cmd, "compile")) {
+            config.mode = .compile;
+        } else if (std.mem.eql(u8, cmd, "repl")) {
+            config.mode = .repl;
+        } else if (if (lsp_enabled) std.mem.eql(u8, cmd, "lsp") else false) {
+            config.mode = .lsp;
+        } else if (std.mem.eql(u8, cmd, "dis")) {
+            config.mode = .disassemble;
+        } else if (std.mem.eql(u8, cmd, "docs")) {
+            config.mode = .docs;
+        } else if (std.mem.startsWith(u8, cmd, "bench")) {
+            // bench / bench[n]; anything else falls through to script path
+            const n = cmd[5..];
+            const iters = if (n.len == 0) 1 else std.fmt.parseUnsigned(u32, n, 10) catch break :blk;
+            config.mode = .bench;
+            config.bench_iters = iters;
+        } else break :blk;
+
+        i += 1;
+    }
+
+    // options, never parsed past the script name
+    while (i < args.len) : (i += 1) {
         const arg = args[i];
+        if (!std.mem.startsWith(u8, arg, "-") or std.mem.eql(u8, arg, "-")) break;
         if (std.mem.eql(u8, arg, "-e")) {
             i += 1;
             if (i >= args.len) {
@@ -367,28 +415,12 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.echo_last = .display;
         } else if (std.mem.eql(u8, arg, "-D")) {
             config.echo_last = .debug;
-        } else if (std.mem.eql(u8, arg, "-b")) {
-            config.mode = .compile;
-        } else if (std.mem.eql(u8, arg, "-o")) {
-            i += 1;
-            if (i >= args.len) {
-                printError(init, "-o requires an argument", .{});
-                return error.InsufficientArgs;
-            }
-            config.output_path = args[i];
-        } else if (std.mem.startsWith(u8, arg, "--bench")) {
-            config.mode = .bench;
-            if (arg.len > 7) {
-                const iters = arg[7..];
-                config.bench_iters = std.fmt.parseUnsigned(u32, iters, 10) catch |err| {
-                    printError(init, "invalid --bench[n] value '{s}' - {}", .{ iters, err });
-                    return error.InvalidArgs;
-                };
-            }
         } else if (std.mem.eql(u8, arg, "--test")) {
             config.test_mode = true;
-        } else if (std.mem.eql(u8, arg, "-t")) {
-            config.test_mode = true;
+        } else if (std.mem.eql(u8, arg, "--html")) {
+            if (config.mode == .docs) config.mode = .docs_html;
+        } else if (std.mem.eql(u8, arg, "--splice")) {
+            config.force_splice = true;
         } else if (std.mem.eql(u8, arg, "--dis")) {
             config.mode = .disassemble;
         } else if (std.mem.eql(u8, arg, "--docs")) {
@@ -397,6 +429,25 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.mode = .docs_html;
         } else if (std.mem.eql(u8, arg, "--docs-splice")) {
             config.force_splice = true;
+        } else if (std.mem.startsWith(u8, arg, "--bench")) {
+            // legacy flag form of the bench command
+            config.mode = .bench;
+            if (arg.len > 7) {
+                config.bench_iters = std.fmt.parseUnsigned(u32, arg[7..], 10) catch |err| {
+                    printError(init, "invalid bench iteration count '{s}' - {}", .{ arg[7..], err });
+                    return error.InvalidArgs;
+                };
+            }
+        } else if (std.mem.eql(u8, arg, "-b")) {
+            // legacy flag form of the compile command
+            config.mode = .compile;
+        } else if (std.mem.eql(u8, arg, "-o")) {
+            i += 1;
+            if (i >= args.len) {
+                printError(init, "-o requires an argument", .{});
+                return error.InsufficientArgs;
+            }
+            config.output_path = args[i];
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             std.debug.print("{s}\n", .{USAGE});
             return error.HelpRequested;
@@ -405,24 +456,29 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             return error.VersionRequested;
         } else if (if (lsp_enabled) std.mem.eql(u8, arg, "--lsp") else false) {
             config.mode = .lsp;
-        } else if (std.mem.eql(u8, arg, "-")) {
-            config.script_path = arg;
-            try argv.append(init.arena.allocator(), arg);
-        } else if (std.mem.startsWith(u8, arg, "-")) {
+        } else {
             printError(init, "unknown option '{s}'", .{arg});
             std.debug.print("{s}\n", .{USAGE});
             return error.UnknownCommand;
-        } else if (config.inline_code == null) {
-            if (config.script_path == null)
-                config.script_path = arg;
-            try argv.append(init.arena.allocator(), arg);
-        } else {
-            try argv.append(init.arena.allocator(), arg);
         }
-        i += 1;
     }
-    config.argv = try argv.toOwnedSlice(init.arena.allocator());
 
+    // first positional is the script; the rest is runtime argv.
+    // compile takes one extra positional - the output path
+    while (i < args.len) : (i += 1) {
+        if (config.script_path == null and config.inline_code == null) {
+            config.script_path = args[i];
+            try argv.append(init.arena.allocator(), args[i]);
+        } else if (config.mode == .compile and config.output_path == null and
+            !std.mem.startsWith(u8, args[i], "-"))
+        {
+            config.output_path = args[i];
+        } else {
+            try argv.append(init.arena.allocator(), args[i]);
+        }
+    }
+
+    config.argv = try argv.toOwnedSlice(init.arena.allocator());
     return config;
 }
 

@@ -37,7 +37,7 @@ from pytest_lsp import ClientServerConfig, LanguageClient
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REVOPLS = str(REPO_ROOT / "zig-out" / "bin" / "revo")
-REVO_ARGS = ["--lsp"]
+REVO_ARGS = ["lsp"]
 
 
 @pytest_lsp.fixture(
