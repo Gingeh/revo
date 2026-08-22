@@ -292,6 +292,35 @@ const SpanLine = struct {
 
 // not good: renderSpanBlock and renderBoxSpanBlock share ~80% of their
 // context-extraction and bookend logic but are separate codepaths
+
+// columns are byte-counted by
+// the lexer, so tabs must be expanded or carets drift left
+const tab_width = 2;
+
+/// display columns `text` occupies, tabs snap to the next tab stop
+fn displayWidth(text: []const u8, start_col: usize) usize {
+    var col = start_col;
+    for (text) |ch| {
+        if (ch == '\t') col += tab_width - (col % tab_width) else col += 1;
+    }
+    return col - start_col;
+}
+
+/// write `text` with tabs expanded to spaces
+fn writeExpanded(writer: *std.Io.Writer, text: []const u8, start_col: usize) !void {
+    var col = start_col;
+    for (text) |ch| {
+        if (ch == '\t') {
+            const w = tab_width - (col % tab_width);
+            for (0..w) |_| try writer.writeByte(' ');
+            col += w;
+        } else {
+            try writer.writeByte(ch);
+            col += 1;
+        }
+    }
+}
+
 fn countDigits(value: u32) usize {
     var n = value;
     var digits: usize = 1;
@@ -487,7 +516,7 @@ fn renderSpanBlock(
         before_idx -= 1;
         const cl = ctx_before[before_idx];
         try writeLineNumber(writer, cl.num, line_width);
-        try writer.writeAll(cl.text);
+        try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
     }
     if (ctx_before_len > 0) {
@@ -518,16 +547,17 @@ fn renderSpanBlock(
         // this is the actual code row in the box
         try writeLineNumber(writer, cl.num, line_width);
         // try writer.writeAll(source_bracket);
-        try writer.writeAll(cl.text);
+        try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
 
         // underline marker: only the first and last rows get it
         if (is_first or is_last or (is_first and is_last)) {
             const col = cl.span_col;
+            const before_len = @min(@as(usize, col -| 1), cl.text.len);
+            const pad = displayWidth(cl.text[0..before_len], 0);
             const span_here = cl.span_end -| cl.span_start;
-            const clamped = @min(span_here, cl.text.len -| (col - 1));
-            const highlight = @max(clamped, 1);
-            const pad = if (col > 1) col - 1 else 0;
+            const clamped = @min(span_here, cl.text.len -| before_len);
+            const highlight = @max(displayWidth(cl.text[before_len..][0..clamped], before_len), 1);
             const ul_bracket_spaces: usize = if (is_first and is_last) 2 else if (is_last) 2 else 2;
             for (0..line_width) |_| try writer.writeByte(' ');
             try writer.writeByte(' ');
@@ -561,7 +591,7 @@ fn renderSpanBlock(
     }
     for (ctx_after[0..ctx_after_len]) |cl| {
         try writeLineNumber(writer, cl.num, line_width);
-        try writer.writeAll(cl.text);
+        try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
     }
 }
@@ -684,7 +714,7 @@ fn renderBoxSpanBlock(
         const cl = ctx_before[before_idx];
         if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
         try writeLineNumber(writer, cl.num, line_width);
-        try writer.writeAll(cl.text);
+        try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
         if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
     }
@@ -711,16 +741,22 @@ fn renderBoxSpanBlock(
 
     const first_line = lines_view[0];
     const last_line = lines_view[lines_view.len - 1];
-    // gutter already takes two spaces, so offset from that baseline
-    const box_offset = display_trim -| 4;
+    // display widths of the shared indent — tabs make it wider than its byte count
+    const first_trim_w = displayWidth(first_line.text[0..@min(display_trim, first_line.text.len)], 0);
+    const last_trim_w = displayWidth(last_line.text[0..@min(display_trim, last_line.text.len)], 0);
     // marker rows sit one column further left than code rows
-    const marker_offset = display_trim -| 5;
-    const top_dashes = @max(@as(usize, 1), first_line.span_col -| display_trim);
+    const marker_offset = first_trim_w -| 5;
+    const first_span_off = @min(@as(usize, first_line.span_col -| 1), first_line.text.len);
+    const top_dashes = @max(@as(usize, 1), displayWidth(first_line.text[0..first_span_off], 0) -| first_trim_w);
     const top_vs = @max(
         @as(usize, 1),
-        (first_line.text.len -| display_trim) -| (top_dashes - 1),
+        (displayWidth(first_line.text, 0) -| first_trim_w) -| (top_dashes - 1),
     );
-    const bottom_dashes = @max(@as(usize, 1), (last_line.span_end -| last_line.span_start) -| display_trim);
+    const last_span_len = @min(last_line.span_end -| last_line.span_start, last_line.text.len);
+    const bottom_dashes = @max(
+        @as(usize, 1),
+        displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w,
+    );
     // top edge: box header and caret stem
     try writeBoxPrefix(writer, line_width, 3);
     for (0..marker_offset) |_| try writer.writeByte(' ');
@@ -749,9 +785,10 @@ fn renderBoxSpanBlock(
         }
         // source row: keep the original indent inside the box
         try writeLineNumber(writer, cl.num, line_width);
-        for (0..box_offset) |_| try writer.writeByte(' ');
+        const row_trim_w = displayWidth(cl.text[0..@min(display_trim, cl.text.len)], 0);
+        for (0..row_trim_w -| 4) |_| try writer.writeByte(' ');
         try writer.writeAll("| ");
-        try writer.writeAll(cl.text[display_trim..]);
+        try writeExpanded(writer, cl.text[display_trim..], row_trim_w);
         try writer.writeByte('\n');
     }
 
@@ -770,7 +807,7 @@ fn renderBoxSpanBlock(
     for (ctx_after[0..ctx_after_len]) |cl| {
         if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
         try writeLineNumber(writer, cl.num, line_width);
-        try writer.writeAll(cl.text);
+        try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
         if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
     }
