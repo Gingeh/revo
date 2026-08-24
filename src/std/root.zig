@@ -82,20 +82,20 @@ fn mtPrototype(target: TypeSpec, vm: *revo.VM) !Data {
     };
 }
 
-pub const NativeFn = *const fn (args: []const Data, vm: *VM) anyerror!NativeResult;
-pub const NativeFunc = struct {
+pub const HostFn = *const fn (args: []const Data, vm: *VM) anyerror!HostResult;
+pub const HostFunc = struct {
     name: []const u8 = "",
     arity: usize,
     variadic: bool = false,
     param_types: []const TypeSpec,
     ret_type: TypeSpec = .any,
-    func: NativeFn,
+    func: HostFn,
 };
 
 pub fn define(
     comptime types: []const TypeSpec,
-    impl: NativeFn,
-) NativeFunc {
+    impl: HostFn,
+) HostFunc {
     return .{
         .arity = types.len,
         .param_types = types,
@@ -105,8 +105,8 @@ pub fn define(
 
 pub fn defineVariadic(
     comptime types: []const TypeSpec,
-    impl: NativeFn,
-) NativeFunc {
+    impl: HostFn,
+) HostFunc {
     return .{
         .arity = types.len,
         .variadic = true,
@@ -173,7 +173,7 @@ fn isBoolAtom(atom: mem.AtomID) bool {
 /// finite integral number representable in T
 pub const numToInt = revo.vm.memory.numToInt;
 
-pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !NativeResult {
+pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !HostResult {
     const tag_atom = try resultTag(vm, tag);
     const items = [_]Data{
         Data.new.atom(tag_atom),
@@ -182,7 +182,7 @@ pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !NativeResult 
     return .okData(Data.new.tuple(try vm.tuples.create(&items)));
 }
 
-pub fn okAtom(vm: *VM) NativeResult {
+pub fn okAtom(vm: *VM) HostResult {
     _ = vm;
     return .{ .ok = revo.Data.new.core(.ok) };
 }
@@ -204,7 +204,7 @@ pub inline fn boolData(value: bool) Data {
 /// %v: display value, %d: as number, %?: debug repr
 ///     fmt("hello %v", "world")
 ///     fmt("val: %v, num: %d", "x", 42)
-pub fn fmt(args: []const Data, vm: *VM) !NativeResult {
+pub fn fmt(args: []const Data, vm: *VM) !HostResult {
     if (args.len == 0) return .errArity(0, 1);
     const format = vm.stringValue(args[0].asString().?);
 
@@ -305,7 +305,7 @@ test "fmt rendering is recursive" {
 }
 
 /// internal, do not use pls
-pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
+pub fn dotest(args: []const Data, vm: *VM) !HostResult {
     const name = args[0].asString().?;
     const body = args[1].asFunction().?;
     var buf: [128]u8 = undefined;
@@ -342,7 +342,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
 }
 
 /// internal, pls dont use. runs a test suite
-pub fn dosuite(args: []const Data, vm: *VM) !NativeResult {
+pub fn dosuite(args: []const Data, vm: *VM) !HostResult {
     const body = args[1].asFunction().?;
     var sbuf: [128]u8 = undefined;
     var sw = std.Io.File.stdout().writerStreaming(vm.runtime.io, &sbuf);
@@ -361,7 +361,7 @@ pub fn dosuite(args: []const Data, vm: *VM) !NativeResult {
     return .okCa(.nil);
 }
 
-pub fn debug_(args: []const Data, vm: *VM) !NativeResult {
+pub fn debug_(args: []const Data, vm: *VM) !HostResult {
     _ = args;
 
     const out_id = try vm.tables.create();
@@ -412,7 +412,7 @@ pub fn debug_(args: []const Data, vm: *VM) !NativeResult {
 /// returns length of string or table
 /// for strings: byte length, for tables: array + map parts
 /// uses __len metamethod if available
-pub fn len_(args: []const Data, vm: *VM) !NativeResult {
+pub fn len_(args: []const Data, vm: *VM) !HostResult {
     const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.atomId(.__len));
     if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     return switch (args[0].tag()) {
@@ -425,7 +425,7 @@ pub fn len_(args: []const Data, vm: *VM) !NativeResult {
 
 /// > inspect(any) -> any
 /// prints one value and returns it back
-pub fn inspect(args: []const Data, vm: *VM) !NativeResult {
+pub fn inspect(args: []const Data, vm: *VM) !HostResult {
     if (comptime !revo.is_freestanding)
         _ = try print(args, vm);
     return .okData(args[0]);
@@ -449,7 +449,7 @@ pub fn typeof(d: Data, vm: *VM) []const u8 {
 /// returns type of arg0 as atom
 /// possible values: nil, number, string, atom, function, table, tuple,
 /// type, foreign; struct values return the struct type itself, which is callable
-pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
+pub fn typeof_(args: []const Data, vm: *VM) !HostResult {
     if (args[0].asStructVal()) |instance_id| {
         const instance = vm.struct_instances.get(instance_id) catch
             return .okData(Data.new.atom(try vm.internAtom("struct")));
@@ -461,7 +461,7 @@ pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
 /// > string(arg0: any) -> string
 /// converts value to string representation
 /// uses __tostring or __display metamethod if available
-pub fn string_(args: []const Data, vm: *VM) !NativeResult {
+pub fn string_(args: []const Data, vm: *VM) !HostResult {
     const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.__tostring.atomId());
     if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
@@ -473,7 +473,7 @@ pub fn string_(args: []const Data, vm: *VM) !NativeResult {
 
 /// > unwrap(result: tuple) -> any
 /// unwraps result tuple, panics if not :ok
-pub fn try_(args: []const Data, vm: *VM) !NativeResult {
+pub fn try_(args: []const Data, vm: *VM) !HostResult {
     const t_id = args[0].asTuple() orelse return .errType(0, "tuple", typeof(args[0], vm));
     const tuple = try vm.tuples.get(t_id);
     if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
@@ -486,7 +486,7 @@ pub fn try_(args: []const Data, vm: *VM) !NativeResult {
 
 /// > tuple:unwrap_err() -> any
 /// extracts error from result tuple, panics if not :err
-pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
+pub fn unwrap_err_(args: []const Data, vm: *VM) !HostResult {
     const result = args[0];
     const result_tid = result.asTuple() orelse return .errType(0, "tuple", typeof(result, vm));
     const tuple = try vm.tuples.get(result_tid);
@@ -513,7 +513,7 @@ fn as_stack_index(value: Data) ?usize {
 /// creates a new channel with optional buffer size
 ///     chan()        # unbuffered
 ///     chan(5)       # buffer of 5
-pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
+pub fn chan_new(args: []const Data, vm: *VM) !HostResult {
     const cap: usize = if (args.len == 0)
         0
     else if (args.len == 1)
@@ -530,7 +530,7 @@ pub fn chan_new(args: []const Data, vm: *VM) !NativeResult {
 }
 
 /// validate `args[0]` as a `:chan, id` tuple and extract the channel id
-fn chanIdOf(args: []const Data, vm: *VM) NativeResult {
+fn chanIdOf(args: []const Data, vm: *VM) HostResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", typeof(args[0], vm));
     const t = vm.tuples.get(tuple_id) catch return .errType(0, "chan tuple", "tuple");
     if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
@@ -543,7 +543,7 @@ fn chanIdOf(args: []const Data, vm: *VM) NativeResult {
 
 /// > send(chan: tuple, value: any) -> atom
 /// sends value to channel
-pub fn chan_send(args: []const Data, vm: *VM) !NativeResult {
+pub fn chan_send(args: []const Data, vm: *VM) !HostResult {
     const cid = switch (chanIdOf(args, vm)) {
         .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNum().?)),
         else => |r| return r,
@@ -554,7 +554,7 @@ pub fn chan_send(args: []const Data, vm: *VM) !NativeResult {
 
 /// > recv(chan: tuple) -> any
 /// receives value from channel, parks if empty
-pub fn chan_recv(args: []const Data, vm: *VM) !NativeResult {
+pub fn chan_recv(args: []const Data, vm: *VM) !HostResult {
     const cid = switch (chanIdOf(args, vm)) {
         .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNum().?)),
         else => |r| return r,
@@ -567,7 +567,7 @@ pub fn chan_recv(args: []const Data, vm: *VM) !NativeResult {
 /// converts value to number
 /// accepts number (passthrough) or string (parsed)
 /// errors on other types
-pub fn number_(args: []const Data, vm: *VM) !NativeResult {
+pub fn number_(args: []const Data, vm: *VM) !HostResult {
     if (args[0].isNumber()) return .Ok(vm, args[0]);
     if (args[0].asString()) |id| {
         const parsed = try std.fmt.parseFloat(f64, vm.stringValue(id));
@@ -580,14 +580,14 @@ pub fn number_(args: []const Data, vm: *VM) !NativeResult {
 /// used in tests
 ///
 /// return the value back if truthy, otherwise (:err, :AssertionFailed)
-pub fn expect(args: []const Data, vm: *VM) !NativeResult {
+pub fn expect(args: []const Data, vm: *VM) !HostResult {
     if (revo.isFalse(args[0])) return .Err(vm, "ExpectFailed");
     return .Ok(vm, args[0]);
 }
 
 /// > expect_eq(what: any) -> !:ok
 /// panics if the value is falsy
-pub fn expect_eq(args: []const Data, vm: *VM) !NativeResult {
+pub fn expect_eq(args: []const Data, vm: *VM) !HostResult {
     if (vm.compare(args[0], args[1]) != .eq) {
         return .Err(vm, "NotEqual");
     }
@@ -596,14 +596,14 @@ pub fn expect_eq(args: []const Data, vm: *VM) !NativeResult {
 
 /// > assert(what: any) -> what
 /// panics if the value is falsy
-pub fn assert_(args: []const Data, vm: *VM) !NativeResult {
+pub fn assert_(args: []const Data, vm: *VM) !HostResult {
     if (revo.isFalse(args[0])) return panic_(&[1]Data{args[0]}, vm);
     return .okData(args[0]);
 }
 
 /// > assert(what: any) -> what
 /// panics if the value is falsy
-pub fn assert_eq(args: []const Data, vm: *VM) !NativeResult {
+pub fn assert_eq(args: []const Data, vm: *VM) !HostResult {
     if (vm.compare(args[0], args[1]) != .eq) {
         return .other("neq");
     }
@@ -613,7 +613,7 @@ pub fn assert_eq(args: []const Data, vm: *VM) !NativeResult {
 /// > print(args: any...) -> atom
 /// prints values to stdout with space separator
 ///     print("hello", 42, "world")
-pub fn print(args: []const Data, vm: *VM) !NativeResult {
+pub fn print(args: []const Data, vm: *VM) !HostResult {
     var pbuf: [256]u8 = undefined;
     const stdout_file = if (comptime revo.is_freestanding)
         std.Io.File{ .handle = if (@import("builtin").target.os.tag == .freestanding) @as(void, {}) else @as(std.posix.fd_t, -1), .flags = .{ .nonblocking = false } }
@@ -638,7 +638,7 @@ pub fn print(args: []const Data, vm: *VM) !NativeResult {
 /// > panic(args: any...) -> error
 /// panics with given message
 ///     panic("something went wrong")
-pub fn panic_(args: []const Data, vm: *VM) !NativeResult {
+pub fn panic_(args: []const Data, vm: *VM) !HostResult {
     var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer buf.deinit();
     if (args.len == 0) {
@@ -653,7 +653,7 @@ pub fn panic_(args: []const Data, vm: *VM) !NativeResult {
     return .other("panic");
 }
 
-pub fn system_(tbl: []const Data, vm: *VM) !NativeResult {
+pub fn system_(tbl: []const Data, vm: *VM) !HostResult {
     const args = tbl[0].asTable().?;
     const table = try vm.tables.get(args);
 
@@ -687,7 +687,7 @@ pub fn system_(tbl: []const Data, vm: *VM) !NativeResult {
     return .Ok(vm, Data.new.tuple(try vm.tuples.create(&[2]Data{ so, se })));
 }
 
-pub fn input(args: []const Data, vm: *VM) !NativeResult {
+pub fn input(args: []const Data, vm: *VM) !HostResult {
     var read_eof = false;
     var delim: u8 = '\n';
 
@@ -742,7 +742,7 @@ pub fn input(args: []const Data, vm: *VM) !NativeResult {
 
 var gensym_counter: u64 = 0;
 
-pub fn gensym(args: []const Data, vm: *VM) !NativeResult {
+pub fn gensym(args: []const Data, vm: *VM) !HostResult {
     _ = args;
     const n = gensym_counter;
     gensym_counter += 1;
@@ -759,7 +759,7 @@ test "gensym produces different values on each call" {
     , "true");
 }
 
-pub fn cwd(args: []const Data, vm: *VM) !NativeResult {
+pub fn cwd(args: []const Data, vm: *VM) !HostResult {
     _ = args;
     const cwd_path = try std.Io.Dir.cwd().realPathFileAlloc(vm.runtime.io, ".", vm.runtime.alloc);
     defer vm.runtime.alloc.free(cwd_path);
@@ -773,7 +773,7 @@ pub fn exit(args: []const Data, vm: *VM) noreturn {
     std.process.exit(status);
 }
 
-pub fn import(args: []const Data, vm: *VM) !NativeResult {
+pub fn import(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .{ .err = .{ .wrong_arity = .{ .got = args.len, .expected = 1 } } };
 
     const raw_path = args[0].asString() orelse return .{ .err = .{ .type_error = .{
@@ -825,7 +825,7 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
         _ = vm.invalidateModuleCache(resolved_path);
     }
     for (vm.loading_stack.items) |loading| {
-        if (std.mem.eql(u8, loading, resolved_path)) return NativeResult.other("cyclic import detected");
+        if (std.mem.eql(u8, loading, resolved_path)) return HostResult.other("cyclic import detected");
     }
 
     const source = try std.Io.Dir.cwd().readFileAlloc(
@@ -845,7 +845,7 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
         if (err != error.OutOfMemory) vm.runtime.alloc.free(cache_key);
         return switch (err) {
             error.OutOfMemory => error.OutOfMemory,
-            else => NativeResult.other("module error"),
+            else => HostResult.other("module error"),
         };
     };
     _ = vm.loading_stack.pop();
@@ -858,7 +858,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode
     try val.write(writer, vm, mode);
 }
 
-pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
+pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) HostResult {
     if (!mm.isFunction()) return .errType(0, "function", typeof(mm, vm));
     const result = vm.callFunction(mm, &.{val}) catch |err| {
         return .other(@errorName(err));
@@ -869,65 +869,65 @@ pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
 /// > sleep(ms: number) -> parked
 /// sleeps current fiber for given milliseconds
 /// parks fiber instead of blocking
-pub fn sleep(args: []const Data, vm: *VM) !NativeResult {
+pub fn sleep(args: []const Data, vm: *VM) !HostResult {
     const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
     const ms: u64 = numToInt(u64, n) orelse return .errType(0, "non-negative integer", typeof(args[0], vm));
     try vm.schedParkCurrentForSleepMS(ms);
     return .parked();
 }
 
-pub const NativeErrPayload = union(enum) {
+pub const HostErrPayload = union(enum) {
     wrong_arity: struct { got: usize, expected: usize },
     type_error: struct { arg: ?usize, expected: []const u8, got: []const u8 },
-    native_error: revo.vm.NativeError,
+    host_error: revo.vm.HostError,
     parked: void,
     other: []const u8,
 };
 
-pub const NativeResult = union(enum) {
+pub const HostResult = union(enum) {
     ok: Data,
-    err: NativeErrPayload,
+    err: HostErrPayload,
 
-    pub fn parked() NativeResult {
+    pub fn parked() HostResult {
         return .{ .err = .{ .parked = {} } };
     }
-    pub fn okBool(b: bool) NativeResult {
+    pub fn okBool(b: bool) HostResult {
         return .{ .ok = Data.new.boolean(b) };
     }
-    pub fn errArity(got: usize, expected: usize) NativeResult {
+    pub fn errArity(got: usize, expected: usize) HostResult {
         return .{ .err = .{ .wrong_arity = .{ .got = got, .expected = expected } } };
     }
-    pub fn errType(arg: usize, expected: []const u8, got: []const u8) NativeResult {
+    pub fn errType(arg: usize, expected: []const u8, got: []const u8) HostResult {
         return .{ .err = .{ .type_error = .{ .arg = arg, .expected = expected, .got = got } } };
     }
-    pub fn okData(d: Data) NativeResult {
+    pub fn okData(d: Data) HostResult {
         return .{ .ok = d };
     }
-    pub fn okCa(a: revo.core_atoms) NativeResult {
+    pub fn okCa(a: revo.core_atoms) HostResult {
         return .{ .ok = Data.new.atom(@intFromEnum(a)) };
     }
-    pub fn other(message: []const u8) NativeResult {
+    pub fn other(message: []const u8) HostResult {
         return .{ .err = .{ .other = message } };
     }
-    pub fn panic() NativeResult {
+    pub fn panic() HostResult {
         return .{ .err = .{ .other = "panic" } };
     }
 
-    pub fn Ok(vm: *VM, value: Data) !NativeResult {
+    pub fn Ok(vm: *VM, value: Data) !HostResult {
         return resultTuple(vm, .ok, value);
     }
 
-    pub fn Err(vm: *VM, err_atom: []const u8) !NativeResult {
+    pub fn Err(vm: *VM, err_atom: []const u8) !HostResult {
         const tag = try vm.internAtom(err_atom);
         return resultTuple(vm, .err, Data.new.atom(tag));
     }
 };
 
-pub fn wasm_stub(_: []const Data, _: *VM) anyerror!NativeResult {
-    return NativeResult.other("function unavailable on this platform");
+pub fn wasm_stub(_: []const Data, _: *VM) anyerror!HostResult {
+    return HostResult.other("function unavailable on this platform");
 }
 
-pub fn defineStub(comptime types: []const TypeSpec) NativeFunc {
+pub fn defineStub(comptime types: []const TypeSpec) HostFunc {
     return .{
         .arity = types.len,
         .variadic = false,
@@ -936,7 +936,7 @@ pub fn defineStub(comptime types: []const TypeSpec) NativeFunc {
     };
 }
 
-pub fn defineStubVariadic(comptime types: []const TypeSpec) NativeFunc {
+pub fn defineStubVariadic(comptime types: []const TypeSpec) HostFunc {
     return .{
         .arity = types.len,
         .variadic = true,
@@ -949,7 +949,7 @@ pub fn defineStubVariadic(comptime types: []const TypeSpec) NativeFunc {
 pub fn typeUtils(vm: *VM) !void {
     inline for (@typeInfo(revo.memory.Type).@"enum".fields) |field| {
         const func = struct {
-            fn is_of(args: []const Data, _: *VM) !NativeResult {
+            fn is_of(args: []const Data, _: *VM) !HostResult {
                 for (args) |arg| {
                     if (arg.tag() != @field(revo.memory.Type, field.name)) {
                         return .okBool(false);
@@ -958,7 +958,7 @@ pub fn typeUtils(vm: *VM) !void {
                 return .okBool(true);
             }
         }.is_of;
-        const id = try vm.functions.create(.{ .native = define(
+        const id = try vm.functions.create(.{ .host = define(
             &[1]TypeSpec{.any},
             func,
         ) });
@@ -968,14 +968,14 @@ pub fn typeUtils(vm: *VM) !void {
         try vm.stdlib_globals.put(atom, val);
     }
     const is_number = struct {
-        fn num(args: []const Data, _: *VM) !NativeResult {
+        fn num(args: []const Data, _: *VM) !HostResult {
             for (args) |arg| {
                 if (!arg.isNumber()) return .okBool(false);
             }
             return .okBool(true);
         }
     }.num;
-    const id = try vm.functions.create(.{ .native = define(&[_]TypeSpec{.any}, is_number) });
+    const id = try vm.functions.create(.{ .host = define(&[_]TypeSpec{.any}, is_number) });
     const atom = try vm.internAtom("number?");
     const val = Data.new.function(id);
     try vm.globals.put(atom, val);
@@ -1077,7 +1077,7 @@ test "bullshit: metatable constructors closures and method chaining" {
     , 223);
 }
 
-test "natives register as functions" {
+test "Hosts register as functions" {
     try testing.topType("len", .function);
     try testing.topType("number", .table);
     try testing.topType("assert", .function);

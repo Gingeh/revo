@@ -120,7 +120,7 @@ pub fn processMarkStack(self: *VM) void {
                         for (closure.upvalues) |upvalue_id|
                             self.functions.markUpvalue(upvalue_id, self);
                     },
-                    .native, .c_function => {},
+                    .host, .c_function => {},
                 }
             },
             .upvalue => |id| {

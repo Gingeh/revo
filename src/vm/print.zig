@@ -134,7 +134,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             const id = self.asFunction().?;
             const f = try vm.functions.get(id);
             switch (f.*) {
-                .native => try writer.print("#fn@{}()/{}", .{ id, f.arity() }),
+                .host => try writer.print("#fn@{}()/{}", .{ id, f.arity() }),
                 .c_function => |cf| try writer.print("${s}@{}()/{}", .{ cf.name, id, f.arity() }),
                 .closure => try writer.print("{s}()/{d}", .{ f.name(), f.arity() }),
             }

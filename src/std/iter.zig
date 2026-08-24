@@ -42,7 +42,7 @@ const Kind = enum(usize) {
 
 /// > to_iter(obj: any) -> function
 /// returns a zero-arg callable iterator for obj
-pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
+pub fn to_iter(args: []const Data, vm: *VM) !HostResult {
     const w = (try wrapIterable(vm, args[0])) orelse
         return .errType(0, "iterable", typeof(args[0], vm));
     if (w.isString() or w.isTuple() or w.isTable())
@@ -52,7 +52,7 @@ pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
 
 /// > range(...) -> function
 /// returns a lazy arithmetic sequence
-pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn range_fn(args: []const Data, vm: *VM) !HostResult {
     const start: f64 = if (args.len == 1) 0 else blk: {
         const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
         break :blk n;
@@ -77,10 +77,10 @@ pub fn range_fn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.table(it_id));
 }
 
-/// native for map/filter/flat_map-style lazy transform iterators
-fn transformFn(comptime kind: Kind) root.NativeFn {
+/// Host for map/filter/flat_map-style lazy transform iterators
+fn transformFn(comptime kind: Kind) root.HostFn {
     return struct {
-        fn f(args: []const Data, vm: *VM) anyerror!NativeResult {
+        fn f(args: []const Data, vm: *VM) anyerror!HostResult {
             const up = (try wrapIterable(vm, args[0])) orelse
                 return .errType(0, "iterable", typeof(args[0], vm));
             const it_id = try makeIterator(vm, kind);
@@ -91,10 +91,10 @@ fn transformFn(comptime kind: Kind) root.NativeFn {
     }.f;
 }
 
-/// native for take/drop/chunk-style bounded lazy iterators
-fn boundedFn(comptime kind: Kind) root.NativeFn {
+/// Host for take/drop/chunk-style bounded lazy iterators
+fn boundedFn(comptime kind: Kind) root.HostFn {
     return struct {
-        fn f(args: []const Data, vm: *VM) anyerror!NativeResult {
+        fn f(args: []const Data, vm: *VM) anyerror!HostResult {
             const up = (try wrapIterable(vm, args[0])) orelse
                 return .errType(0, "iterable", typeof(args[0], vm));
             const n = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
@@ -108,7 +108,7 @@ fn boundedFn(comptime kind: Kind) root.NativeFn {
 
 /// > zip(...) -> function
 /// returns a lazy iterator of tuples, one element from each iterable
-pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn zip_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len < 2) return .errArity(args.len, 2);
     var ups = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, args.len);
     defer ups.deinit(vm.runtime.alloc);
@@ -125,7 +125,7 @@ pub fn zip_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > enumerate(collection: any) -> function
 /// returns a lazy iterator of (index, value) tuples
-pub fn enumerate_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn enumerate_fn(args: []const Data, vm: *VM) !HostResult {
     const up = (try wrapIterable(vm, args[0])) orelse
         return .errType(0, "iterable", typeof(args[0], vm));
     const it_id = try makeIterator(vm, .enumerate);
@@ -135,7 +135,7 @@ pub fn enumerate_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > collect(iterable: any) -> table
 /// collects all values from an iterable into a table
-pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn collect_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -149,7 +149,7 @@ pub fn collect_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > collect_string(iterable: any) -> string
 /// collects string/number elements from an iterable into a string
-pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn collect_string_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -171,7 +171,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > reduce(collection: any, fn: function, init: any) -> any
 /// folds/accumulates elements using function and initial value
-pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn reduce_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -185,7 +185,7 @@ pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > fold(collection: any, fn: function) -> any
 /// like reduce but without an initial value; first element seeds the fold
-pub fn fold_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn fold_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -215,7 +215,7 @@ fn callPred(vm: *VM, f: Data, v: Data, idx: Data) !Data {
 
 /// > each(collection: any, fn: function) -> atom
 /// iterates over elements, calling function for side effects, returns :ok
-pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn each_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -228,7 +228,7 @@ pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > find(what: any, fn: function) -> any
 /// returns first element where function returns true, or nil
-pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn find_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -242,7 +242,7 @@ pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > all?(collection: any, pred: function) -> boolean
 /// returns true if function returns true for all elements
-pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn all_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -256,7 +256,7 @@ pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > any?(collection: any, pred: function) -> boolean
 /// returns true if function returns true for any element
-pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn any_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -270,7 +270,7 @@ pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > count(collection: any, pred: function) -> number
 /// returns the number of elements, or of those where pred is truthy
-pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn count_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len < 1 or args.len > 2) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -286,7 +286,7 @@ pub fn count_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > sum(collection: any) -> number
 /// sums numeric elements, skipping non-numbers
-pub fn sum_fn(args: []const Data, vm: *VM) !NativeResult {
+pub fn sum_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
         return .errType(0, "iterable", typeof(args[0], vm));
@@ -301,7 +301,7 @@ pub fn sum_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// __call handler for iterator tables
 /// reads the kind from the metatable and advances the matching state machine
-fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
+fn iteratorNext(args: []const Data, vm: *VM) !HostResult {
     const mt_id = (try vm.getMetatableId(args[0])) orelse
         return .okData(revo.Data.new.core(.done));
     const kind_val = (try vm.tables.get(mt_id)).getRawAtom(revo.core_atoms.kind.atomId(), vm) orelse
@@ -322,14 +322,14 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
     };
 }
 
-fn seqNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn seqNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var v: Data = undefined;
     var idx: Data = undefined;
     if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
     return .okData(v);
 }
 
-fn mapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn mapNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var v: Data = undefined;
     var idx: Data = undefined;
     if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
@@ -338,7 +338,7 @@ fn mapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     return .okData(try callPred(vm, f, v, idx));
 }
 
-fn filterNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn filterNext(st_id: mem.TableID, vm: *VM) !HostResult {
     const f = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.func.atomId(), vm) orelse
         return .okData(revo.Data.new.core(.done));
     while (true) {
@@ -349,7 +349,7 @@ fn filterNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     }
 }
 
-fn takeNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn takeNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var st = try vm.tables.get(st_id);
     const n = (st.getRawAtom(revo.core_atoms.n.atomId(), vm) orelse Data.new.num(0)).asNum().?;
     const taken = (st.getRawAtom(revo.core_atoms.count.atomId(), vm) orelse Data.new.num(0)).asNum().?;
@@ -362,7 +362,7 @@ fn takeNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     return .okData(v);
 }
 
-fn dropNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn dropNext(st_id: mem.TableID, vm: *VM) !HostResult {
     while (true) {
         var v: Data = undefined;
         var idx: Data = undefined;
@@ -375,7 +375,7 @@ fn dropNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     }
 }
 
-fn enumerateNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn enumerateNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var v: Data = undefined;
     var idx: Data = undefined;
     if (!try pullStep(vm, st_id, &v, &idx)) return .okData(revo.Data.new.core(.done));
@@ -383,7 +383,7 @@ fn enumerateNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     return .okData(Data.new.tuple(pair));
 }
 
-fn chunkNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn chunkNext(st_id: mem.TableID, vm: *VM) !HostResult {
     const n_val = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.n.atomId(), vm) orelse
         return .okData(revo.Data.new.core(.done));
     const n = root.numToInt(usize, n_val.asNum().?) orelse
@@ -401,7 +401,7 @@ fn chunkNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     return .okData(Data.new.table(out_id));
 }
 
-fn zipNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn zipNext(st_id: mem.TableID, vm: *VM) !HostResult {
     const ups_data = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.up.atomId(), vm) orelse
         return .okData(revo.Data.new.core(.done));
     const ups_id = ups_data.asTuple() orelse return .okData(revo.Data.new.core(.done));
@@ -419,7 +419,7 @@ fn zipNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     return .okData(Data.new.tuple(t));
 }
 
-fn flatMapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn flatMapNext(st_id: mem.TableID, vm: *VM) !HostResult {
     while (true) {
         var st = try vm.tables.get(st_id);
         const cur = st.getRawAtom(revo.core_atoms.cur.atomId(), vm) orelse revo.Data.new.core(.nil);
@@ -448,7 +448,7 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !NativeResult {
     }
 }
 
-fn rangeNext(st_id: mem.TableID, vm: *VM) !NativeResult {
+fn rangeNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var st = try vm.tables.get(st_id);
     const a = (st.getRawAtom(revo.core_atoms.a.atomId(), vm) orelse Data.new.num(0)).asNum().?;
     const b = (st.getRawAtom(revo.core_atoms.b.atomId(), vm) orelse Data.new.num(0)).asNum().?;
@@ -505,7 +505,7 @@ fn makeState(vm: *VM, obj: Data) !mem.TableID {
     return st_id;
 }
 
-fn makeSeqIterator(vm: *VM, obj: Data) !NativeResult {
+fn makeSeqIterator(vm: *VM, obj: Data) !HostResult {
     const it_id = try makeIterator(vm, .seq);
     try putState(vm, it_id, .up, obj);
     return .okData(Data.new.table(it_id));
@@ -517,7 +517,7 @@ fn makeIterator(vm: *VM, kind: Kind) !mem.TableID {
     const mt_id = try vm.tables.create();
     const mt = try vm.tables.get(mt_id);
     try mt.putRawAtom(revo.core_atoms.kind.atomId(), Data.new.num(@as(f64, @floatFromInt(@intFromEnum(kind)))), vm);
-    const next_id = try vm.installNative("iter_next", .{
+    const next_id = try vm.installHost("iter_next", .{
         .arity = 1,
         .param_types = &.{.any},
         .func = iteratorNext,
@@ -651,7 +651,7 @@ const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
 const mem = revo.memory;
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 const typeof = root.typeof;
 const testing = revo.lang.testing;
 
@@ -859,7 +859,7 @@ test "iter index callbacks and state hiding" {
     , "a");
 }
 
-test "iter native closures can allocate tables without corrupting pools" {
+test "iter Host closures can allocate tables without corrupting pools" {
     // pool grew underneath them, corrupting the iterated table
     try testing.topNumber(
         \\ const xs = {}

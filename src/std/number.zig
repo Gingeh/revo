@@ -15,36 +15,36 @@ fn num(args: []const Data) f64 {
     return args[0].asNum().?;
 }
 
-fn call(args: []const Data, vm: *VM) !NativeResult {
+fn call(args: []const Data, vm: *VM) !HostResult {
     _ = args[0];
     return root.number_(args[1..], vm);
 }
 
-fn isNan(args: []const Data, _: *VM) !NativeResult {
+fn isNan(args: []const Data, _: *VM) !HostResult {
     return .okBool(std.math.isNan(num(args)));
 }
 
-fn isFinite(args: []const Data, _: *VM) !NativeResult {
+fn isFinite(args: []const Data, _: *VM) !HostResult {
     return .okBool(std.math.isFinite(num(args)));
 }
 
-fn isInf(args: []const Data, _: *VM) !NativeResult {
+fn isInf(args: []const Data, _: *VM) !HostResult {
     return .okBool(std.math.isInf(num(args)));
 }
 
-fn floor(args: []const Data, _: *VM) !NativeResult {
+fn floor(args: []const Data, _: *VM) !HostResult {
     return .okData(Data.new.num(@floor(num(args))));
 }
 
-fn ceil(args: []const Data, _: *VM) !NativeResult {
+fn ceil(args: []const Data, _: *VM) !HostResult {
     return .okData(Data.new.num(@ceil(num(args))));
 }
 
-fn round(args: []const Data, _: *VM) !NativeResult {
+fn round(args: []const Data, _: *VM) !HostResult {
     return .okData(Data.new.num(@round(num(args))));
 }
 
-fn abs(args: []const Data, _: *VM) !NativeResult {
+fn abs(args: []const Data, _: *VM) !HostResult {
     return .okData(Data.new.num(@abs(num(args))));
 }
 
@@ -72,4 +72,4 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;

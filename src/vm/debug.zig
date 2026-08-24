@@ -4,7 +4,7 @@ const revo = @import("revo");
 const diagnostic = revo.lang.diagnostic;
 pub const TraceFrame = diagnostic.TraceFrame;
 
-pub const NativeError = error{
+pub const HostError = error{
     StackUnderflow,
     KeyDNE,
     StackOverflow,

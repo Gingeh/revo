@@ -5,7 +5,7 @@ const api = @import("api.zig");
 
 const Data = revo.Data;
 const VM = revo.VM;
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 
 const json = std.json;
 
@@ -14,7 +14,7 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "decode", .f = root.define(&.{.string}, decode) },
 };
 
-fn encode(args: []const Data, vm: *VM) !NativeResult {
+fn encode(args: []const Data, vm: *VM) !HostResult {
     var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer out.deinit();
     try writeJsonValue(args[0], vm, &out.writer);
@@ -23,7 +23,7 @@ fn encode(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, data);
 }
 
-fn decode(args: []const Data, vm: *VM) !NativeResult {
+fn decode(args: []const Data, vm: *VM) !HostResult {
     const source = vm.stringValue(args[0].asString().?);
     var parsed = json.parseFromSlice(json.Value, vm.runtime.alloc, source, .{}) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -34,7 +34,7 @@ fn decode(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, value);
 }
 
-fn resultErr(vm: *VM, message: []const u8) !NativeResult {
+fn resultErr(vm: *VM, message: []const u8) !HostResult {
     return root.resultTuple(vm, .err, try vm.ownDataString(message));
 }
 

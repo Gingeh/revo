@@ -429,7 +429,7 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
 
 /// > net:connect(host: string, port: number) -> socket
 /// connects to a remote host and port, returns a socket handle
-fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
+fn connect_fn(args: []const Data, vm: *VM) !HostResult {
     const host = vm.stringValue(args[0].asString().?);
     const port: u16 = root.numToInt(u16, args[1].asNum().?) orelse
         return .errType(1, "port number 0..65535", root.typeof(args[1], vm));
@@ -491,7 +491,7 @@ fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > net:listen(port: number [, backlog: number]) -> socket
 /// listens for incoming connections on the given port, returns server socket
-fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
+fn listen_fn(args: []const Data, vm: *VM) !HostResult {
     const port: u16 = root.numToInt(u16, args[0].asNum().?) orelse
         return .errType(0, "port number 0..65535", root.typeof(args[0], vm));
     const backlog: u31 = if (args.len > 1)
@@ -525,7 +525,7 @@ fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > socket:accept() -> socket
 /// accepts an incoming client connection on a server socket
-fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
+fn accept_fn(args: []const Data, vm: *VM) !HostResult {
     if (builtin.target.os.tag == .windows) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
 
@@ -596,7 +596,7 @@ fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
 
 /// > socket:send(data: string) -> number
 /// sends data over the socket, returns number of bytes sent
-fn send_fn(args: []const Data, vm: *VM) !NativeResult {
+fn send_fn(args: []const Data, vm: *VM) !HostResult {
     if (builtin.target.os.tag == .windows) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
     const message = vm.stringValue(args[1].asString().?);
@@ -699,7 +699,7 @@ fn parseRecvOptions(opts_data: Data, vm: *VM) !RecvWaitToken {
 
 /// > socket:recv(opts: table) -> string
 /// receives data according to opts.mode (:read_some | :read_all | :read_line)
-fn recv(args: []const Data, vm: *VM) !NativeResult {
+fn recv(args: []const Data, vm: *VM) !HostResult {
     if (builtin.target.os.tag == .windows) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
     const opts_data = args[1];
@@ -810,7 +810,7 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
 
 /// > socket:close() -> atom
 /// closes the socket
-fn socket_close_fn(args: []const Data, vm: *VM) !NativeResult {
+fn socket_close_fn(args: []const Data, vm: *VM) !HostResult {
     const socket_data = Data.new.table(args[0].asTable().?);
     try closeEntry(socket_data, vm);
     return try .Ok(vm, revo.Data.new.core(.nil));
@@ -826,4 +826,4 @@ const VM = revo.VM;
 const api = @import("api.zig");
 const meta = @import("meta.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;

@@ -18,7 +18,7 @@ const ast = @import("../lang/ast.zig");
 const Data = revo.Data;
 const root = @import("root.zig");
 const TypeSpec = root.TypeSpec;
-const NativeFunc = root.NativeFunc;
+const HostFunc = root.HostFunc;
 
 pub const regex_on = @import("build_options").regex;
 
@@ -49,7 +49,7 @@ pub const iface_groups: []const IfaceGroup = &.{
 /// the zig side of one spec: registry key + implementation
 pub const Impl = struct {
     name: []const u8,
-    f: NativeFunc,
+    f: HostFunc,
 };
 
 pub const ImplGroup = struct {
@@ -192,7 +192,7 @@ fn ifaceSrc(name: []const u8) []const u8 {
 }
 
 /// the k-th spec with this name takes the k-th impl with the same name
-fn implFor(impls: []const Impl, name: []const u8, k: usize) ?NativeFunc {
+fn implFor(impls: []const Impl, name: []const u8, k: usize) ?HostFunc {
     var seen: usize = 0;
     for (impls) |imp| {
         if (!std.mem.eql(u8, imp.name, name)) continue;
@@ -272,7 +272,7 @@ pub const FnSpec = struct {
     /// when set, the metatable key is this core atom (e.g. `__index`)
     /// instead of `internAtom(name)`. only `__index` uses it today
     core_key: ?revo.core_atoms = null,
-    f: NativeFunc,
+    f: HostFunc,
 
     /// release one spec's owned strings, not the spec struct itself
     pub fn deinit(self: *const FnSpec, alloc: std.mem.Allocator) void {
@@ -722,7 +722,7 @@ pub fn registerAll(
     for (groups) |specs| {
         for (specs) |spec| {
             const head = headOf(spec.sig);
-            const fn_id = try vm.installNative(spec.name, spec.f);
+            const fn_id = try vm.installHost(spec.name, spec.f);
             switch (head.kind) {
                 .global => try global_funcs.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id }),
                 .module => {

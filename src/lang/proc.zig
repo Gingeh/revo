@@ -21,12 +21,12 @@ pub const ExpandError = error{
 } || std.mem.Allocator.Error;
 
 pub fn register(vm: *revo.VM) !void {
-    const id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, iter) });
+    const id = try vm.functions.create(.{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, iter) });
     const iter_val = Data.new.function(id);
     try vm.globals.put(try vm.internAtom("__proc_iter"), iter_val);
     try vm.stdlib_globals.put(try vm.internAtom("__proc_iter"), iter_val);
     const apply_id = try vm.functions.create(
-        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .function, .table }, procApply) },
+        .{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .function, .table }, procApply) },
     );
 
     const apply_val = Data.new.function(apply_id);
@@ -920,7 +920,7 @@ fn atomNode(allocator: std.mem.Allocator, span: Span, name: []const u8) ExpandEr
     return ast.allocNode(allocator, span, .{ .hash = name });
 }
 
-fn iter(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn iter(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const items = switch (args[0].tag()) {
         .table, .tuple => args[0],
@@ -929,15 +929,15 @@ fn iter(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     return .okData(try makeIterValue(vm, items));
 }
 
-fn next(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn next(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     return iterStep(args, vm, true);
 }
 
-fn peek(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn peek(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     return iterStep(args, vm, false);
 }
 
-fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.typeof(args[0], vm));
     const iter_tbl = try vm.tables.get(iter_id);
@@ -945,7 +945,7 @@ fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     return .{ .ok = index_data };
 }
 
-fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const expected_atom = args[1].asAtom() orelse return .errType(1, "atom", revo.std_lib.typeof(args[1], vm));
     const expected_name = vm.atomName(expected_atom);
@@ -990,7 +990,7 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
     return .{ .ok = Data.new.tuple(payload_id) };
 }
 
-fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
+fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const callee = if (args[0].isFunction()) args[0] else return .errType(
         0,
@@ -1010,19 +1010,19 @@ fn makeIterValue(vm: *revo.VM, items: Data) !Data {
     try iter_tbl.putRawAtom(revo.core_atoms.index.atomId(), Data.new.num(0), vm);
 
     const next_id = try vm.functions.create(
-        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, next) },
+        .{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, next) },
     );
 
     const peek_id = try vm.functions.create(
-        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, peek) },
+        .{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, peek) },
     );
 
     const consumed_id = try vm.functions.create(
-        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, consumed) },
+        .{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{.table}, consumed) },
     );
 
     const next_of_id = try vm.functions.create(
-        .{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .table, .atom }, nextOf) },
+        .{ .host = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{ .table, .atom }, nextOf) },
     );
 
     try iter_tbl.putRawAtom(revo.core_atoms.next.atomId(), Data.new.function(next_id), vm);
@@ -1045,7 +1045,7 @@ fn normalizeProcValue(vm: *revo.VM, value: Data) !Data {
     };
 }
 
-fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.NativeResult {
+fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.typeof(args[0], vm));
     const iter_tbl = try vm.tables.get(iter_id);

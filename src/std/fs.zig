@@ -114,18 +114,18 @@ fn mapIOError(err: anyerror) []const u8 {
 /// > fs.open(path: string) -> !table
 /// wraps a path in a file handle table
 /// use `file.close()` when you're done with the handle
-fn open_fn(args: []const Data, vm: *VM) !NativeResult {
+fn open_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
-    return try NativeResult.Ok(vm, try wrapFile(vm, path));
+    return try HostResult.Ok(vm, try wrapFile(vm, path));
 }
 
 /// > file:read() -> !string
 /// reads the full file contents as a string
-fn read_fn(args: []const Data, vm: *VM) !NativeResult {
-    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
+fn read_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
 
-    const stat = Dir.cwd().statFile(vm.runtime.io, handle.path, .{}) catch return try NativeResult.Err(vm, "StatError");
-    if (stat.size > max_read_size) return try NativeResult.Err(vm, "FileTooLarge");
+    const stat = Dir.cwd().statFile(vm.runtime.io, handle.path, .{}) catch return try HostResult.Err(vm, "StatError");
+    if (stat.size > max_read_size) return try HostResult.Err(vm, "FileTooLarge");
 
     const data = Dir.cwd().readFileAlloc(
         vm.runtime.io,
@@ -133,18 +133,18 @@ fn read_fn(args: []const Data, vm: *VM) !NativeResult {
         vm.runtime.alloc,
         .limited(max_read_size),
     ) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, try vm.adoptDataString(data));
+    return try HostResult.Ok(vm, try vm.adoptDataString(data));
 }
 
 /// > file:write(data: any, ?permissions: atom|number) -> !number
 /// overwrites the file with the provided string
 /// optional permissions default to the platform file default
-fn write_fn(args: []const Data, vm: *VM) !NativeResult {
-    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
-    if (!args[1].isString()) return try NativeResult.Err(vm, "InvalidArguments");
-    const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try NativeResult.Err(vm, "InvalidPermissions") else .default_file;
+fn write_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
+    if (!args[1].isString()) return try HostResult.Err(vm, "InvalidArguments");
+    const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try HostResult.Err(vm, "InvalidPermissions") else .default_file;
 
     const data = vm.stringValue(args[1].asString().?);
     Dir.cwd().writeFile(vm.runtime.io, .{
@@ -152,66 +152,66 @@ fn write_fn(args: []const Data, vm: *VM) !NativeResult {
         .data = data,
         .flags = .{ .permissions = permissions },
     }) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
 
-    return try NativeResult.Ok(vm, Data.new.num(data.len));
+    return try HostResult.Ok(vm, Data.new.num(data.len));
 }
 
 /// > file:append(data: any, ?permissions: atom|number) -> !number
 /// appends data to the file, creating it if needed
 /// optional permissions default to the platform file default
-fn append_fn(args: []const Data, vm: *VM) !NativeResult {
-    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
-    if (!args[1].isString()) return try NativeResult.Err(vm, "InvalidArguments");
-    const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try NativeResult.Err(vm, "InvalidPermissions") else .default_file;
+fn append_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
+    if (!args[1].isString()) return try HostResult.Err(vm, "InvalidArguments");
+    const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try HostResult.Err(vm, "InvalidPermissions") else .default_file;
 
     const data = vm.stringValue(args[1].asString().?);
     const file = Dir.cwd().openFile(vm.runtime.io, handle.path, .{ .mode = .read_write }) catch |err| switch (err) {
         error.FileNotFound => Dir.cwd().createFile(vm.runtime.io, handle.path, .{
             .truncate = false,
             .permissions = permissions,
-        }) catch |e| return try NativeResult.Err(vm, mapIOError(e)),
-        else => return try NativeResult.Err(vm, mapIOError(err)),
+        }) catch |e| return try HostResult.Err(vm, mapIOError(e)),
+        else => return try HostResult.Err(vm, mapIOError(err)),
     };
     defer file.close(vm.runtime.io);
 
     const stat = file.stat(vm.runtime.io) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
     try file.writePositionalAll(vm.runtime.io, data, stat.size);
 
-    return try NativeResult.Ok(vm, Data.new.num(data.len));
+    return try HostResult.Ok(vm, Data.new.num(data.len));
 }
 
 /// > file:stat() -> !table
 /// get file metadata as a table
-fn stat_fn(args: []const Data, vm: *VM) !NativeResult {
-    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
+fn stat_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
     const stat = Dir.cwd().statFile(vm.runtime.io, handle.path, .{}) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, try makeStatTable(vm, stat));
+    return try HostResult.Ok(vm, try makeStatTable(vm, stat));
 }
 
 /// > file:close() -> !atom
 /// closes a file handle table
 /// this is currently a logical close for wrapper handles
-fn close_fn(args: []const Data, vm: *VM) !NativeResult {
-    _ = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
-    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
+fn close_fn(args: []const Data, vm: *VM) !HostResult {
+    _ = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
+    return try HostResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > file:readdir() -> !table
 /// returns table of directory entries for the dir handle's path
-fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
-    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
+fn readdir_meth_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
     const path = handle.path;
 
     const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{
         .iterate = true,
     }) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
     defer open_dir.close(vm.runtime.io);
     var iter = open_dir.iterate();
@@ -233,39 +233,39 @@ fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
         try t.putRaw(Data.new.num(i), entry, vm);
     }
 
-    return try NativeResult.Ok(vm, Data.new.table(result_table));
+    return try HostResult.Ok(vm, Data.new.table(result_table));
 }
 
 /// > fs.exists?(path: string) -> !atom
 /// does path exist?
-fn exists_fn(args: []const Data, vm: *VM) !NativeResult {
+fn exists_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
     const file = if (std.fs.path.isAbsolute(path))
         Dir.openFileAbsolute(vm.runtime.io, path, .{
             .allow_directory = true,
             .path_only = true,
         }) catch |err| switch (err) {
-            error.FileNotFound => return try NativeResult.Ok(vm, revo.Data.new.core(.false)),
-            else => return try NativeResult.Err(vm, mapIOError(err)),
+            error.FileNotFound => return try HostResult.Ok(vm, revo.Data.new.core(.false)),
+            else => return try HostResult.Err(vm, mapIOError(err)),
         }
     else
         Dir.cwd().openFile(vm.runtime.io, path, .{
             .allow_directory = true,
             .path_only = true,
         }) catch |err| switch (err) {
-            error.FileNotFound => return try NativeResult.Ok(vm, revo.Data.new.core(.false)),
-            else => return try NativeResult.Err(vm, mapIOError(err)),
+            error.FileNotFound => return try HostResult.Ok(vm, revo.Data.new.core(.false)),
+            else => return try HostResult.Err(vm, mapIOError(err)),
         };
     defer file.close(vm.runtime.io);
-    return try NativeResult.Ok(vm, revo.Data.new.core(.true));
+    return try HostResult.Ok(vm, revo.Data.new.core(.true));
 }
 
 /// > fs.mkdir(path: string, ?permissions: atom|number) -> !atom
 /// creates a directory, using default permissions when omitted
-fn mkdir_fn(args: []const Data, vm: *VM) !NativeResult {
+fn mkdir_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
     const permissions: File.Permissions = if (args.len > 1)
-        parsePermissions(vm, args[1]) catch return try NativeResult.Err(vm, "InvalidPermissions")
+        parsePermissions(vm, args[1]) catch return try HostResult.Err(vm, "InvalidPermissions")
     else if (builtin.target.os.tag == .windows)
         // windows doesn't have a sepaarte directory perm
         @as(File.Permissions, @enumFromInt(0))
@@ -273,37 +273,37 @@ fn mkdir_fn(args: []const Data, vm: *VM) !NativeResult {
         .default_dir;
 
     Dir.cwd().createDir(vm.runtime.io, path, permissions) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
+    return try HostResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > fs.remove(path: string) -> !atom
 /// removes a file or empty directory at path
-fn remove_fn(args: []const Data, vm: *VM) !NativeResult {
+fn remove_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
     Dir.cwd().deleteFile(vm.runtime.io, path) catch |file_err| switch (file_err) {
         error.IsDir => {
             Dir.cwd().deleteDir(vm.runtime.io, path) catch |err| {
-                return try NativeResult.Err(vm, mapIOError(err));
+                return try HostResult.Err(vm, mapIOError(err));
             };
-            return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
+            return try HostResult.Ok(vm, revo.Data.new.core(.ok));
         },
-        error.FileNotFound => return try NativeResult.Err(vm, "NotFound"),
-        else => return try NativeResult.Err(vm, mapIOError(file_err)),
+        error.FileNotFound => return try HostResult.Err(vm, "NotFound"),
+        else => return try HostResult.Err(vm, mapIOError(file_err)),
     };
-    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
+    return try HostResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > fs.readdir(path: string) -> !table
 /// ret: table of directory entries
-fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
+fn readdir_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
 
     const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{
         .iterate = true,
     }) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
     defer open_dir.close(vm.runtime.io);
     var iter = open_dir.iterate();
@@ -325,18 +325,18 @@ fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
         try t.putRaw(Data.new.num(i), entry, vm);
     }
 
-    return try NativeResult.Ok(vm, Data.new.table(result_table));
+    return try HostResult.Ok(vm, Data.new.table(result_table));
 }
 
 /// > fs.rename(old_path: string, new_path: string) -> !atom
 /// renames a file or directory
-fn rename_fn(args: []const Data, vm: *VM) !NativeResult {
+fn rename_fn(args: []const Data, vm: *VM) !HostResult {
     const old_path = vm.stringValue(args[0].asString().?);
     const new_path = vm.stringValue(args[1].asString().?);
     Dir.cwd().rename(old_path, Dir.cwd(), new_path, vm.runtime.io) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+        return try HostResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
+    return try HostResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 fn sourceForPath(comptime template: []const u8, path: []const u8) ![]u8 {
@@ -502,4 +502,4 @@ const testing = revo.lang.testing;
 const api = @import("api.zig");
 const meta = @import("meta.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
