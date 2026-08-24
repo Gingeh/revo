@@ -7,9 +7,9 @@ const Data = mem.Data;
 const t = revo.lang.testing;
 const pool = @import("pool.zig");
 
-pub const NativeError = revo.vm.NativeError;
-pub const NativeErrPayload = revo.std_lib.NativeErrPayload;
-pub const NativeResult = revo.std_lib.NativeResult;
+pub const HostError = revo.vm.HostError;
+pub const HostErrPayload = revo.std_lib.HostErrPayload;
+pub const HostResult = revo.std_lib.HostResult;
 
 pub const ProgramCounter = usize;
 pub const LocalSlot = revo.opcode.Register;
@@ -32,7 +32,7 @@ pub const Frame = struct {
     closure_id: ?mem.FunctionID,
 };
 
-pub const NativeFn = *const fn (args: []const Data, vm: *revo.VM) NativeResult;
+pub const HostFn = *const fn (args: []const Data, vm: *revo.VM) HostResult;
 
 pub const RevoBinding = extern struct {
     name: [*:0]const u8,
@@ -93,13 +93,13 @@ pub const Upvalue = struct {
 
 pub const Function = union(enum) {
     closure: Closure,
-    native: revo.std_lib.NativeFunc,
+    host: revo.std_lib.HostFunc,
     c_function: CFunction,
 
     pub fn arity(self: Function) u8 {
         return switch (self) {
             .closure => |f| f.arity,
-            .native => |f| @intCast(f.arity),
+            .host => |f| @intCast(f.arity),
             .c_function => VARIADIC,
         };
     }
@@ -107,7 +107,7 @@ pub const Function = union(enum) {
     pub fn name(self: Function) []const u8 {
         return switch (self) {
             .closure => |f| f.name,
-            .native => |f| if (f.name.len > 0) f.name else "<native>",
+            .host => |f| if (f.name.len > 0) f.name else "<host>",
             .c_function => |f| f.name,
         };
     }
@@ -151,7 +151,7 @@ pub const FunctionPool = struct {
             if (maybe_f.*) |f| switch (f) {
                 .closure => |closure| self.alloc.free(closure.upvalues),
                 .c_function => {},
-                .native => {},
+                .host => {},
             };
         }
         for (self.prototypes.items) |proto| {
@@ -341,7 +341,7 @@ pub const FunctionPool = struct {
             total += 48;
             switch (f) {
                 .closure => |closure| total += @sizeOf(UpvalueID) * closure.upvalues.len,
-                .native, .c_function => {},
+                .host, .c_function => {},
             }
             fid = self.function_next.items[fid];
         }
@@ -366,7 +366,7 @@ pub const FunctionPool = struct {
 fn freeFunction(f: *Function, alloc: std.mem.Allocator) ?Function {
     switch (f.*) {
         .closure => |closure| alloc.free(closure.upvalues),
-        .native, .c_function => {},
+        .host, .c_function => {},
     }
     return null;
 }

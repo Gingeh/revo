@@ -23,9 +23,9 @@ const Pred = struct {
 //
 // generators
 //
-fn makeUnary(comptime op: fn (f64) f64) root.NativeFn {
+fn makeUnary(comptime op: fn (f64) f64) root.HostFn {
     return struct {
-        fn apply(args: []const Data, _: *VM) !NativeResult {
+        fn apply(args: []const Data, _: *VM) !HostResult {
             return .{ .ok = Data.new.num(op(toF64(args[0]))) };
         }
     }.apply;
@@ -35,9 +35,9 @@ fn makeUnaryChecked(
     comptime op: fn (f64) f64,
     comptime check: fn (f64) bool,
     comptime expected: []const u8,
-) root.NativeFn {
+) root.HostFn {
     return struct {
-        fn apply(args: []const Data, vm: *VM) !NativeResult {
+        fn apply(args: []const Data, vm: *VM) !HostResult {
             const n = toF64(args[0]);
             if (!check(n))
                 return .errType(0, expected, typeof(args[0], vm));
@@ -46,18 +46,18 @@ fn makeUnaryChecked(
     }.apply;
 }
 
-fn makeBinary(comptime op: fn (f64, f64) f64) root.NativeFn {
+fn makeBinary(comptime op: fn (f64, f64) f64) root.HostFn {
     return struct {
-        fn apply(args: []const Data, _: *VM) !NativeResult {
+        fn apply(args: []const Data, _: *VM) !HostResult {
             return .{ .ok = Data.new.num(op(toF64(args[0]), toF64(args[1]))) };
         }
     }.apply;
 }
 
-fn makeVariadic(comptime cmp: fn (f64, f64) bool) root.NativeFn {
+fn makeVariadic(comptime cmp: fn (f64, f64) bool) root.HostFn {
     return struct {
         /// returns min or max of all arguments
-        fn apply(args: []const Data, _: *VM) !NativeResult {
+        fn apply(args: []const Data, _: *VM) !HostResult {
             var res = toF64(args[0]);
             for (args[1..]) |arg| {
                 const val = toF64(arg);
@@ -218,5 +218,5 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 const typeof = root.typeof;

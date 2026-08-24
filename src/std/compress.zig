@@ -5,7 +5,7 @@ const api = @import("api.zig");
 
 const Data = revo.Data;
 const VM = revo.VM;
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 
 const flate = std.compress.flate;
 const zstd = std.compress.zstd;
@@ -119,7 +119,7 @@ pub const specs: []const api.FnSpec = &.{
     },
 };
 
-fn resultErr(vm: *VM, message: []const u8) !NativeResult {
+fn resultErr(vm: *VM, message: []const u8) !HostResult {
     return root.resultTuple(vm, .err, try vm.ownDataString(message));
 }
 
@@ -128,7 +128,7 @@ const max_decompressed: usize = 512 * 1024 * 1024;
 
 // -- [base64] ----------------------------------------------------------------
 
-fn base64Encode(args: []const Data, vm: *VM) !NativeResult {
+fn base64Encode(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer out.deinit();
@@ -136,7 +136,7 @@ fn base64Encode(args: []const Data, vm: *VM) !NativeResult {
     return .okData(try vm.adoptDataString(try out.toOwnedSlice()));
 }
 
-fn base64Decode(args: []const Data, vm: *VM) !NativeResult {
+fn base64Decode(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const decoder = std.base64.standard.Decoder;
     const decoded_len = decoder.calcSizeForSlice(input) catch |err| {
@@ -150,7 +150,7 @@ fn base64Decode(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.ownDataString(buf));
 }
 
-fn base64UrlEncode(args: []const Data, vm: *VM) !NativeResult {
+fn base64UrlEncode(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer out.deinit();
@@ -158,7 +158,7 @@ fn base64UrlEncode(args: []const Data, vm: *VM) !NativeResult {
     return .okData(try vm.adoptDataString(try out.toOwnedSlice()));
 }
 
-fn base64UrlDecode(args: []const Data, vm: *VM) !NativeResult {
+fn base64UrlDecode(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const decoder = std.base64.url_safe_no_pad.Decoder;
     const decoded_len = decoder.calcSizeForSlice(input) catch |err| {
@@ -192,7 +192,7 @@ fn flateDecompress(input: []const u8, container: flate.Container, alloc: std.mem
     return try decompressor.reader.allocRemaining(alloc, .limited(max_decompressed));
 }
 
-fn gzipCompress(args: []const Data, vm: *VM) !NativeResult {
+fn gzipCompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateCompress(input, .gzip, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -200,7 +200,7 @@ fn gzipCompress(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
-fn gzipDecompress(args: []const Data, vm: *VM) !NativeResult {
+fn gzipDecompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateDecompress(input, .gzip, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -208,7 +208,7 @@ fn gzipDecompress(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
-fn zlibCompress(args: []const Data, vm: *VM) !NativeResult {
+fn zlibCompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateCompress(input, .zlib, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -216,7 +216,7 @@ fn zlibCompress(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
-fn zlibDecompress(args: []const Data, vm: *VM) !NativeResult {
+fn zlibDecompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateDecompress(input, .zlib, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -224,7 +224,7 @@ fn zlibDecompress(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
-fn deflateCompress(args: []const Data, vm: *VM) !NativeResult {
+fn deflateCompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateCompress(input, .raw, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -232,7 +232,7 @@ fn deflateCompress(args: []const Data, vm: *VM) !NativeResult {
     return root.resultTuple(vm, .ok, try vm.adoptDataString(result));
 }
 
-fn inflateDecompress(args: []const Data, vm: *VM) !NativeResult {
+fn inflateDecompress(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     const result = flateDecompress(input, .raw, vm.runtime.alloc) catch |err| {
         return resultErr(vm, @errorName(err));
@@ -242,7 +242,7 @@ fn inflateDecompress(args: []const Data, vm: *VM) !NativeResult {
 
 // -- [zstd] ------------------------------------------------------------------
 
-fn zstdDecompressFn(args: []const Data, vm: *VM) !NativeResult {
+fn zstdDecompressFn(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     var in = std.Io.Reader.fixed(input);
     var stream = zstd.Decompress.init(&in, &.{}, .{});
@@ -254,7 +254,7 @@ fn zstdDecompressFn(args: []const Data, vm: *VM) !NativeResult {
 
 // -- [lzma] ------------------------------------------------------------------
 
-fn lzmaDecompressFn(args: []const Data, vm: *VM) !NativeResult {
+fn lzmaDecompressFn(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     var in = std.Io.Reader.fixed(input);
     var buf: [8192]u8 = undefined;
@@ -270,7 +270,7 @@ fn lzmaDecompressFn(args: []const Data, vm: *VM) !NativeResult {
 
 // -- [xz] --------------------------------------------------------------------
 
-fn xzDecompressFn(args: []const Data, vm: *VM) !NativeResult {
+fn xzDecompressFn(args: []const Data, vm: *VM) !HostResult {
     const input = vm.stringValue(args[0].asString().?);
     var in = std.Io.Reader.fixed(input);
     var buf: [8192]u8 = undefined;

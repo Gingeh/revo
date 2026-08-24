@@ -65,13 +65,13 @@ pub const specs: []const api.FnSpec = &.{
     },
 };
 
-fn len(args: []const Data, vm: *VM) !NativeResult {
+fn len(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const t = try vm.tuples.get(id);
     return .{ .ok = Data.new.num(t.items.len) };
 }
 
-fn index(args: []const Data, vm: *VM) !NativeResult {
+fn index(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const n = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
     const idx = try revo.asIndex(n);
@@ -80,7 +80,7 @@ fn index(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = t.items[idx] };
 }
 
-fn add(args: []const Data, vm: *VM) !NativeResult {
+fn add(args: []const Data, vm: *VM) !HostResult {
     const left_id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const right_id = args[1].asTuple() orelse return .errType(1, "tuple", root.typeof(args[1], vm));
     const left = try vm.tuples.get(left_id);
@@ -92,7 +92,7 @@ fn add(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.tuple(try vm.tuples.create(items.items)));
 }
 
-fn mul(args: []const Data, vm: *VM) !NativeResult {
+fn mul(args: []const Data, vm: *VM) !HostResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const n = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
     const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer number", root.typeof(args[1], vm));
@@ -113,4 +113,4 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;

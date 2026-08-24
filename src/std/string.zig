@@ -273,7 +273,7 @@ pub const specs: []const api.FnSpec = &.{
 /// > string:with(idx: number, char: string|number) -> string
 /// replaces character at index with given char or byte
 /// index is 0-based
-fn set(args: []const Data, vm: *VM) !NativeResult {
+fn set(args: []const Data, vm: *VM) !HostResult {
     const str_handle = args[0].asString().?;
 
     const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.typeof(args[1], vm));
@@ -305,14 +305,14 @@ fn set(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:len() -> number
 /// returns length of string
-fn len_f(args: []const Data, vm: *VM) !NativeResult {
+fn len_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     return .{ .ok = Data.new.num(str.len) };
 }
 
 /// > string[idx: number] -> string
 /// returns character at index as single-char string
-fn index_f(args: []const Data, vm: *VM) !NativeResult {
+fn index_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.Data.new.core(.missing) } else return .errType(1, "number", root.typeof(args[1], vm));
     if (idx >= str.len) return .{ .ok = revo.Data.new.core(.missing) };
@@ -322,7 +322,7 @@ fn index_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string + other: string -> string
 /// concatenates two strings
-fn add_f(args: []const Data, vm: *VM) !NativeResult {
+fn add_f(args: []const Data, vm: *VM) !HostResult {
     const left = vm.stringValue(args[0].asString().?);
     const right = vm.stringValue(args[1].asString().?);
     const concatenated = try std.mem.concat(vm.runtime.alloc, u8, &.{ left, right });
@@ -332,7 +332,7 @@ fn add_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:upper() -> string
 /// converts string to uppercase
-fn upper_f(args: []const Data, vm: *VM) !NativeResult {
+fn upper_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const buf = try vm.runtime.alloc.dupe(u8, str);
     for (buf) |*c| c.* = std.ascii.toUpper(c.*);
@@ -342,7 +342,7 @@ fn upper_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:lower() -> string
 /// converts string to lowercase
-fn lower_f(args: []const Data, vm: *VM) !NativeResult {
+fn lower_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const buf = try vm.runtime.alloc.dupe(u8, str);
     for (buf) |*c| c.* = std.ascii.toLower(c.*);
@@ -352,7 +352,7 @@ fn lower_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string * n: number -> string
 /// repeats string n times
-fn mul_f(args: []const Data, vm: *VM) !NativeResult {
+fn mul_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const times = if (args[1].asNum()) |n|
         root.numToInt(i64, n) orelse return .errType(1, "integer number", root.typeof(args[1], vm))
@@ -371,7 +371,7 @@ fn mul_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:sub(start: number, length: number) -> string
 /// extracts substring from start with given length
-fn sub_f(args: []const Data, vm: *VM) !NativeResult {
+fn sub_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const start = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.typeof(args[1], vm));
     const length = if (args[2].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(2, "number", root.typeof(args[2], vm));
@@ -390,7 +390,7 @@ fn sub_f(args: []const Data, vm: *VM) !NativeResult {
 /// > string:find(needle: string) -> number|atom
 /// finds first occurrence of needle in string
 /// returns index or :missing if not found
-fn find_f(args: []const Data, vm: *VM) !NativeResult {
+fn find_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const needle = vm.stringValue(args[1].asString().?);
 
@@ -402,7 +402,7 @@ fn find_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:replace(old: string, new: string) -> string
 /// replaces all occurrences of old with new
-fn replace_f(args: []const Data, vm: *VM) !NativeResult {
+fn replace_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const old = vm.stringValue(args[1].asString().?);
     const new = vm.stringValue(args[2].asString().?);
@@ -414,7 +414,7 @@ fn replace_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:split(delim: string) -> table
 /// splits string by delimiter into table
-fn split_f(args: []const Data, vm: *VM) !NativeResult {
+fn split_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const delim = vm.stringValue(args[1].asString().?);
 
@@ -442,7 +442,7 @@ fn split_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:trim() -> string
 /// trims whitespace from both ends
-fn trim_f(args: []const Data, vm: *VM) !NativeResult {
+fn trim_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const trimmed = std.mem.trim(u8, str, " \t\r\n");
     return .{ .ok = try vm.ownDataStringNoDedup(trimmed) };
@@ -450,7 +450,7 @@ fn trim_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:starts_with?(prefix: string) -> bool
 /// checks if string starts with prefix
-fn starts_with_f(args: []const Data, vm: *VM) !NativeResult {
+fn starts_with_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const prefix = vm.stringValue(args[1].asString().?);
     return .{ .ok = root.boolData(std.mem.startsWith(u8, str, prefix)) };
@@ -458,7 +458,7 @@ fn starts_with_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:ends_with?(suffix: string) -> bool
 /// checks if string ends with suffix
-fn ends_with_f(args: []const Data, vm: *VM) !NativeResult {
+fn ends_with_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const suffix = vm.stringValue(args[1].asString().?);
     return .{ .ok = root.boolData(std.mem.endsWith(u8, str, suffix)) };
@@ -466,7 +466,7 @@ fn ends_with_f(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:reverse() -> string
 /// reverses the string
-fn reverse_f(args: []const Data, vm: *VM) !NativeResult {
+fn reverse_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const duped = try vm.runtime.alloc.dupe(u8, str);
     std.mem.reverse(u8, duped);
@@ -477,7 +477,7 @@ fn reverse_f(args: []const Data, vm: *VM) !NativeResult {
 /// > string:table() -> table
 /// converts string to table of characters
 /// "asdf":table() => {"a", "s", "d", "f"}
-fn to_table(args: []const Data, vm: *VM) !NativeResult {
+fn to_table(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const table_id = try vm.tables.create();
     const table = try vm.tables.get(table_id);
@@ -491,7 +491,7 @@ fn to_table(args: []const Data, vm: *VM) !NativeResult {
 /// > string:ascii() -> number
 /// returns ASCII code of first character
 /// "a":ascii() => 97
-fn ascii_f(args: []const Data, vm: *VM) !NativeResult {
+fn ascii_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     if (str.len == 0) {
         return .errType(0, "non-empty string", "empty string");
@@ -499,7 +499,7 @@ fn ascii_f(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = Data.new.num(str[0]) };
 }
 
-fn of_ascii(args: []const Data, vm: *VM) !NativeResult {
+fn of_ascii(args: []const Data, vm: *VM) !HostResult {
     const n = args[0].asNum().?;
     const code: u32 = root.numToInt(u32, n) orelse return .errType(0, "non-negative integer", root.typeof(args[0], vm));
     if (code > 127) {
@@ -511,7 +511,7 @@ fn of_ascii(args: []const Data, vm: *VM) !NativeResult {
 
 /// __call handler for the string module table
 /// string(x) converts any value to its string representation
-fn string_call(args: []const Data, vm: *VM) !root.NativeResult {
+fn string_call(args: []const Data, vm: *VM) !root.HostResult {
     _ = args[0]; // self (the string module table)
     return root.string_(args[1..], vm);
 }
@@ -530,7 +530,7 @@ test "string metatable" {
 
 /// > string:contains?(substr: string) -> bool
 /// checks if string contains substring
-fn contains(args: []const Data, vm: *VM) !NativeResult {
+fn contains(args: []const Data, vm: *VM) !HostResult {
     const str_id = args[0].asString().?;
     const search_id = args[1].asString().?;
 
@@ -542,7 +542,7 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string:index_of(substr: string) -> number | nil
 /// ret 0-based index of substring or nil
-fn index_of(args: []const Data, vm: *VM) !NativeResult {
+fn index_of(args: []const Data, vm: *VM) !HostResult {
     const str_id = args[0].asString().?;
     const search_id = args[1].asString().?;
 
@@ -557,7 +557,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
 
 /// > string.join(table: table, sep: string) -> string
 /// joins table elements into string with separator
-fn join(args: []const Data, vm: *VM) !NativeResult {
+fn join(args: []const Data, vm: *VM) !HostResult {
     const tbl_id = args[0].asTable().?;
     const sep_id = args[1].asString().?;
 
@@ -610,4 +610,4 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;

@@ -1,5 +1,5 @@
 // debug flags
-pub fn set_debug(args: []const Data, vm: *VM) !NativeResult {
+pub fn set_debug(args: []const Data, vm: *VM) !HostResult {
     const table_id = args[0].asTable() orelse return .errType(0, "table", std_lib.typeof(args[0], vm));
     const table = try vm.tables.get(table_id);
     vm.debug.dump = try check_field("dump", table, vm);
@@ -10,7 +10,7 @@ pub fn set_debug(args: []const Data, vm: *VM) !NativeResult {
 }
 
 // get metatable
-pub fn get_metatable_(args: []const Data, vm: *VM) !NativeResult {
+pub fn get_metatable_(args: []const Data, vm: *VM) !HostResult {
     const mt = try vm.getMetatableId(args[0]);
     return if (mt) |id| .{ .ok = Data.new.table(id) } else .{ .ok = revo.Data.new.core(.missing) };
 }
@@ -20,7 +20,7 @@ pub fn get_metatable_(args: []const Data, vm: *VM) !NativeResult {
 ///     t = {}
 ///     mt = {get_val = fn() 42}
 ///     set_metatable(t, mt)
-pub fn set_metatable_(args: []const Data, vm: *VM) !NativeResult {
+pub fn set_metatable_(args: []const Data, vm: *VM) !HostResult {
     const mt = if (args[1].asAtom()) |a|
         if (a == revo.core_atoms.atomId(.nil)) null else return .errType(1, "nil atom or table", "atom")
     else if (args[1].asTable()) |id|
@@ -44,4 +44,4 @@ const testing = revo.lang.testing;
 const Data = revo.Data;
 const VM = revo.VM;
 const std_lib = @import("root.zig");
-const NativeResult = std_lib.NativeResult;
+const HostResult = std_lib.HostResult;

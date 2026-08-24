@@ -132,7 +132,7 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
                     1 => try self.callFunctionParts(indexer, null, &.{object}, result_reg),
                     else => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
                 },
-                .native => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
+                .host => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
                 .c_function => try self.callFunctionParts(indexer, null, &.{ object, key }, result_reg),
             };
             return .{ .value = value, .from_meta = true };

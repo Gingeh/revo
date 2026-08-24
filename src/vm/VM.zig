@@ -634,12 +634,12 @@ pub fn setGlobal(self: *VM, name: []const u8, val: Data) !void {
 // stdlib reg
 //
 
-/// install a native fn on the heap. name fills the function's name
+/// install a Host fn on the heap. name fills the function's name
 /// field (stack traces, mt keys)
-pub fn installNative(self: *VM, name: []const u8, func: revo.std_lib.NativeFunc) !mem.FunctionID {
+pub fn installHost(self: *VM, name: []const u8, func: revo.std_lib.HostFunc) !mem.FunctionID {
     var f = func;
     f.name = name;
-    return self.functions.create(.{ .native = f });
+    return self.functions.create(.{ .host = f });
 }
 
 /// register a function as a global. also records in stdlib_globals so
@@ -751,7 +751,7 @@ fn frameName(self: *VM, closure_id: ?mem.FunctionID) []const u8 {
     const func = self.functions.get(id) catch return "<dead>";
     return switch (func.*) {
         .closure => |closure| if (std.mem.eql(u8, closure.name, "__main")) "<module>" else closure.name,
-        .native => |f| f.name,
+        .host => |f| f.name,
         .c_function => "<c func>",
     };
 }
@@ -860,7 +860,7 @@ pub inline fn currentClosure(self: *VM) !?*root.functions.Closure {
     const func = try self.functionFast(closure_id);
     return switch (func.*) {
         .closure => |*closure| closure,
-        .native, .c_function => null,
+        .host, .c_function => null,
     };
 }
 
@@ -933,7 +933,7 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
     const func = try self.functions.get(closure_id);
     const closure = switch (func.*) {
         .closure => |value| value,
-        .native, .c_function => return closure_id,
+        .host, .c_function => return closure_id,
     };
 
     if (closure.sharable_upvalues) return closure_id;
@@ -1062,7 +1062,7 @@ pub inline fn callFunction(self: *VM, callee: Data, args: []const Data) EvalErro
 
 /// reroute a parked callee's wake-up or ret to a dispatch result register.
 /// the callee's closure frame (if any) is still on the fiber, so its eventual
-/// ret writes through the frame's result_register; a native callee wrote
+/// ret writes through the frame's result_register; a Host callee wrote
 /// parked_result_slot at park time and wakeFiber fills it on completion
 fn rerouteParked(self: *VM, fiber: *Fiber, base: usize, caller_frame_depth: usize, result_reg: ?opcode.Register) void {
     _ = self;
@@ -1244,7 +1244,7 @@ pub const EvalError = error{
     InvalidTuple,
     OutOfMemory,
     ConstantReassignment,
-} || root.functions.NativeError;
+} || root.functions.HostError;
 
 pub inline fn tableFast(
     self: *VM,
@@ -1324,7 +1324,7 @@ fn callNonClosureFunction(
                 c_result,
             );
         },
-        .native => |f| {
+        .host => |f| {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
@@ -1436,7 +1436,7 @@ fn callNonClosureFunction(
                             }
                             return error.TypeError;
                         },
-                        .native_error => |native_err| return native_err,
+                        .host_error => |Host_err| return Host_err,
                         .parked => {
                             const frame = try self.currentFrame();
                             self.currentFiber().parked_result_slot = frame.base + instr.c;

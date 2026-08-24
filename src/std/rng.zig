@@ -6,7 +6,7 @@ const testing = revo.lang.testing;
 
 const Data = revo.Data;
 const VM = revo.VM;
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 
 pub const specs: []const api.FnSpec = &.{
     .{
@@ -68,7 +68,7 @@ pub const specs: []const api.FnSpec = &.{
     },
 };
 
-pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {
+pub fn setSeed(args: []const Data, vm: *VM) !HostResult {
     const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
     const new_seed: u64 = root.numToInt(u64, raw_arg) orelse return .errType(0, "non-negative integer", root.typeof(args[0], vm));
 
@@ -77,7 +77,7 @@ pub fn setSeed(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-pub fn revertSeed(args: []const Data, vm: *VM) !NativeResult {
+pub fn revertSeed(args: []const Data, vm: *VM) !HostResult {
     _ = args;
 
     vm.runtime.rng_prng = null;
@@ -85,14 +85,14 @@ pub fn revertSeed(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-pub fn rand(args: []const Data, vm: *VM) !NativeResult {
+pub fn rand(args: []const Data, vm: *VM) !HostResult {
     const raw_arg = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
     const upper_bound: isize = root.numToInt(isize, raw_arg) orelse return .errType(0, "integer number", root.typeof(args[0], vm));
 
     return .okData(Data.new.num(randomNumber(isize, vm, 0, upper_bound)));
 }
 
-pub fn randRange(args: []const Data, vm: *VM) !NativeResult {
+pub fn randRange(args: []const Data, vm: *VM) !HostResult {
     const raw_lower = args[0].asNum() orelse return .errType(0, "number", root.typeof(args[0], vm));
     const lower_bound: isize = root.numToInt(isize, raw_lower) orelse return .errType(0, "integer number", root.typeof(args[0], vm));
 
@@ -107,13 +107,13 @@ pub fn randRange(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.num(result));
 }
 
-pub fn randFloat(args: []const Data, vm: *VM) !NativeResult {
+pub fn randFloat(args: []const Data, vm: *VM) !HostResult {
     _ = args;
 
     return .okData(Data.new.num(randomNumber(f64, vm, 0.0, 1.0)));
 }
 
-pub fn choice(args: []const Data, vm: *VM) !NativeResult {
+pub fn choice(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
 
     // gusic: I have no idea if this is the right error to use, please don't kill me if it isn't

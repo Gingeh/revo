@@ -8,7 +8,7 @@ const revo = @import("../root.zig");
 const Data = revo.Data;
 const root = @import("root.zig");
 const TypeSpec = root.TypeSpec;
-const NativeFunc = root.NativeFunc;
+const HostFunc = root.HostFunc;
 
 pub const all_specs: []const []const FnSpec = &.{
     @import("root.zig").root_specs,
@@ -77,7 +77,7 @@ pub const FnSpec = struct {
     /// when set, the metatable key is this core atom (e.g. `__index`)
     /// instead of `internAtom(name)`. only `__index` uses it today
     core_key: ?revo.core_atoms = null,
-    f: NativeFunc,
+    f: HostFunc,
 };
 
 pub const g: Placement = .{ .kind = .global };
@@ -115,7 +115,7 @@ pub fn registerAll(
 
     for (groups) |specs| {
         for (specs) |spec| {
-            const fn_id = try vm.installNative(spec.name, spec.f);
+            const fn_id = try vm.installHost(spec.name, spec.f);
             for (spec.placements) |p| switch (p.kind) {
                 .global => try global_funcs.append(vm.runtime.alloc, .{ .name = spec.name, .fn_id = fn_id }),
                 .module => {

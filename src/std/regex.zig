@@ -5,7 +5,7 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 
 pub const specs: []const api.FnSpec = &.{
     .{
@@ -83,7 +83,7 @@ fn resolveRegex(val: Data, vm: *VM) !ResolvedRegex {
     return error.InvalidRegex;
 }
 
-fn compileFn(args: []const Data, vm: *VM) !NativeResult {
+fn compileFn(args: []const Data, vm: *VM) !HostResult {
     const pattern_str = try vm.runtime.alloc.dupe(u8, vm.stringValue(args[0].asString().?));
     defer vm.runtime.alloc.free(pattern_str);
 
@@ -103,7 +103,7 @@ fn compileFn(args: []const Data, vm: *VM) !NativeResult {
     const mt_id = try vm.tables.create();
     const mt = try vm.tables.get(mt_id);
 
-    const gc_fn_id = try vm.installNative("__regex_gc", .{
+    const gc_fn_id = try vm.installHost("__regex_gc", .{
         .arity = 1,
         .param_types = &.{.table},
         .func = gcFn,
@@ -118,7 +118,7 @@ fn compileFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.table(tid));
 }
 
-fn isMatchFn(args: []const Data, vm: *VM) !NativeResult {
+fn isMatchFn(args: []const Data, vm: *VM) !HostResult {
     const r = resolveRegex(args[0], vm) catch return .okData(Data.new.boolean(false));
     const owned = r.owned;
     defer if (owned) vm.runtime.alloc.destroy(r.regex);
@@ -126,7 +126,7 @@ fn isMatchFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.boolean(r.regex.isMatch(haystack)));
 }
 
-fn findFn(args: []const Data, vm: *VM) !NativeResult {
+fn findFn(args: []const Data, vm: *VM) !HostResult {
     const r = resolveRegex(args[0], vm) catch return .okData(Data.new.nil());
     const owned = r.owned;
     defer if (owned) vm.runtime.alloc.destroy(r.regex);
@@ -137,7 +137,7 @@ fn findFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-fn findAllFn(args: []const Data, vm: *VM) !NativeResult {
+fn findAllFn(args: []const Data, vm: *VM) !HostResult {
     const r = resolveRegex(args[0], vm) catch return .okData(Data.new.nil());
 
     const it_id = try vm.tables.create();
@@ -152,7 +152,7 @@ fn findAllFn(args: []const Data, vm: *VM) !NativeResult {
     try it.putRaw(Data.new.atom(atom_pos), Data.new.num(0), vm);
 
     if (r.owned) {
-        const gc_fn_id = try vm.installNative("__regex_it_gc", .{
+        const gc_fn_id = try vm.installHost("__regex_it_gc", .{
             .arity = 1,
             .param_types = &.{.table},
             .func = itGcFn,
@@ -165,7 +165,7 @@ fn findAllFn(args: []const Data, vm: *VM) !NativeResult {
     const mt_id = try vm.tables.create();
     const mt = try vm.tables.get(mt_id);
 
-    const next_fn_id = try vm.installNative("__regex_next", .{
+    const next_fn_id = try vm.installHost("__regex_next", .{
         .arity = 1,
         .param_types = &.{.table},
         .func = nextFn,
@@ -178,7 +178,7 @@ fn findAllFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.table(it_id));
 }
 
-fn freeFn(args: []const Data, vm: *VM) !NativeResult {
+fn freeFn(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
     const table = try vm.tables.get(tid);
 
@@ -194,7 +194,7 @@ fn freeFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-fn itGcFn(args: []const Data, vm: *VM) !NativeResult {
+fn itGcFn(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
     const table = vm.tables.get(tid) catch return .okData(Data.new.nil());
     const atom_regex = try vm.internAtom("_ptr");
@@ -207,7 +207,7 @@ fn itGcFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-fn gcFn(args: []const Data, vm: *VM) !NativeResult {
+fn gcFn(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
     const table = vm.tables.get(tid) catch return .okData(Data.new.nil());
     const ptr_val = table.getRaw(try vm.dataAtom("_ptr"), vm) orelse
@@ -219,7 +219,7 @@ fn gcFn(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.nil());
 }
 
-fn nextFn(args: []const Data, vm: *VM) !NativeResult {
+fn nextFn(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
     const table = try vm.tables.get(tid);
 

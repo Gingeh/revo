@@ -39,7 +39,7 @@ pub const specs: []const api.FnSpec = &.{
     },
 };
 
-pub fn version(args: []const Data, vm: *VM) !NativeResult {
+pub fn version(args: []const Data, vm: *VM) !HostResult {
     _ = args;
     const v = @import("build_options").version;
 
@@ -52,7 +52,7 @@ pub fn version(args: []const Data, vm: *VM) !NativeResult {
 /// > eval(code: string) -> !any
 /// evaluates it as a module, gives you back its' return value
 /// you can treat it as a function's body
-pub fn eval(args: []const Data, vm: *VM) !NativeResult {
+pub fn eval(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
 
     const source = switch (args[0].tag()) {
@@ -77,7 +77,7 @@ pub fn eval(args: []const Data, vm: *VM) !NativeResult {
 /// > build(code: string) -> !any
 /// builds it as a module, gives you back its' bytecode in a string
 /// the string is only useful for writing to a file or executing
-pub fn build(args: []const Data, vm: *VM) !NativeResult {
+pub fn build(args: []const Data, vm: *VM) !HostResult {
     const source = vm.stringValue(args[0].asString().?);
 
     const result = try revo.lang.build(vm, .{ .text = source, .name = "<anon>" }, .{});
@@ -121,5 +121,5 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
 const typeof = root.typeof;

@@ -43,23 +43,23 @@ pub const specs: []const api.FnSpec = &.{
     },
 };
 
-fn now_ms(_: []const Data, vm: *VM) !NativeResult {
+fn now_ms(_: []const Data, vm: *VM) !HostResult {
     const ts = std.Io.Clock.real.now(vm.runtime.io);
     return .{ .ok = Data.new.num(ts.toMilliseconds()) };
 }
 
-fn now_ns(_: []const Data, vm: *VM) !NativeResult {
+fn now_ns(_: []const Data, vm: *VM) !HostResult {
     const ts = std.Io.Clock.real.now(vm.runtime.io);
     if (vm.runtime.time_wall_base == 0) vm.runtime.time_wall_base = ts.nanoseconds;
     return .{ .ok = Data.new.num(ts.nanoseconds - vm.runtime.time_wall_base) };
 }
 
-fn monotonic_ms(_: []const Data, vm: *VM) !NativeResult {
+fn monotonic_ms(_: []const Data, vm: *VM) !HostResult {
     const ts = std.Io.Clock.awake.now(vm.runtime.io);
     return .{ .ok = Data.new.num(ts.toMilliseconds()) };
 }
 
-fn monotonic_ns(_: []const Data, vm: *VM) !NativeResult {
+fn monotonic_ns(_: []const Data, vm: *VM) !HostResult {
     const ts = std.Io.Clock.awake.now(vm.runtime.io);
     if (vm.runtime.time_mono_base == 0) vm.runtime.time_mono_base = ts.nanoseconds;
     return .{ .ok = Data.new.num(ts.nanoseconds - vm.runtime.time_mono_base) };
@@ -79,4 +79,4 @@ const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
-const NativeResult = root.NativeResult;
+const HostResult = root.HostResult;
