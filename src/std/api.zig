@@ -161,12 +161,14 @@ pub fn freeLoadedSpecs(alloc: std.mem.Allocator, owner: []const []const FnSpec) 
         const ls = slot.* orelse continue;
         if (ls.groups.ptr != owner.ptr) continue;
         if (ls.alloc.ptr != alloc.ptr) return;
+
         for (owner) |g| {
             for (g) |s| {
                 s.deinit(alloc);
             }
             alloc.free(g);
         }
+
         alloc.free(owner);
         slot.* = null;
         full_specs = newestLive();
@@ -234,10 +236,12 @@ pub const Head = struct {
 pub fn headOf(sig: []const u8) Head {
     const end = std.mem.indexOfScalar(u8, sig, '(') orelse sig.len;
     var head = sig[0..end];
+
     if (std.mem.indexOfScalar(u8, head, '[')) |open| head = head[0..open];
     if (std.mem.indexOfScalar(u8, head, ':')) |i| {
         return .{ .kind = .method, .target = root.typeFromName(head[0..i]) };
     }
+
     if (std.mem.lastIndexOfScalar(u8, head, '.')) |i| {
         return .{ .kind = .module, .module = head[0..i] };
     }
@@ -246,6 +250,13 @@ pub fn headOf(sig: []const u8) Head {
 
 /// (name, type-string)
 pub const Param = struct { []const u8, []const u8 };
+
+/// separate from the doc text so renderers can nest it under the struct entry
+pub const FieldSpec = struct {
+    name: []const u8,
+    type_text: []const u8 = "",
+    doc: []const u8 = "",
+};
 
 pub const FnSpec = struct {
     name: []const u8,
@@ -256,6 +267,8 @@ pub const FnSpec = struct {
     variadic: bool = false,
     /// a plain value binding (`const width = 80`), not callable
     is_value: bool = false,
+    /// documented fields when this spec describes a struct
+    fields: []const FieldSpec = &.{},
     /// when set, the metatable key is this core atom (e.g. `__index`)
     /// instead of `internAtom(name)`. only `__index` uses it today
     core_key: ?revo.core_atoms = null,
@@ -272,6 +285,12 @@ pub const FnSpec = struct {
         alloc.free(self.params);
         alloc.free(self.ret);
         alloc.free(self.doc);
+        for (self.fields) |fl| {
+            alloc.free(fl.name);
+            alloc.free(fl.type_text);
+            alloc.free(fl.doc);
+        }
+        alloc.free(self.fields);
     }
 };
 
@@ -466,22 +485,21 @@ pub fn specFromDecl(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]cons
 }
 
 fn specFromStruct(alloc: std.mem.Allocator, s: anytype, doc: []const u8) !FnSpec {
-    var doc_buf = std.ArrayList(u8).empty;
-    defer doc_buf.deinit(alloc);
-    try doc_buf.appendSlice(alloc, doc);
+    var fields: std.ArrayList(FieldSpec) = .empty;
+    errdefer fields.deinit(alloc);
 
     for (s.items) |item| {
         switch (item) {
             .field => |f| {
                 const fdoc = f.doc orelse continue;
-                try doc_buf.appendSlice(alloc, "\n\n- `");
-                try doc_buf.appendSlice(alloc, f.name);
-                if (f.type_name) |tn| {
-                    try doc_buf.appendSlice(alloc, ": ");
-                    try renderType(alloc, &doc_buf, tn);
-                }
-                try doc_buf.appendSlice(alloc, "` - ");
-                try doc_buf.appendSlice(alloc, fdoc);
+                var type_buf = std.ArrayList(u8).empty;
+                defer type_buf.deinit(alloc);
+                if (f.type_name) |tn| try renderType(alloc, &type_buf, tn);
+                try fields.append(alloc, .{
+                    .name = try alloc.dupe(u8, f.name),
+                    .type_text = try alloc.dupe(u8, type_buf.items),
+                    .doc = try alloc.dupe(u8, fdoc),
+                });
             },
             // struct fns ride along as method specs via their binding docs
             .binding => {},
@@ -493,8 +511,9 @@ fn specFromStruct(alloc: std.mem.Allocator, s: anytype, doc: []const u8) !FnSpec
         .sig = try alloc.dupe(u8, s.name),
         .params = &.{},
         .ret = "",
-        .doc = try alloc.dupe(u8, std.mem.trimEnd(u8, doc_buf.items, "\n")),
+        .doc = try alloc.dupe(u8, doc),
         .is_value = true,
+        .fields = try fields.toOwnedSlice(alloc),
         .f = undefined,
     };
 }

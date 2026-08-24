@@ -688,9 +688,17 @@ fn renderPlain(
     if (module_doc.len > 0) try w.print("\n{s}\n", .{module_doc});
     var count: usize = 0;
     for (specs) |s| {
-        if (s.doc.len == 0) continue;
+        if (s.doc.len == 0 and s.fields.len == 0) continue;
         count += 1;
-        if (s.is_value)
+        if (s.fields.len > 0) {
+            try w.print("\n- struct {s}\n{s}\n", .{ s.name, s.doc });
+            for (s.fields) |fl| {
+                try w.print("  - `{s}", .{fl.name});
+                if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
+                if (fl.doc.len > 0) try w.print("` - {s}", .{fl.doc}) else try w.writeAll("`");
+                try w.writeAll("\n");
+            }
+        } else if (s.is_value)
             try w.print("\n- {s}\n{s}\n", .{ s.name, s.doc })
         else
             try w.print("\n- {s}/{d}\n{s}\n", .{ s.name, s.params.len, s.doc });

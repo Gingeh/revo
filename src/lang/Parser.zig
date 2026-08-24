@@ -2491,4 +2491,3 @@ test "declare defaults to pub" {
     const root = try parseTokens(alloc, tokens);
     try std.testing.expect(root.expr.decl.pub_);
 }
-

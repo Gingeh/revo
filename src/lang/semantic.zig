@@ -39,6 +39,7 @@ pub fn analyze(
     var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations, docs);
     defer checker.deinit();
 
+    try checker.collectPredeclared(root);
     try checker.walkImports(root, module_resolver);
     _ = try checker.analyzeNode(root);
     if (type_map) |tm| {
@@ -135,6 +136,9 @@ const SemanticChecker = struct {
     known_globals: std.StringHashMap(void),
     /// known globals rebound by user code (shadowed by a local binding)
     shadowed_globals: std.StringHashMap(void),
+    /// every top-level declared name, calls and idents may reference
+    /// declarations that appear later in the file
+    predeclared: std.StringHashMapUnmanaged(void) = .empty,
     current_type_params: []const []const u8 = &.{},
     /// > 0 while inside a fn body; gates type_map/docs exports
     fn_nesting: usize = 0,
@@ -202,6 +206,30 @@ const SemanticChecker = struct {
         self.scopes.deinit(self.alloc);
         self.import_fn_sigs.deinit();
         self.dep_asts.deinit(self.alloc);
+        self.predeclared.deinit(self.alloc);
+    }
+
+    /// collect every top-level declared name so forward references don't
+    /// read as unknown names
+    fn collectPredeclared(self: *SemanticChecker, root: *const ast.Node) !void {
+        const items: []const *ast.Node = switch (root.expr) {
+            .block => |exprs| exprs,
+            else => return,
+        };
+        for (items) |item| {
+            const inner: *const ast.Node = switch (item.expr) {
+                .decl => |d| d.inner,
+                else => item,
+            };
+            const name: ?[]const u8 = switch (inner.expr) {
+                .binding => |b| if (b.target.expr == .ident) b.target.expr.ident else null,
+                .type_alias => |t| t.name,
+                .struct_def => |d| d.name,
+                .import_stmt => |stmt| stmt.name,
+                else => null,
+            };
+            if (name) |n| try self.predeclared.put(self.alloc, n, {});
+        }
     }
 
     fn walkImports(self: *SemanticChecker, node: *const ast.Node, resolver: ModuleResolver) !void {
@@ -722,7 +750,12 @@ const SemanticChecker = struct {
     }
 
     fn analyzeIdent(self: *SemanticChecker, name: []const u8, span: ast.Span) !types_mod.TypeInfo {
-        if (self.lookup(name) == null and !ast.isDiscardName(name)) {
+        // stdlib fns are only declared into scope when the checker runs with
+        // vm globals (repl); without them, fall back to the spec registry so
+        // bare calls like `print(x)` don't read as unknown
+        if (self.lookup(name) == null and !ast.isDiscardName(name) and
+            !self.predeclared.contains(name) and revo.std_lib.api.find(name) == null)
+        {
             const msg = try std.fmt.allocPrint(self.alloc, "name `{s}` is not defined", .{name});
             try self.appendError(msg, span, "unknown name");
         }
@@ -1117,6 +1150,11 @@ const SemanticChecker = struct {
     }
 
     fn analyzeCall(self: *SemanticChecker, call: anytype, span: ast.Span) !types_mod.TypeInfo {
+        // bare ident callees get the same unknown-name check as plain idents -
+        // inferExprType would silently fall back to .any
+        if (call.callee.expr == .ident) {
+            _ = try self.analyzeIdent(call.callee.expr.ident, call.callee.span);
+        }
         if (call.callee.expr == .field) {
             _ = try self.analyzeNode(call.callee.expr.field.object);
         }

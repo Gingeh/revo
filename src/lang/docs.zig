@@ -5,6 +5,7 @@ const revo = @import("../root.zig");
 const api = revo.std_lib.api;
 const Writer = std.Io.Writer;
 pub const FnSpec = api.FnSpec;
+pub const FieldSpec = api.FieldSpec;
 const headOf = api.headOf;
 
 // -- [extract] ---------------------------------------------------------------
@@ -262,6 +263,30 @@ fn renderFn(w: *Writer, p: Planned) !void {
     } else {
         try renderDoc(w, spec.doc);
     }
+
+    if (spec.fields.len > 0) try renderFields(w, spec.fields);
+}
+
+/// documented struct fields as a markdown list, continuation lines
+/// indented so multi-line docs stay inside their bullet
+fn renderFields(w: *Writer, fields: []const FieldSpec) !void {
+    for (fields) |fl| {
+        try w.print("- `{s}", .{fl.name});
+        if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
+        try w.writeAll("`");
+        // field docs carry their in-source indentation; strip it so
+        // nesting under the bullet stays consistent
+        var first = true;
+        var it = std.mem.splitScalar(u8, fl.doc, '\n');
+        while (it.next()) |line| {
+            const stripped = std.mem.trim(u8, line, " ");
+            if (!first) try w.writeAll("\n  ") else try w.writeAll(" - ");
+            first = false;
+            try w.writeAll(stripped);
+        }
+        try w.writeAll("\n");
+    }
+    try w.writeAll("\n");
 }
 
 fn renderDoc(w: *Writer, doc: []const u8) !void {

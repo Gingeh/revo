@@ -855,8 +855,10 @@ pub fn signatureHelp(
             const params = try alloc.alloc(ParamInfo, spec.params.len);
             errdefer alloc.free(params);
             for (spec.params, 0..) |p, i| {
-                const pt = if (p[1].len > 0) pt: {
-                    break :pt try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, p[1]);
+                // parseTypeString can return shared comptime sentinels
+                const pt: ?types.TypeInfo = if (p[1].len > 0) pt: {
+                    const t = try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, p[1]);
+                    break :pt try types.clone(t, alloc);
                 } else null;
                 params[i] = .{
                     .name = try alloc.dupe(u8, p[0]),
@@ -865,7 +867,8 @@ pub fn signatureHelp(
             }
 
             const ret: ?types.TypeInfo = if (spec.ret.len > 0) ret: {
-                break :ret try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, spec.ret);
+                const t = try type_parser.parseTypeString(type_parser.BareCtx{ .alloc = alloc }, spec.ret);
+                break :ret try types.clone(t, alloc);
             } else null;
 
             const doc: ?[]const u8 = if (spec.doc.len > 0) try alloc.dupe(u8, spec.doc) else null;
@@ -1754,16 +1757,20 @@ const SigVisitor = struct {
     sig_map: *std.StringHashMapUnmanaged(FnSig),
     alloc: std.mem.Allocator,
 
+    /// parseTypeString can return shared comptime sentinels or strings borrowing ast
+    /// sig_map can outlive both so we need deepcopy
+    fn ownedType(self: *@This(), te: *const lang.ast.TypeExpr) ?types.TypeInfo {
+        const t = type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, te) catch return null;
+        return types.clone(t, self.alloc) catch null;
+    }
+
     fn paramInfos(self: *@This(), fn_expr: anytype) ?[]ParamInfo {
         const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return null;
         errdefer self.alloc.free(params);
         for (fn_expr.params, params) |src, *dst| {
             dst.* = .{
                 .name = self.alloc.dupe(u8, src.name) catch return null,
-                .type_name = if (src.type_name) |te|
-                    type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, te) catch null
-                else
-                    null,
+                .type_name = if (src.type_name) |te| self.ownedType(te) else null,
             };
         }
         return params;
@@ -1781,17 +1788,11 @@ const SigVisitor = struct {
                         for (f.params, params) |src, *dst| {
                             dst.* = .{
                                 .name = self.alloc.dupe(u8, src.name) catch return,
-                                .type_name = if (src.type_name) |te|
-                                    type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, te) catch null
-                                else
-                                    null,
+                                .type_name = if (src.type_name) |te| self.ownedType(te) else null,
                             };
                         }
 
-                        const return_type: ?types.TypeInfo = if (f.return_type) |rt|
-                            type_parser.evalTypeExpr(type_parser.BareCtx{ .alloc = self.alloc }, rt) catch null
-                        else
-                            null;
+                        const return_type: ?types.TypeInfo = if (f.return_type) |rt| self.ownedType(rt) else null;
 
                         const name_owned = self.alloc.dupe(u8, name) catch return;
                         self.sig_map.put(self.alloc, name_owned, .{
@@ -2624,7 +2625,10 @@ test "workspace diagnostics clean file" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var ws = try Workspace.init(alloc);
+    // *vm attached like the lsp does, stdlib fns come from its globals*
+    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
+    defer vm.deinit();
+    var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
     const id = try ws.open("<test>", "let x = 1\nprint(x)", .{});
@@ -2777,4 +2781,30 @@ test "workspace hover over bare fn definition" {
     var hov = try ws.hover(alloc, id, .{ .line = 3, .character = 5 }, query_opts);
     defer if (hov) |*h| h.deinit(alloc);
     try std.testing.expect(hov != null);
+}
+
+test "workspace sig map survives typed fn invalidation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var ws = try Workspace.init(alloc);
+    defer ws.deinit();
+
+    const id = try ws.open("<sig>",
+        \\const f = fn(x: table, y: fn(num) -> str) x
+        \\type T = fn(table<int>, num) -> table<string, int>
+        \\
+    , .{});
+    _ = try ws.inspectDetailed(alloc, id, .{});
+
+    try ws.change(id, "const f = fn(x: table) x");
+    _ = try ws.inspectDetailed(alloc, id, .{});
+
+    const cache = ws.inspect_cache.getPtr(id) orelse return error.TestUnexpectedResult;
+    const sig = cache.sig_map.get("f") orelse return error.TestUnexpectedResult;
+    const p = sig.params[0].type_name.?;
+    try std.testing.expect(p == .table);
+    try std.testing.expect(p.table.key == null);
+    try std.testing.expect(p.table.value.* == .any);
 }

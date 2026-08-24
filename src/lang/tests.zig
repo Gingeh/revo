@@ -1562,6 +1562,10 @@ test "semantic catches undefined variable" {
     try t.expectCompileError("missing_name", .ParseError);
 }
 
+test "semantic catches undefined function call" {
+    try t.expectCompileError("pritn(\"hi\")", .ParseError);
+}
+
 test "semantic catches trying to mutate a tuple variable" {
     try t.expectCompileError("let tup = (0,0) tup[0] = 1", .ParseError);
 }
@@ -2021,9 +2025,11 @@ test "structs do not leak" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    try t.expectRuntimeErrorInDir(module_dir,
+    // *the struct from asdf.rv must not resolve in a fresh module - it fails
+    // at compile time now instead of as a runtime undefined variable*
+    try t.expectCompileErrorInDir(module_dir,
         \\ User { name = "asdf" }
-    , .UndefinedVariable);
+    );
 }
 
 test "struct descriptors stay off globals" {
