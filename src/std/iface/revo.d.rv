@@ -9,6 +9,13 @@ you can treat it as a function's body
 pub declare revo.eval = fn(code: string) -> !any/string
 
 #*
+reads the file and evaluates it as a module, gives you back its' return value
+like eval but the source comes from a file, relative imports inside
+resolve against the file's directory
+*#
+pub declare revo.dofile = fn(path: string) -> !any/string
+
+#*
 builds it as a module, gives you back its' bytecode in a string
 the string is only useful for writing to a file or executing
 *#

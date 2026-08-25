@@ -2,6 +2,7 @@
 
 pub const impls: []const api.Impl = &.{
     .{ .name = "eval", .f = root.define(&.{.string}, eval) },
+    .{ .name = "dofile", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, dofile) },
     .{ .name = "build", .f = root.define(&.{.string}, build) },
     .{ .name = "version", .f = root.define(&.{}, version) },
 };
@@ -30,6 +31,42 @@ pub fn eval(args: []const Data, vm: *VM) !HostResult {
     const source_name = "<eval>";
     const res = revo.module.runModule(vm, source_name, source, false) catch {
         return .other("eval failed");
+    };
+
+    return switch (res) {
+        .ok => root.resultTuple(vm, .ok, vm.currentFiber().result),
+        .err => |err| {
+            const err_str = try vm.ownDataString(revo.lang.diagnostic.firstError(err.report).?);
+            return root.resultTuple(vm, .err, err_str);
+        },
+    };
+}
+
+/// > dofile(path: string) -> !any
+/// reads the file, evaluates it as a module, gives you back its' return value
+/// like eval but the source comes from a file, relative imports inside
+/// resolve against the file's directory
+pub fn dofile(args: []const Data, vm: *VM) !HostResult {
+    if (args.len != 1) return .errArity(args.len, 1);
+
+    const path = switch (args[0].tag()) {
+        .string => vm.stringValue(args[0].asString().?),
+        else => return .errType(0, "string", typeof(args[0], vm)),
+    };
+
+    const source = std.Io.Dir.cwd().readFileAlloc(
+        vm.runtime.io,
+        path,
+        vm.runtime.alloc,
+        .limited(fs.max_read_size),
+    ) catch |err| {
+        const msg = try vm.ownDataString(fs.mapIOError(err));
+        return root.resultTuple(vm, .err, msg);
+    };
+    defer vm.runtime.alloc.free(source);
+
+    const res = revo.module.runModule(vm, path, source, false) catch {
+        return .other("dofile failed");
     };
 
     return switch (res) {
@@ -84,9 +121,36 @@ test "revo.build compiles source" {
 
 const revo = @import("../root.zig");
 const testing = revo.lang.testing;
+const std = @import("std");
 const Data = revo.Data;
 const VM = revo.VM;
 const api = @import("api.zig");
 const root = @import("root.zig");
+const fs = @import("fs.zig");
 const HostResult = root.HostResult;
 const typeof = root.typeof;
+
+test "revo.dofile returns the file's value" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "hi.rv", .data = "{x = 2}" });
+
+    const dir_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(dir_path);
+    const file_path = try std.fs.path.join(std.testing.allocator, &.{ dir_path, "hi.rv" });
+    defer std.testing.allocator.free(file_path);
+
+    const source = try std.fmt.allocPrint(std.testing.allocator,
+        \\ const (_, res) = revo.dofile('{s}')
+        \\ res.x
+    , .{file_path});
+    defer std.testing.allocator.free(source);
+
+    try testing.topNumber(source, 2);
+}
+
+test "revo.dofile errors on missing file" {
+    try testing.topAtom(
+        \\ revo.dofile("./nope-does-not-exist.rv")[0]
+    , "err");
+}

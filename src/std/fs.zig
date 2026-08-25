@@ -14,8 +14,7 @@ pub const impls: []const api.Impl = &.{
 };
 
 const path_key = "__path";
-// 1gb
-const max_read_size = 1024 * 1024 * 1024;
+pub const max_read_size = 1024 * 1024 * 1024;
 const PermTag = @typeInfo(File.Permissions).@"enum".tag_type;
 
 const FileHandle = struct {
@@ -93,7 +92,7 @@ fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
     return Data.new.table(table);
 }
 
-fn mapIOError(err: anyerror) []const u8 {
+pub fn mapIOError(err: anyerror) []const u8 {
     return switch (err) {
         error.FileNotFound => "NotFound",
         error.AccessDenied => "PermissionDenied",

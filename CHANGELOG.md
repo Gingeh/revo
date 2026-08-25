@@ -25,7 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     const pi = 3.14
     ```
 
-- stdlib `exit(number)`
+- stdlib:
+  - `exit(number)`
+  - `revo.dofile(path)`
+
+    like `revo.eval` but reads the source from a file
 - zig extensions, examples for zig extensions (`examples/zig`)
 - `HACKING.md`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later
