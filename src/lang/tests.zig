@@ -145,6 +145,36 @@ test "table literal field shadows stdlib method" {
     , 42);
 }
 
+test "table entries can declare bindings" {
+    // keyless binding entries land in the array part, storing their value
+    try t.topNumber(
+        \\ const t = { let x = let y = fn(v) v * 2 }
+        \\ t[0](21)
+    , 42);
+
+    // keyed entry whose value declares
+    try t.topNumber(
+        \\ const t = { k = let q = 7 }
+        \\ t.k
+    , 7);
+
+    // declaring entries must not desync the table as a call argument
+    try t.topNumber(
+        \\ const f = fn(t) t[0](9) + t[5] + t[1]
+        \\ f({
+        \\   let a = let b = fn(v) v + 1,
+        \\   [5] = do/b break/b 10 end,
+        \\   (fn() 20)(),
+        \\ })
+    , 40);
+
+    // named fn entries keep storing under their name
+    try t.topNumber(
+        \\ const t = { fn f() 42 }
+        \\ t.f()
+    , 42);
+}
+
 test "dynamic field assignment shadows stdlib method" {
     try t.topNumber(
         \\ const t = {}

@@ -44,8 +44,8 @@ pub fn eval(args: []const Data, vm: *VM) !HostResult {
 
 /// > dofile(path: string) -> !any
 /// reads the file, evaluates it as a module, gives you back its' return value
-/// like eval but the source comes from a file, relative imports inside
-/// resolve against the file's directory
+/// like eval but the source comes from a file, relative paths resolve
+/// against the current module's directory like `import`, then cwd
 pub fn dofile(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
 
@@ -54,9 +54,22 @@ pub fn dofile(args: []const Data, vm: *VM) !HostResult {
         else => return .errType(0, "string", typeof(args[0], vm)),
     };
 
+    // import-style resolution: ./mod.rv means "next to the script", not
+    // "next to the cwd"; raw path is the fallback for repl/-e runs
+    const resolved: ?[]const u8 = revo.resolveImportFile(
+        vm.runtime.io,
+        vm.runtime.alloc,
+        path,
+        vm.module_dir,
+        vm.project_root,
+        vm.package_path.items,
+    ) catch null;
+    defer if (resolved) |p| vm.runtime.alloc.free(p);
+    const real_path = resolved orelse path;
+
     const source = std.Io.Dir.cwd().readFileAlloc(
         vm.runtime.io,
-        path,
+        real_path,
         vm.runtime.alloc,
         .limited(fs.max_read_size),
     ) catch |err| {
@@ -65,7 +78,7 @@ pub fn dofile(args: []const Data, vm: *VM) !HostResult {
     };
     defer vm.runtime.alloc.free(source);
 
-    const res = revo.module.runModule(vm, path, source, false) catch {
+    const res = revo.module.runModule(vm, real_path, source, false) catch {
         return .other("dofile failed");
     };
 
@@ -149,8 +162,15 @@ test "revo.dofile returns the file's value" {
     try testing.topNumber(source, 2);
 }
 
-test "revo.dofile errors on missing file" {
-    try testing.topAtom(
-        \\ revo.dofile("./nope-does-not-exist.rv")[0]
-    , "err");
+test "revo.dofile resolves relative paths against the module dir" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "dep.rv", .data = "\"from-dep\"" });
+
+    const dir_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(dir_path);
+
+    try testing.topStringInDir(dir_path,
+        \\ revo.dofile("./dep.rv")[1]
+    , "from-dep");
 }

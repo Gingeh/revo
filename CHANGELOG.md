@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `exit(number)`
   - `revo.dofile(path)`
 
-    like `revo.eval` but reads the source from a file
+    like `revo.eval` but reads the source from a file, relative paths resolve against the current module's directory like `import`, then cwd
 - zig extensions, examples for zig extensions (`examples/zig`)
 - `HACKING.md`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later
@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- compiler: table literal entries declaring bindings reserved parent-frame registers mid-expression, clobbering the table under construction and desyncing enclosing call windows ("want table, got function"). declaring entries now compile in an isolated child frame, and keyless binding entries land in the array part instead of under the binding's name
 - `orelse` falls through on `:undef`, so `t.missing orelse 0` works for absent table keys (GH-40)
 - diagnostics expand tabs to tab stops before rendering carets, which no longer drift left on tab-indented lines (GH-36)
 - stdlib `len()` signature corrected from `number|:nil` to `number`

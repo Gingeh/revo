@@ -10,8 +10,8 @@ pub declare revo.eval = fn(code: string) -> !any/string
 
 #*
 reads the file and evaluates it as a module, gives you back its' return value
-like eval but the source comes from a file, relative imports inside
-resolve against the file's directory
+like eval but the source comes from a file, relative paths resolve
+against the current module's directory like import, then cwd
 *#
 pub declare revo.dofile = fn(path: string) -> !any/string
 

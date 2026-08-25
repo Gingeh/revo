@@ -170,24 +170,6 @@ pub const TokenType = enum {
         .{ "orelse", .kw_orelse },
         .{ "pub", .kw_pub },
         .{ "declare", .kw_declare },
-        // maybe TODO:
-        //
-        // .{ "🐗", .kw_bor },
-        // .{ "🎺🥁📯🎶", .kw_band },
-        // .{ "📥", .kw_import },
-        // .{ "🛬", .kw_import },
-        // .{ "🍺", .kw_pub },
-        // .{ "📤", .kw_pub },
-        // .{ "🛫", .kw_pub },
-        // .{ "💔", .kw_break },
-        // .{ "⛓️‍💥", .kw_break },
-        // .{ "🔁", .kw_loop },
-        // .{ "🔚", .kw_end },
-        // .{ "🧪", .kw_test },
-        // .{ "👩‍🔬", .kw_test },
-        // .{ "👨‍🔬", .kw_test },
-        // .{ "🧑‍🔬", .kw_test },
-        // .{ "🗺️", .kw_global },
     });
 };
 

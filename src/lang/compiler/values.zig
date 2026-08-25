@@ -567,66 +567,104 @@ pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
     var array_index: i64 = 0;
     for (entries) |entry| {
         try self.regDupe();
+
+        // `name = v` / `:h = v` store by atom. keyless values are array
+        // elements, except named fns (`fn f() ...`, `let f = fn ...`),
+        // which store under their name without declaring it as a local
+        // so a keyless `let x = e` stores e itself
+        var atom: ?[]const u8 = null;
+        var named_fn: ?*const ast.Binding = null;
         if (entry.key) |key| {
             if (!entry.computed) switch (key.expr) {
-                .ident => |name| {
-                    try self.compile(entry.value, true);
-                    try self.emit(
-                        .table_set_atom,
-                        try self.vm.internAtom(name),
-                    );
-                    try self.regRelease();
-                    continue;
-                },
-                .hash => |name| {
-                    try self.compile(entry.value, true);
-                    try self.emit(
-                        .table_set_atom,
-                        try self.vm.internAtom(name),
-                    );
-                    try self.regRelease();
-                    continue;
-                },
-                else => {},
-            };
-            try self.compile(key, true);
+                .ident => |n| atom = n,
+                .hash => |n| atom = n,
+                else => try self.compile(try isolateEntryDecls(self, key), true),
+            } else try self.compile(try isolateEntryDecls(self, key), true);
+        } else if (namedFnBinding(entry.value)) |b| {
+            atom = b.target.expr.ident;
+            named_fn = b;
         } else {
-            // named function like `fn name(...) ...` uses the name as key
-            if (entry.value.expr == .decl and
-                entry.value.expr.decl.inner.expr == .binding and
-                entry.value.expr.decl.inner.expr.binding.target.expr == .ident)
-            {
-                const fn_name = entry.value.expr.decl.inner.expr.binding.target.expr.ident;
-                // compile fn_expr directly to avoid the declaration path
-                // which would create a module-level local binding that conflicts
-                // with the table's register
-                const b = &entry.value.expr.decl.inner.expr.binding;
-                if (b.value.expr == .fn_expr) {
-                    try self.compileFn(
-                        b.value.expr.fn_expr.params,
-                        b.value.expr.fn_expr.return_type,
-                        b.value.expr.fn_expr.body,
-                        fn_name,
-                        null,
-                        b.value.expr.fn_expr.type_params,
-                        null,
-                    );
-                } else {
-                    try self.compile(entry.value, true);
-                }
-                try self.emit(.table_set_atom, try self.vm.internAtom(fn_name));
-                try self.regRelease();
-                continue;
-            }
-            // array index key
             try self.@"const"(Data.new.num(array_index));
             array_index += 1;
         }
-        try self.compile(entry.value, true);
-        try self.emit(.table_set, 0);
+
+        if (atom) |name| {
+            if (named_fn) |b| {
+                try self.compileFn(
+                    b.value.expr.fn_expr.params,
+                    b.value.expr.fn_expr.return_type,
+                    b.value.expr.fn_expr.body,
+                    name,
+                    null,
+                    b.value.expr.fn_expr.type_params,
+                    null,
+                );
+            } else {
+                try self.compile(try isolateEntryDecls(self, entry.value), true);
+            }
+            try self.emit(.table_set_atom, try self.vm.internAtom(name));
+        } else {
+            try self.compile(try isolateEntryDecls(self, entry.value), true);
+            try self.emit(.table_set, 0);
+        }
         try self.regRelease();
     }
 }
+
+/// the binding of a keyless `fn f ...` / `let f = fn ...` entry
+fn namedFnBinding(node: *const Node) ?*const ast.Binding {
+    if (node.expr != .decl) return null;
+    const d = node.expr.decl;
+    if (d.inner.expr != .binding) return null;
+    const b = &d.inner.expr.binding;
+    if (b.target.expr != .ident or b.value.expr != .fn_expr) return null;
+    return b;
+}
+
+/// entry values and computed keys that declare bindings or carry loop
+/// machinery would reserve parent-frame registers or leave the value
+/// stack unbalanced mid-expression
+/// desyncing every positional window
+/// around them,[] those compile inside a synthetic zero-param fn called
+/// on the spot, so the child frame owns the slots
+///
+/// clean nodes come back unchanged
+fn isolateEntryDecls(self: *Compiler, node: *const Node) !*Node {
+    var visitor = IsolationVisitor{};
+    visitor.visit(node);
+    if (!visitor.found) return @constCast(node);
+
+    const fn_node = try self.alloc.create(ast.Node);
+    fn_node.* = .{ .span = node.span, .expr = .{ .fn_expr = .{
+        .params = &.{},
+        .body = @constCast(node),
+        .type_params = &.{},
+    } } };
+
+    const call_node = try self.alloc.create(ast.Node);
+    call_node.* = .{ .span = node.span, .expr = .{ .call = .{
+        .callee = fn_node,
+        .args = &.{},
+    } } };
+    return call_node;
+}
+
+/// does this expression declare bindings or carry loop machinery? both
+/// desync the enclosing window, see isolateEntryDecls. fn bodies are
+/// skipped, their frames isolate themselves already
+const IsolationVisitor = struct {
+    found: bool = false,
+
+    pub fn visit(self: *IsolationVisitor, node: *const Node) void {
+        if (self.found) return;
+        switch (node.expr) {
+            .decl, .binding, .import_stmt, .struct_def, .loop_expr, .for_loop, .while_loop, .labeled_block => self.found = true,
+            // fn frames isolate themselves already
+            .fn_expr => {},
+            else => ast.walkAST(IsolationVisitor, self, node),
+        }
+    }
+};
 
 fn evalConstNode(self: *Compiler, node: *const Node) ?Data {
     switch (node.expr) {
