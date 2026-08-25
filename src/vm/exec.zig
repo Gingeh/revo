@@ -1081,8 +1081,12 @@ inline fn execFiberDispatch(
 
             const take = switch (op) {
                 .jump_if_not_nil_and_not_err => blk: {
-                    const is_nil = if (val.asAtom()) |a| a == revo.core_atoms.atomId(.nil) else false;
-                    break :blk !is_nil and !is_err;
+                    const absent = if (val.asAtom()) |a|
+                        a == revo.core_atoms.atomId(.nil) or
+                            a == revo.core_atoms.atomId(.undef)
+                    else
+                        false;
+                    break :blk !absent and !is_err;
                 },
                 else => is_err,
             };

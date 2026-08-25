@@ -135,7 +135,7 @@ pub const Opcode = enum(u8) {
     /// bx = 0: propagate errors
     /// bx = 1: dont propagate
     unwrap_result,
-    jump_if_not_nil_and_not_err, // if not nil and not (:err, ...), jump to bx
+    jump_if_not_nil_and_not_err, // if not nil/undef and not (:err, ...), jump to bx
     jump_if_err, // if (:err, ...), jump to bx
 };
 
