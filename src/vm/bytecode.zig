@@ -170,12 +170,12 @@ fn readDataValue(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror
         },
         @intFromEnum(memory.Type.string) => blk: {
             const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-            const str = try reader.take(len);
+            const str = try reader.take(@intCast(len));
             break :blk try vm.ownDataString(str);
         },
         @intFromEnum(memory.Type.atom) => blk: {
             const len = std.mem.readInt(u64, try reader.takeArray(8), .little);
-            const str = try reader.take(len);
+            const str = try reader.take(@intCast(len));
             const id = try vm.internAtom(str);
             break :blk memory.Data.new.atom(id);
         },

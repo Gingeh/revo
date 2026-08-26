@@ -21,7 +21,7 @@ const nil_val = Data.new.nil();
 pub export fn revo_intern(vm_ptr: *anyopaque, ptr_val: u64, len: usize) callconv(.c) u64 {
     // returns 0 on failure but safe because vm assigns ids starting at 1
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const ptr: [*]u8 = @ptrFromInt(ptr_val);
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(ptr_val)));
     const slice = ptr[0..len];
     const id = v.strings.own(slice) catch return 0;
     return @intCast(id);
@@ -30,7 +30,7 @@ pub export fn revo_intern(vm_ptr: *anyopaque, ptr_val: u64, len: usize) callconv
 /// intern a byte slice as an atom, returns stable atom id (0 on failure)
 pub export fn revo_intern_atom(vm_ptr: *anyopaque, ptr_val: u64, len: usize) callconv(.c) u64 {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const ptr: [*]u8 = @ptrFromInt(ptr_val);
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(ptr_val)));
     const slice = ptr[0..len];
     const id = v.internAtom(slice) catch return 0;
     return @intCast(id);
@@ -39,7 +39,7 @@ pub export fn revo_intern_atom(vm_ptr: *anyopaque, ptr_val: u64, len: usize) cal
 /// look up a global variable by name, returns nil if missing
 pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const ptr: [*]u8 = @ptrFromInt(name_ptr);
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(name_ptr)));
     const name_slice = ptr[0..name_len];
 
     const value = v.getGlobal(name_slice) orelse
@@ -55,7 +55,7 @@ pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize)
 /// set a global variable by name
 pub export fn revo_setglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize, value: Data) callconv(.c) void {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const ptr: [*]u8 = @ptrFromInt(name_ptr);
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(name_ptr)));
     const name_slice = ptr[0..name_len];
 
     v.setGlobal(name_slice, value) catch {};
@@ -111,15 +111,15 @@ pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: Data, value
 /// create a new tuple from an array of values, returns nil on failure
 pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const Data) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const src = items[0..count];
-    var data_list = std.ArrayList(Data).initCapacity(v.runtime.alloc, count) catch
+    const src = items[0..@as(usize, @intCast(count))];
+    var data_list = std.ArrayList(Data).initCapacity(v.runtime.alloc, src.len) catch
         return nil_val;
     defer data_list.deinit(v.runtime.alloc);
     for (src) |item|
         data_list.appendAssumeCapacity(item);
     const tid = v.tuples.create(data_list.items) catch
         return nil_val;
-    v.noteGCPressure(@sizeOf(Tuple) + @sizeOf(Data) * count);
+    v.noteGCPressure(@sizeOf(Tuple) + @sizeOf(Data) * src.len);
     return Data.new.tuple(tid);
 }
 
@@ -154,10 +154,10 @@ pub export fn revo_call(
     // stack buffer avoids GC-triggering heap alloc, most revo functions have few args
     var buf: [16]Data = undefined;
     if (argc > 16) return false;
-    for (0..argc) |i|
+    for (0..@as(usize, @intCast(argc))) |i|
         buf[i] = argv[i];
 
-    const result = v.callFunction(callee, buf[0..argc]) catch return false;
+    const result = v.callFunction(callee, buf[0..@as(usize, @intCast(argc))]) catch return false;
     out.* = result;
     return true;
 }
@@ -190,6 +190,11 @@ pub export fn revo_foreign_ptr(val: Data) callconv(.c) ?*anyopaque {
 /// register a shared lib's revo_bindings into the module table; types come
 /// from the sibling `<stem>.d.rv` manifest (`extensionManifestFor`)
 pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
+    if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {
+        std.debug.print("error: dynamic library loading is not supported on this platform\n", .{});
+        return error.OsNotSupported;
+    }
+
     if (builtin.target.os.tag == .windows) {
         std.debug.print("error: dynamic library loading is not supported on windows\n", .{});
         return error.OsNotSupported;

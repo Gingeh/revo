@@ -1,11 +1,16 @@
 pub const is_freestanding = @import("build_options").is_freestanding;
 
-pub const async_backend_impl = if (builtin.target.os.tag == .windows or is_freestanding or !builtin.link_libc)
-    @import("./runtime/async_backend_none.zig")
-else
-    @import("./runtime/async_backend_posix.zig");
+// wasi runs single-threaded, posix backend needs thread spawn
+// nobody has windows to develop for it
+pub const has_async_backend = switch (builtin.target.os.tag) {
+    .windows, .wasi, .freestanding => false,
+    else => builtin.link_libc,
+};
 
-pub const has_async_backend = builtin.target.os.tag != .windows and !is_freestanding and builtin.link_libc;
+pub const async_backend_impl = if (has_async_backend)
+    @import("./runtime/async_backend_posix.zig")
+else
+    @import("./runtime/async_backend_none.zig");
 
 pub const Runtime = struct {
     alloc: std.mem.Allocator,

@@ -597,7 +597,7 @@ fn accept_fn(args: []const Data, vm: *VM) !HostResult {
 /// > socket:send(data: string) -> number
 /// sends data over the socket, returns number of bytes sent
 fn send_fn(args: []const Data, vm: *VM) !HostResult {
-    if (builtin.target.os.tag == .windows) return error.OsNotSupported;
+    if (builtin.target.os.tag == .windows or builtin.target.os.tag == .wasi) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
     const message = vm.stringValue(args[1].asString().?);
 
@@ -700,7 +700,7 @@ fn parseRecvOptions(opts_data: Data, vm: *VM) !RecvWaitToken {
 /// > socket:recv(opts: table) -> string
 /// receives data according to opts.mode (:read_some | :read_all | :read_line)
 fn recv(args: []const Data, vm: *VM) !HostResult {
-    if (builtin.target.os.tag == .windows) return error.OsNotSupported;
+    if (builtin.target.os.tag == .windows or builtin.target.os.tag == .wasi) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
     const opts_data = args[1];
 

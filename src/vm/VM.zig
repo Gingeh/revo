@@ -377,7 +377,7 @@ pub fn deinit(self: *VM) void {
 
     if (!revo.is_freestanding) {
         for (self.loaded_extensions.items) |*lib| {
-            if (builtin.target.os.tag != .windows)
+            if (builtin.target.os.tag != .windows and builtin.target.os.tag != .wasi)
                 lib.close();
         }
     }
@@ -398,7 +398,7 @@ pub fn moduleStamp(self: *VM, path: []const u8) !ModuleStamp {
     const stat = try std.Io.Dir.cwd().statFile(self.runtime.io, path, .{});
     return .{
         .mtime = @intCast(stat.mtime.toNanoseconds()),
-        .size = stat.size,
+        .size = @intCast(stat.size),
     };
 }
 
