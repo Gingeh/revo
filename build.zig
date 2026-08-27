@@ -109,7 +109,7 @@ pub fn build(b: *Build) !void {
     // 32bit builds are unsupported until a good implementation of tagged data is made
     // (wasm32 is fine: 32-bit pointers fit below the tag region)
     const is_freestanding = target.result.os.tag == .freestanding or
-        target.result.cpu.arch == .wasm64;
+        target.result.cpu.arch.isWasm();
 
     const optimize = b.standardOptimizeOption(.{});
 

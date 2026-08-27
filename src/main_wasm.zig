@@ -38,7 +38,28 @@ fn writeToHost(
     return total;
 }
 
+//
 // wasm-safe io vtable
+//
+fn wasmIoNow(_: ?*anyopaque, clock: std.Io.Clock) std.Io.Timestamp {
+    const clock_id: std.os.wasi.clockid_t = switch (clock) {
+        .real => .REALTIME,
+        .awake, .boot, .cpu_process, .cpu_thread => .MONOTONIC,
+    };
+    var ts: u64 = undefined;
+    _ = std.os.wasi.clock_time_get(clock_id, 0, &ts);
+    return .{ .nanoseconds = @intCast(ts) };
+}
+
+fn wasmIoClockResolution(_: ?*anyopaque, clock: std.Io.Clock) std.Io.Clock.ResolutionError!std.Io.Duration {
+    _ = clock;
+    return .{ .nanoseconds = 1_000_000 };
+}
+
+fn wasmIoSleep(_: ?*anyopaque, _: std.Io.Timeout) std.Io.Cancelable!void {
+    // sleep is handled by the scheduler's fiber parking not by blocking
+}
+
 fn wasmIoCrashHandler(_: ?*anyopaque) void {}
 fn wasmIoOperate(_: ?*anyopaque, operation: std.Io.Operation) std.Io.Cancelable!std.Io.Operation.Result {
     return switch (operation) {
@@ -72,6 +93,9 @@ const wasm_io_vtable: std.Io.VTable = blk: {
     v.operate = wasmIoOperate;
     v.lockStderr = wasmIoLockStderr;
     v.unlockStderr = wasmIoUnlockStderr;
+    v.now = wasmIoNow;
+    v.clockResolution = wasmIoClockResolution;
+    v.sleep = wasmIoSleep;
     break :blk v;
 };
 
