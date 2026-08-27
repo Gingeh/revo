@@ -40,9 +40,8 @@ else
     \\  dis              show bytecode disassembly instead of running
     \\  bench[n]         run with performance counters ([n] iterations, 1 if not specified)
     \\  docs             extract doc comments from a file, dir, or the pwd workspace
-    \\                   --html    render as docgen markdown reference format
+    \\                   --html    render as html instead of markdown
     \\                   --splice  splice output into markdown piped on stdin
-    \\                             (implied by --html with a target arg)
     \\
     \\if the first argument is a command that exists, it gets ran;
     \\otherwise, it's treated as a script path
@@ -56,8 +55,8 @@ else
     \\  revo -e "1 + 2" -i                run inline code and enter REPL
     \\  revo bench script.rv              run with performance counters
     \\  revo dis script.rv                show bytecode disassembly
-    \\  revo docs script.rv               print extracted docs without running code
-    \\  revo docs --html src/std/iface    render the stdlib reference as markdown
+    \\  revo docs script.rv               print extracted docs as markdown
+    \\  revo docs --html src/std/iface    render the stdlib reference as html
     \\  revo docs --html src/std/iface < std.md > std.new   splice into a doc page
     \\
 ++ (if (lsp_enabled)
@@ -183,8 +182,8 @@ fn runMain(init: std.process.Init) !void {
     }
 
     // docs modes always run the docgen pipeline: extract from a file, a dir
-    // of sources, the pwd workspace, or a piped source; `--docs-html` splices
-    // into piped markdown when stdin isn't a tty
+    // of sources, the pwd workspace, or a piped source; `--html` outputs html,
+    // without it outputs markdown; `--html` with piped stdin splices into the page
     if (config.mode == .docs or config.mode == .docs_html) {
         try runDocs(init, init.gpa, arena, config);
         return;
@@ -483,17 +482,14 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
 }
 
 /// docs mode against a source file, a dir of sources, or the pwd workspace;
-/// `--docs-html` splices into a piped markdown page when stdin isn't a tty.
-/// splicing needs a target arg or an explicit `--docs-splice`; plain piped
-/// stdin with no target means "extract from stdin", so `--docs-html < file.rv`
-/// renders the body instead of erroring on missing markers.
+/// `--html` renders as html; without it, renders as markdown.
+/// `--splice` with piped stdin splices into a markdown page when stdin isn't a tty.
 /// a parse failure in an explicit target is fatal, in a walked workspace
 /// it's a warning - keep going, one bad file shouldn't kill the page
 fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Config) !void {
     const html = config.mode == .docs_html;
     const stdin_tty = try std.Io.File.stdin().isTty(init.io);
-    const splice = html and !stdin_tty and
-        (config.force_splice or config.script_path != null);
+    const splice = config.force_splice and !stdin_tty;
 
     var owned = std.ArrayList([]docs.FnSpec).empty;
     defer owned.deinit(arena);
@@ -501,29 +497,24 @@ fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Con
     defer flat.deinit(arena);
     var module_doc: []const u8 = "";
 
-    const target: []const u8 = blk: {
-        if (config.script_path) |path| {
-            if (isDir(init, path)) {
-                try collectAll(init, gpa, arena, path, &owned, &flat);
-            } else {
-                module_doc = try addDocsFromPath(init, gpa, arena, path, &owned, &flat);
-            }
-            break :blk path;
-        } else if (splice or stdin_tty) {
-            var project = revo.lang.Project.detectFromCwd(init.io, gpa);
-            defer project.deinit(gpa);
-            const root_dir: []const u8 = if (project.root.len > 0) project.root else ".";
-            const t = try arena.dupe(u8, root_dir);
-            try collectAll(init, gpa, arena, t, &owned, &flat);
-            break :blk t;
+    if (config.script_path) |path| {
+        if (isDir(init, path)) {
+            try collectAll(init, gpa, arena, path, &owned, &flat);
         } else {
-            // `--docs-html`/`--docs` piped a revo source on stdin
-            module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
-            break :blk "<stdin>";
+            module_doc = try addDocsFromPath(init, gpa, arena, path, &owned, &flat);
         }
-    };
+    } else if (splice or stdin_tty) {
+        var project = revo.lang.Project.detectFromCwd(init.io, gpa);
+        defer project.deinit(gpa);
+        const root_dir: []const u8 = if (project.root.len > 0) project.root else ".";
+        const t = try arena.dupe(u8, root_dir);
+        try collectAll(init, gpa, arena, t, &owned, &flat);
+    } else {
+        // `--html`/`docs` piped a revo source on stdin
+        module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
+    }
 
-    try emitDocs(init, gpa, arena, target, flat.items, module_doc, html, splice);
+    try emitDocs(init, gpa, arena, flat.items, module_doc, html, splice);
     for (owned.items) |s| docs.freeSpecs(gpa, s);
 }
 
@@ -637,13 +628,12 @@ fn isDir(init: std.process.Init, path: []const u8) bool {
     return true;
 }
 
-/// render the extracted specs - plain listing or docgen markdown - and
-/// write to stdout, splicing into piped markdown when `splice`
+/// render the extracted specs,, markdown by default, html with `--html`,,
+/// and write to stdout, splicing into piped markdown when `splice`
 fn emitDocs(
     init: std.process.Init,
     gpa: Allocator,
     arena: Allocator,
-    target: []const u8,
     flat: []*const docs.FnSpec,
     module_doc: []const u8,
     html: bool,
@@ -652,9 +642,9 @@ fn emitDocs(
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
     if (html) {
-        try docs.renderMarkdown(gpa, &buf.writer, flat, module_doc);
+        try docs.renderHtml(gpa, &buf.writer, flat, module_doc);
     } else {
-        try renderPlain(&buf.writer, target, flat, module_doc);
+        try docs.renderMarkdown(gpa, &buf.writer, flat, module_doc);
     }
 
     const body = std.mem.trim(u8, buf.written(), "\n");
@@ -675,35 +665,6 @@ fn emitDocs(
         try out.interface.writeAll("\n");
     }
     try out.flush();
-}
-
-/// plain listing: name/arity plus the doc text, documented specs only
-fn renderPlain(
-    w: *std.Io.Writer,
-    target: []const u8,
-    specs: []*const docs.FnSpec,
-    module_doc: []const u8,
-) !void {
-    try w.print("# docs for {s}\n", .{target});
-    if (module_doc.len > 0) try w.print("\n{s}\n", .{module_doc});
-    var count: usize = 0;
-    for (specs) |s| {
-        if (s.doc.len == 0 and s.fields.len == 0) continue;
-        count += 1;
-        if (s.fields.len > 0) {
-            try w.print("\n- struct {s}\n{s}\n", .{ s.name, s.doc });
-            for (s.fields) |fl| {
-                try w.print("  - `{s}", .{fl.name});
-                if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
-                if (fl.doc.len > 0) try w.print("` - {s}", .{fl.doc}) else try w.writeAll("`");
-                try w.writeAll("\n");
-            }
-        } else if (s.is_value)
-            try w.print("\n- {s}\n{s}\n", .{ s.name, s.doc })
-        else
-            try w.print("\n- {s}/{d}\n{s}\n", .{ s.name, s.params.len, s.doc });
-    }
-    if (count == 0) try w.writeAll("\n(no doc comments found)\n");
 }
 
 fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, config: Config) !void {

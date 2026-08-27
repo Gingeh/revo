@@ -1,4 +1,4 @@
-//! doc extraction and docgen markdown rendering
+//! doc extraction and docgen rendering (markdown + html)
 
 const std = @import("std");
 const revo = @import("../root.zig");
@@ -388,6 +388,261 @@ fn slugify(alloc: std.mem.Allocator, name: []const u8) ![]const u8 {
 
 pub fn lessStr(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
+}
+
+// -- [html] ------------------------------------------------------------------
+
+/// html variant of renderMarkdown,, same structure, real tags
+pub fn renderHtml(
+    alloc: std.mem.Allocator,
+    w: *Writer,
+    specs: []*const FnSpec,
+    module_doc: []const u8,
+) !void {
+    var slugs = SlugSet{};
+    defer slugs.deinit(alloc);
+    if (module_doc.len > 0) {
+        try w.writeAll("<p>");
+        try writeHtmlEscaped(w, module_doc);
+        try w.writeAll("</p>\n\n");
+    }
+    try renderHtmlGlobals(alloc, w, specs, &slugs);
+    try renderHtmlModules(alloc, w, specs, &slugs);
+    try renderHtmlMethods(alloc, w, specs, &slugs);
+}
+
+fn renderHtmlGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
+    var planned = std.ArrayList(Planned).empty;
+    defer planned.deinit(alloc);
+    for (specs) |s| {
+        if (headOf(s.sig).kind == .global) {
+            try planned.append(alloc, .{ .spec = s, .slug = "" });
+        }
+    }
+    try collectAndSort(alloc, &planned, slugs);
+    try renderHtmlSection(w, "globals", planned.items);
+}
+
+fn renderHtmlModules(alloc: std.mem.Allocator, w: *Writer, list: []*const FnSpec, slugs: *SlugSet) !void {
+    try w.writeAll("<h2>modules</h2>\n\n");
+
+    var mod_set = std.StringHashMapUnmanaged(void).empty;
+    defer mod_set.deinit(alloc);
+    for (list) |s| {
+        const head = headOf(s.sig);
+        if (head.kind == .module) try mod_set.put(alloc, head.module.?, {});
+    }
+
+    var names = std.ArrayList([]const u8).empty;
+    defer names.deinit(alloc);
+    {
+        var it = mod_set.keyIterator();
+        while (it.next()) |k| try names.append(alloc, k.*);
+    }
+    std.mem.sort([]const u8, names.items, {}, lessStr);
+
+    for (names.items) |mod_name| {
+        var planned = std.ArrayList(Planned).empty;
+        defer planned.deinit(alloc);
+        for (list) |s| {
+            const head = headOf(s.sig);
+            if (head.kind == .module and std.mem.eql(u8, head.module.?, mod_name)) {
+                try planned.append(alloc, .{ .spec = s, .slug = "" });
+            }
+        }
+        try collectAndSort(alloc, &planned, slugs);
+        try renderHtmlGroup(w, mod_name, planned.items);
+    }
+}
+
+fn renderHtmlMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
+    try w.writeAll("<h2>methods</h2>\n\n");
+
+    var target_set = std.StringHashMapUnmanaged(void).empty;
+    defer target_set.deinit(alloc);
+    for (specs) |s| {
+        if (methodPrefix(s.sig)) |prefix| try target_set.put(alloc, prefix, {});
+    }
+
+    var names = std.ArrayList([]const u8).empty;
+    defer names.deinit(alloc);
+    {
+        var it = target_set.keyIterator();
+        while (it.next()) |k| try names.append(alloc, k.*);
+    }
+    std.mem.sort([]const u8, names.items, {}, lessStr);
+
+    for (names.items) |target_name| {
+        var planned = std.ArrayList(Planned).empty;
+        defer planned.deinit(alloc);
+        for (specs) |s| {
+            if (std.mem.eql(u8, methodPrefix(s.sig) orelse "", target_name)) {
+                try planned.append(alloc, .{ .spec = s, .slug = "" });
+            }
+        }
+        try collectAndSort(alloc, &planned, slugs);
+        try renderHtmlGroup(w, target_name, planned.items);
+    }
+}
+
+fn renderHtmlGroup(w: *Writer, title: []const u8, planned: []const Planned) !void {
+    try w.print("<h3>{s}</h3>\n\n", .{title});
+    try renderHtmlToc(w, planned);
+    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
+    for (planned, 0..) |p, i| {
+        try renderHtmlFn(w, p);
+        if (i + 1 < planned.len) try w.writeAll("<hr>\n\n");
+    }
+    try w.writeAll("</details>\n\n");
+}
+
+fn renderHtmlSection(
+    w: *Writer,
+    title: []const u8,
+    planned: []const Planned,
+) !void {
+    try w.print("<h2>{s}</h2>\n\n", .{title});
+    if (planned.len == 0) {
+        try w.writeAll("<p>(none)</p>\n\n");
+        return;
+    }
+
+    try renderHtmlToc(w, planned);
+    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
+    for (planned, 0..) |p, i| {
+        try renderHtmlFn(w, p);
+        if (i + 1 < planned.len) try w.writeAll("<hr>\n\n");
+    }
+    try w.writeAll("</details>\n\n");
+}
+
+fn renderHtmlToc(w: *Writer, planned: []const Planned) !void {
+    try w.writeAll("<nav>");
+    for (planned, 0..) |p, i| {
+        if (i > 0) try w.writeAll(" | ");
+        try w.print("<a href=\"#{s}\">{s}</a>", .{ p.slug, p.spec.name });
+    }
+    try w.writeAll("</nav>\n\n");
+}
+
+fn renderHtmlFn(w: *Writer, p: Planned) !void {
+    const spec = p.spec;
+
+    try w.print("<h4 id=\"{s}\">{s}</h4>\n\n", .{ p.slug, spec.name });
+
+    if (spec.is_value) {
+        try w.writeAll("<p>(value)</p>\n\n");
+    } else {
+        try w.writeAll("<pre><code class=\"language-ruby\">");
+        try writeHtmlEscaped(w, spec.sig);
+        try w.writeAll("</code></pre>\n\n");
+    }
+
+    if (spec.core_key) |k| {
+        try w.writeAll("<p>metatable key: <code>");
+        try writeHtmlEscaped(w, @tagName(k));
+        try w.writeAll("</code></p>\n\n");
+    }
+
+    if (spec.doc.len == 0) {
+        try w.writeAll("<blockquote>undocumented :(</blockquote>\n\n");
+    } else {
+        try renderHtmlDoc(w, spec.doc);
+    }
+
+    if (spec.fields.len > 0) try renderHtmlFields(w, spec.fields);
+}
+
+fn renderHtmlFields(w: *Writer, fields: []const FieldSpec) !void {
+    try w.writeAll("<ul>\n");
+    for (fields) |fl| {
+        try w.writeAll("  <li><code>");
+        try writeHtmlEscaped(w, fl.name);
+        if (fl.type_text.len > 0) {
+            try w.writeAll(": ");
+            try writeHtmlEscaped(w, fl.type_text);
+        }
+        try w.writeAll("</code>");
+        if (fl.doc.len > 0) {
+            try w.writeAll(" - ");
+            try writeHtmlEscaped(w, fl.doc);
+        }
+        try w.writeAll("</li>\n");
+    }
+    try w.writeAll("</ul>\n\n");
+}
+
+fn renderHtmlDoc(w: *Writer, doc: []const u8) !void {
+    const trimmed = std.mem.trim(u8, doc, "\n");
+
+    var prose: []const u8 = trimmed;
+    var code: []const u8 = "";
+    if (std.mem.indexOf(u8, trimmed, "\n\n")) |idx| {
+        prose = trimmed[0..idx];
+        code = std.mem.trim(u8, trimmed[idx + 2 ..], "\n");
+    }
+
+    // prose
+    {
+        var min_indent: usize = std.math.maxInt(usize);
+        var lines = std.mem.splitScalar(u8, prose, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            var n: usize = 0;
+            while (n < line.len and line[n] == ' ') n += 1;
+            if (n < min_indent) min_indent = n;
+        }
+        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
+
+        try w.writeAll("<p>");
+        var it = std.mem.splitScalar(u8, prose, '\n');
+        var first = true;
+        while (it.next()) |line| {
+            if (!first) try w.writeAll("\n");
+            first = false;
+            const stripped = if (line.len >= min_indent) line[min_indent..] else line;
+            try writeHtmlEscaped(w, stripped);
+        }
+        try w.writeAll("</p>\n\n");
+    }
+
+    // code
+    if (code.len > 0) {
+        var min_indent: usize = std.math.maxInt(usize);
+        {
+            var it = std.mem.splitScalar(u8, code, '\n');
+            while (it.next()) |line| {
+                if (line.len == 0) continue;
+                var n: usize = 0;
+                while (n < line.len and line[n] == ' ') n += 1;
+                if (n < min_indent) min_indent = n;
+            }
+        }
+        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
+
+        try w.writeAll("<pre><code class=\"language-revo\">");
+        var it = std.mem.splitScalar(u8, code, '\n');
+        var first = true;
+        while (it.next()) |line| {
+            if (!first) try w.writeAll("\n");
+            first = false;
+            const stripped = if (line.len >= min_indent) line[min_indent..] else line;
+            try writeHtmlEscaped(w, stripped);
+        }
+        try w.writeAll("</code></pre>\n\n");
+    }
+}
+
+fn writeHtmlEscaped(w: *Writer, text: []const u8) !void {
+    for (text) |c| {
+        switch (c) {
+            '<' => try w.writeAll("&lt;"),
+            '>' => try w.writeAll("&gt;"),
+            '&' => try w.writeAll("&amp;"),
+            '"' => try w.writeAll("&quot;"),
+            else => try w.writeByte(c),
+        }
+    }
 }
 
 // -- [test] ------------------------------------------------------------------

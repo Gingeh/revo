@@ -1,10 +1,6 @@
 ##!
  filesystem access: reading files, listing directories, path checks, creating and removing entries
 !##
-# authoring: docs are `#* ... *#` blocks above the declare
-# write docs as markdown, bare ``` fences for code examples (no language tag)
-# an `#` line is an editorial comment (skipped); the head may carry a `[T]`
-# generic suffix; a bare `__call`/`__index` head sets the core key
 
 #*
 wraps a path in a file handle table

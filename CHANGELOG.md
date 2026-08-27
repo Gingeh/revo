@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - docgen documents structs, type aliases, and modules, with documented struct fields rendered under the struct entry
 
-  both markdown (revo docs) and html (revo docs --html) output formats are available
-  this makes
+  `revo docs` now outputs markdown by default, `revo docs --html` outputs real html
+  `--splice` flag needed to splice into piped markdown templates (was implied by `--html`)
 
     ```revo
     #* this is a struct *#
