@@ -89,7 +89,7 @@ pub const Data = extern struct {
         }
     };
 
-    pub const RenderMode = enum(u2) { display, decimal, debug, pretty };
+    pub const RenderMode = enum(u2) { display, debug, pretty };
 
     // canonicalize NaN to a stable quiet-NaN bit pattern
     pub inline fn numberRaw(n: f64) Data {

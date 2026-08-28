@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** cli is now subcommand-based: `compile`, `repl`, `dis`, `bench`, `docs`, `lsp`. options must come before the script name, everything after goes to runtime argv. the old flags like `-b` and `--dis` are gone in favor of their subcommands
 - **Breaking:** c api values use nanbox: `RevoData` is a single u64 now, boxed payloads are intern ids instead of pointers
 - **Breaking:** stdlib `read()` renamed to `input()`, and only reads stdin lines. use `fs.open()?:read()` to read files
+- **Breaking:** `fmt` and string interpolation now only support `%v` (value, plain), `%?` (debug, quoted strings, multilined tables), `%p` (pretty, debug with colors)
 - `Native` renamed to `Host` throughout the codebase
 - lsp: fn return type hints, nested document symbols, parameter hover and param types in hover signatures
 - semantic: top-level re-declarations shadow the module surface while fn-local bindings no longer leak into it; table methods written as `fn name(self)` inside a table literal get typed
@@ -52,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - diagnostics expand tabs to tab stops before rendering carets, which no longer drift left on tab-indented lines (GH-36)
 - stdlib `len()` signature corrected from `number|:nil` to `number`
 - lsp signature help deep-copies parsed types so shared comptime sentinels can't dangle
+- vm: table printing now consistent for `%v` `%?` `%p`; atom keys without `:`, ` = ` separator, multiline for debug/pretty when 2+ hash entries, pretty grouped array line, colored braces for empty
+- vm: string escapes `\b` `\f` `\v` `\0` `\xXX` now rendered for non-printable bytes
 
 ## [0.1.1] - 2026-08-10
 

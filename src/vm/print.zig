@@ -114,8 +114,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
     const metamethod = switch (mode) {
         .display => try vm.getMetamethodByAtom(self, try vm.internAtom("__display")) orelse
             try vm.getMetamethodByAtom(self, revo.core_atoms.__tostring.atomId()),
-        .debug => try vm.getMetamethodByAtom(self, revo.core_atoms.__debug.atomId()),
-        .decimal, .pretty => null,
+        .debug, .pretty => try vm.getMetamethodByAtom(self, revo.core_atoms.__debug.atomId()),
     };
     if (metamethod) |mm| {
         if (!mm.isFunction()) return error.TypeError;
@@ -126,7 +125,6 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
         .number => try styledPrint(writer, mode, color_accent, "{}", .{self.asNum().?}),
         .string => switch (mode) {
             .display => try writer.writeAll(vm.stringValue(self.asString().?)),
-            .decimal => try writer.print("{}", .{try std.fmt.parseFloat(f64, vm.stringValue(self.asString().?))}),
             .debug => try writeEscapedString(writer, vm.stringValue(self.asString().?)),
             .pretty => {
                 try style(writer, color_string);
@@ -267,7 +265,7 @@ pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, 
 
     try writer.writeAll("{ ");
     const hash_count = tbl.hash.count;
-    const multi_line = mode == .decimal and hash_count >= 2;
+    const multi_line = mode == .debug and hash_count >= 2;
     var first = true;
     for (tbl.array.items, 0..) |val, idx| {
         _ = idx;
@@ -286,6 +284,7 @@ pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, 
             try writeTableKey(key, writer, vm, mode);
             try writer.writeAll(" = ");
             try writeData(val, writer, vm, mode);
+            first = false;
         } else {
             if (!first) try writer.writeAll(", ");
             first = false;

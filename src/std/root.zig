@@ -200,10 +200,10 @@ pub inline fn boolData(value: bool) Data {
 }
 
 /// > fmt(format: string, args: any...) -> string
-/// format string with %v, %d, %? specifiers
-/// %v: display value, %d: as number, %?: debug repr
+/// format string with %v, %?, %p specifiers
+/// %v: value (plain, strings without quotes), %?: debug (strings with quotes, tables multilined), %p: pretty (debug with colors)
 ///     fmt("hello %v", "world")
-///     fmt("val: %v, num: %d", "x", 42)
+///     fmt("val: %v, dbg: %?", "x", "y")
 pub fn fmt(args: []const Data, vm: *VM) !HostResult {
     if (args.len == 0) return .errArity(0, 1);
     const format = vm.stringValue(args[0].asString().?);
@@ -227,18 +227,6 @@ pub fn fmt(args: []const Data, vm: *VM) !HostResult {
                     arg_idx += 1;
                     i += 2;
                 },
-                's' => {
-                    if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
-                    try append_data(&result.writer, args[arg_idx], vm, .display);
-                    arg_idx += 1;
-                    i += 2;
-                },
-                'd' => {
-                    if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
-                    try append_data(&result.writer, args[arg_idx], vm, .decimal);
-                    arg_idx += 1;
-                    i += 2;
-                },
                 '?' => {
                     if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
                     try append_data(&result.writer, args[arg_idx], vm, .debug);
@@ -247,7 +235,11 @@ pub fn fmt(args: []const Data, vm: *VM) !HostResult {
                 },
                 'p' => {
                     if (arg_idx >= args.len) return .errArity(args.len, arg_idx + 1);
+                    const old_supports = revo.pretty.supports_color;
+                    revo.pretty.supports_color = true;
+                    errdefer revo.pretty.supports_color = old_supports;
                     try append_data(&result.writer, args[arg_idx], vm, .pretty);
+                    revo.pretty.supports_color = old_supports;
                     arg_idx += 1;
                     i += 2;
                 },
@@ -267,19 +259,19 @@ pub fn fmt(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = try vm.adoptDataString(str) };
 }
 
-test "fmt %d formats numbers" {
+test "fmt %v formats plain" {
     try testing.topString(
-        \\ fmt("%d", 42)
+        \\ fmt("%v", 42)
     , "42");
     try testing.topString(
-        \\ fmt("%d", 1.5)
+        \\ fmt("%v", 1.5)
     , "1.5");
     try testing.topString(
-        \\ fmt("%d", "10.5")
+        \\ fmt("%v", "10.5")
     , "10.5");
     try testing.topString(
-        \\ fmt("%d", :hello)
-    , "<un-number-able>");
+        \\ fmt("%v", :hello)
+    , ":hello");
 }
 
 test "fmt escapes literal percent" {
@@ -300,8 +292,8 @@ test "fmt rendering is recursive" {
     try testing.topString(
         \\ const mt = {__display = fn(self) "shown", __debug = fn(self) "debug"}
         \\ const t = set_metatable({}, mt)
-        \\ fmt("%v|%?|%d", {x = t}, {x = t}, {x = t})
-    , "{ :x: shown, }|{ :x: \"debug\", }|{ <un-number-able>: { }, }");
+        \\ fmt("%v|%?", {x = t}, {x = t})
+    , "{ x = shown }|{ x = \"debug\" }");
 }
 
 /// internal, do not use pls

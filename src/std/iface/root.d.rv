@@ -2,7 +2,7 @@
  the global namespace - fmt, len, inspect, type and metatable helpers, test assertions, channels, sleep and print
 !##
 
-#* formats a string with %v, %d, %s, %?, %p specifiers (%% is a literal percent)
+#* formats a string with %v, %?, %p specifiers (%% is a literal percent) - %v is value (plain), %? is debug (quoted strings, multilined tables), %p is pretty (debug with colors)
 string literals also support `#{expr}`, `#{expr:?}`, and `#{expr:p}` interpolation *#
 pub declare fmt = fn(format: string, args: any...) -> string
 
