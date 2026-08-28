@@ -309,7 +309,7 @@ pub fn dotest(args: []const Data, vm: *VM) !HostResult {
     const name = args[0].asString().?;
     const body = args[1].asFunction().?;
     var buf: [128]u8 = undefined;
-    var w = std.Io.File.stdout().writerStreaming(vm.runtime.io, &buf);
+    var w = revo.stdout().writerStreaming(vm.runtime.io, &buf);
     defer w.flush() catch {};
 
     w.interface.print("* test \"{s}\"...\n", .{try vm.strings.get(name)}) catch {};
@@ -345,7 +345,7 @@ pub fn dotest(args: []const Data, vm: *VM) !HostResult {
 pub fn dosuite(args: []const Data, vm: *VM) !HostResult {
     const body = args[1].asFunction().?;
     var sbuf: [128]u8 = undefined;
-    var sw = std.Io.File.stdout().writerStreaming(vm.runtime.io, &sbuf);
+    var sw = revo.stdout().writerStreaming(vm.runtime.io, &sbuf);
     defer sw.flush() catch {};
     _ = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
@@ -627,11 +627,7 @@ pub fn assert_eq(args: []const Data, vm: *VM) !HostResult {
 ///     print("hello", 42, "world")
 pub fn print(args: []const Data, vm: *VM) !HostResult {
     var pbuf: [256]u8 = undefined;
-    const stdout_file = if (comptime revo.is_freestanding)
-        std.Io.File{ .handle = if (@import("builtin").target.os.tag == .freestanding) @as(void, {}) else @as(std.posix.fd_t, -1), .flags = .{ .nonblocking = false } }
-    else
-        std.Io.File.stdout();
-    var pw = stdout_file.writerStreaming(vm.runtime.io, &pbuf);
+    var pw = revo.stdout().writerStreaming(vm.runtime.io, &pbuf);
     defer _ = pw.flush() catch {};
     if (args.len == 0) {
         _ = try pw.interface.writeAll("\n");
@@ -728,7 +724,7 @@ pub fn input(args: []const Data, vm: *VM) !HostResult {
         }
     }
 
-    const file = std.Io.File.stdin();
+    const file = revo.stdin();
     var result = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 128);
     defer result.deinit(vm.runtime.alloc);
 

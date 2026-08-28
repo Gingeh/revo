@@ -6,7 +6,7 @@ pub var supports_color: bool = !revo.is_freestanding;
 pub fn isColorSupported(env: *std.process.Environ.Map, io: std.Io) bool {
     if (env.contains("NO_COLOR")) return false;
     if (env.contains("CLICOLOR_FORCE") or env.contains("FORCE_COLOR")) return true;
-    const is_tty = std.Io.File.stdout().isTty(io) catch return false;
+    const is_tty = revo.stdout().isTty(io) catch return false;
     if (!is_tty) return false;
     if (env.get("TERM")) |term| if (std.mem.eql(u8, term, "dumb")) return false;
     return true;

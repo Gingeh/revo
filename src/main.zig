@@ -22,7 +22,7 @@ const USAGE =
     \\options:
     \\  -e code          run code
     \\  -i               enter repl after executing
-    \\  -d,-D            output the last evaluated value of the program in display/debug mode
+    \\  -d,-D,-P         output the the program's result in {display, debug, pretty} mode
     \\  --test           run with test blocks
     \\  -h, --help       show this help message
     \\  --version        show version
@@ -102,7 +102,7 @@ pub fn main(provided_init: std.process.Init) void {
         => {},
         else => |err| {
             var stderr_buf: [256]u8 = undefined;
-            var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
+            var stderr = revo.stderr().writer(init.io, &stderr_buf);
             pretty.printError(&stderr.interface, "{s}", .{@errorName(err)}) catch return;
             std.process.exit(1);
         },
@@ -142,7 +142,7 @@ fn runMain(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
-        const stdin_file = std.Io.File.stdin();
+        const stdin_file = revo.stdin();
         if (!try stdin_file.isTty(init.io)) {
             const source = std.Io.Dir.cwd().readFileAlloc(
                 init.io,
@@ -248,7 +248,7 @@ fn runMain(init: std.process.Init) !void {
             if (!config.interactive) return;
         }
     } else {
-        const stdin_file = std.Io.File.stdin();
+        const stdin_file = revo.stdin();
         if (!try stdin_file.isTty(init.io)) {
             const source = std.Io.Dir.cwd().readFileAlloc(
                 init.io,
@@ -414,6 +414,8 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.echo_last = .display;
         } else if (std.mem.eql(u8, arg, "-D")) {
             config.echo_last = .debug;
+        } else if (std.mem.eql(u8, arg, "-P")) {
+            config.echo_last = .pretty;
         } else if (std.mem.eql(u8, arg, "--test")) {
             config.test_mode = true;
         } else if (std.mem.eql(u8, arg, "--html")) {
@@ -488,7 +490,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
 /// it's a warning - keep going, one bad file shouldn't kill the page
 fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Config) !void {
     const html = config.mode == .docs_html;
-    const stdin_tty = try std.Io.File.stdin().isTty(init.io);
+    const stdin_tty = try revo.stdin().isTty(init.io);
     const splice = config.force_splice and !stdin_tty;
 
     var owned = std.ArrayList([]docs.FnSpec).empty;
@@ -650,7 +652,7 @@ fn emitDocs(
     const body = std.mem.trim(u8, buf.written(), "\n");
 
     var out_buf: [4096]u8 = undefined;
-    var out = std.Io.File.stdout().writer(init.io, &out_buf);
+    var out = revo.stdout().writer(init.io, &out_buf);
     if (splice) {
         const old = try std.Io.Dir.cwd().readFileAlloc(
             init.io,

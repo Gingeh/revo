@@ -204,12 +204,12 @@ fn readLine(init: std.process.Init) ![]u8 {
         return duped;
     } else {
         var stdout_buffer: [8]u8 = undefined;
-        var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+        var stdout = revo.stdout().writer(init.io, &stdout_buffer);
         stdout.interface.writeAll(">> ") catch {};
         stdout.interface.flush() catch {};
 
         var stdin_buffer: [1024]u8 = undefined;
-        var stdin_reader = std.Io.File.stdin().reader(init.io, &stdin_buffer);
+        var stdin_reader = revo.stdin().reader(init.io, &stdin_buffer);
         var writer = std.Io.Writer.Allocating.init(init.gpa);
         defer writer.deinit();
         _ = try stdin_reader.interface.streamDelimiter(&writer.writer, '\n');
@@ -416,7 +416,7 @@ pub const Session = struct {
 
 pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     var banner_buffer: [128]u8 = undefined;
-    var out = std.Io.File.stdout().writer(init.io, &banner_buffer);
+    var out = revo.stdout().writer(init.io, &banner_buffer);
     const writer = &out.interface;
 
     try writer.print(

@@ -339,6 +339,42 @@ pub fn printEvalError(gpa: std.mem.Allocator, source: []const u8, failure: EvalF
     std.debug.print("{s}", .{buf.written()});
 }
 
+pub fn stdout() std.Io.File {
+    if (comptime is_freestanding)
+        return .{
+            .handle = if (@import("builtin").target.os.tag == .freestanding)
+                @as(void, {})
+            else
+                @as(std.posix.fd_t, 1),
+            .flags = .{ .nonblocking = false },
+        };
+    return std.Io.File.stdout();
+}
+
+pub fn stdin() std.Io.File {
+    if (comptime is_freestanding)
+        return .{
+            .handle = if (@import("builtin").target.os.tag == .freestanding)
+                @as(void, {})
+            else
+                @as(std.posix.fd_t, 0),
+            .flags = .{ .nonblocking = false },
+        };
+    return std.Io.File.stdin();
+}
+
+pub fn stderr() std.Io.File {
+    if (comptime is_freestanding)
+        return .{
+            .handle = if (@import("builtin").target.os.tag == .freestanding)
+                @as(void, {})
+            else
+                @as(std.posix.fd_t, 2),
+            .flags = .{ .nonblocking = false },
+        };
+    return std.Io.File.stderr();
+}
+
 test {
     _ = @import("./lang/tests.zig");
 }
