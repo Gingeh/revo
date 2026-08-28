@@ -629,7 +629,7 @@ fn namedFnBinding(node: *const Node) ?*const ast.Binding {
 /// on the spot, so the child frame owns the slots
 ///
 /// clean nodes come back unchanged
-fn isolateEntryDecls(self: *Compiler, node: *const Node) !*Node {
+pub fn isolateEntryDecls(self: *Compiler, node: *const Node) !*Node {
     var visitor = IsolationVisitor{};
     visitor.visit(node);
     if (!visitor.found) return @constCast(node);
@@ -652,7 +652,7 @@ fn isolateEntryDecls(self: *Compiler, node: *const Node) !*Node {
 /// does this expression declare bindings or carry loop machinery? both
 /// desync the enclosing window, see isolateEntryDecls. fn bodies are
 /// skipped, their frames isolate themselves already
-const IsolationVisitor = struct {
+pub const IsolationVisitor = struct {
     found: bool = false,
 
     pub fn visit(self: *IsolationVisitor, node: *const Node) void {

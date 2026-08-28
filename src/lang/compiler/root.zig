@@ -795,7 +795,10 @@ pub const Compiler = struct {
             .assign_expr => |assign| try values.compileAssign(self, assign.target, assign.value),
             .block => |exprs| try self.compileBlock(exprs),
             .tuple => |items| {
-                for (items) |item| try self.compile(item, true);
+                for (items) |item| {
+                    const isolated = try values.isolateEntryDecls(self, item);
+                    try self.compile(isolated, true);
+                }
                 try self.emit(.tuple_new, @intCast(items.len));
             },
             .table => |entries| try values.compileTable(self, entries),
