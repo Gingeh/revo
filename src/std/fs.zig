@@ -83,7 +83,7 @@ fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
     var t = try vm.tables.get(table);
 
     try t.putRaw(try vm.dataAtom("size"), Data.new.num(stat.size), vm);
-    try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(@tagName(stat.kind)), vm);
+    try t.putRaw(try vm.dataAtom("kind"), try vm.dataAtom(@tagName(stat.kind)), vm);
     try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@intFromEnum(stat.permissions)), vm);
     try t.putRaw(try vm.dataAtom("mtime"), Data.new.num(stat.mtime.toSeconds()), vm);
     try t.putRaw(try vm.dataAtom("atime"), Data.new.num((stat.atime orelse stat.mtime).toSeconds()), vm);
@@ -115,6 +115,23 @@ pub fn mapIOError(err: anyerror) []const u8 {
 /// use `file.close()` when you're done with the handle
 fn open_fn(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
+    const file = if (std.fs.path.isAbsolute(path))
+        Dir.openFileAbsolute(vm.runtime.io, path, .{
+            .allow_directory = true,
+            .path_only = true,
+        }) catch |err| switch (err) {
+            error.FileNotFound => return try HostResult.Err(vm, "NotFound"),
+            else => return try HostResult.Err(vm, mapIOError(err)),
+        }
+    else
+        Dir.cwd().openFile(vm.runtime.io, path, .{
+            .allow_directory = true,
+            .path_only = true,
+        }) catch |err| switch (err) {
+            error.FileNotFound => return try HostResult.Err(vm, "NotFound"),
+            else => return try HostResult.Err(vm, mapIOError(err)),
+        };
+    defer file.close(vm.runtime.io);
     return try HostResult.Ok(vm, try wrapFile(vm, path));
 }
 
@@ -222,7 +239,7 @@ fn readdir_meth_fn(args: []const Data, vm: *VM) !HostResult {
         const entry_table = try vm.tables.create();
         var t = try vm.tables.get(entry_table);
         try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name), vm);
-        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)), vm);
+        try t.putRaw(try vm.dataAtom("kind"), try vm.dataAtom(kindName(ent.kind)), vm);
         try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
     }
 
@@ -314,7 +331,7 @@ fn readdir_fn(args: []const Data, vm: *VM) !HostResult {
         const entry_table = try vm.tables.create();
         var t = try vm.tables.get(entry_table);
         try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name), vm);
-        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)), vm);
+        try t.putRaw(try vm.dataAtom("kind"), try vm.dataAtom(kindName(ent.kind)), vm);
         try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
     }
 

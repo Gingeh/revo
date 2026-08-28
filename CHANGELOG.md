@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
     like `revo.eval` but reads the source from a file, relative paths resolve against the current module's directory like `import`, then cwd
 - zig extensions, examples for zig extensions (`examples/zig`)
+- access tuple fields via dot: `(:a, :b).0 == :a`
 - `HACKING.md`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later
 

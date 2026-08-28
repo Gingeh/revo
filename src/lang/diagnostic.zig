@@ -748,16 +748,11 @@ fn renderBoxSpanBlock(
     // marker rows sit one column further left than code rows
     const marker_offset = first_trim_w -| 5;
     const first_span_off = @min(@as(usize, first_line.span_col -| 1), first_line.text.len);
-    const top_dashes = @max(@as(usize, 1), displayWidth(first_line.text[0..first_span_off], 0) -| first_trim_w);
-    const top_vs = @max(
-        @as(usize, 1),
-        (displayWidth(first_line.text, 0) -| first_trim_w) -| (top_dashes - 1),
-    );
+    const top_dashes = displayWidth(first_line.text[0..first_span_off], 0) -| first_trim_w;
+    const total_w = displayWidth(first_line.text, 0) -| first_trim_w;
+    const top_vs = @max(@as(usize, 1), total_w -| top_dashes);
     const last_span_len = @min(last_line.span_end -| last_line.span_start, last_line.text.len);
-    const bottom_dashes = @max(
-        @as(usize, 1),
-        displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w,
-    );
+    const bottom_dashes = (displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w) -| 1;
     // top edge: box header and caret stem
     try writeBoxPrefix(writer, line_width, 3);
     for (0..marker_offset) |_| try writer.writeByte(' ');

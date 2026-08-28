@@ -197,12 +197,20 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
         if (self.stop_token) |stop| if (self.check(stop)) break;
         if (self.stop_on_stmt_start and self.isStatementBoundary(left)) break;
 
-        // postfix `obj.field`
+        // postfix `obj.field` or `obj.1` (tuple numeric field access)
         if (self.match(.dot)) {
-            const name = try self.expectIdent();
-            left = try self.allocExpr(Span.merge(left.span, name.span()), .{
-                .field = .{ .object = left, .name = name.text },
-            });
+            if (self.peek().type == .number) {
+                const num = self.advance();
+                const key = try self.allocExpr(num.span(), .{ .number = .{ .value = std.fmt.parseFloat(f64, num.text) catch return error.InvalidNumber } });
+                left = try self.allocExpr(Span.merge(left.span, num.span()), .{
+                    .index = .{ .object = left, .key = key },
+                });
+            } else {
+                const name = try self.expectIdent();
+                left = try self.allocExpr(Span.merge(left.span, name.span()), .{
+                    .field = .{ .object = left, .name = name.text },
+                });
+            }
             continue;
         }
 

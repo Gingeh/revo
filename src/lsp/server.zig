@@ -568,8 +568,39 @@ const Handler = struct {
 
         var cap: usize = tokens.len * 5;
         for (tokens) |t| {
-            if (t.interp_opens.len > 0)
-                cap += t.interp_opens.len * 40;
+            if (t.interp_opens.len > 0) {
+                const inner_off: usize = if (t.type == .multiline_string) 3 else 1;
+                const inner_start = t.start + inner_off;
+                const inner_end = t.end - inner_off;
+                if (inner_start >= inner_end) continue;
+                var literal_start: usize = inner_start;
+                for (t.interp_opens) |open| {
+                    if (open.offset < literal_start) continue;
+                    cap += 10; // literal prefix + #{ operator
+                    const close = interpEnd(source, open.offset, inner_end) orelse {
+                        literal_start = open.offset + 1;
+                        continue;
+                    };
+                    const body_start = open.offset + 1;
+                    if (close > body_start) {
+                        const body = source[body_start..close];
+                        if (lang.lexReportAt(arena, body, .{
+                            .offset = body_start,
+                            .line = open.line,
+                            .column = open.column + 1,
+                        })) |body_lexed| {
+                            const sub = switch (body_lexed) {
+                                .ok => |t2| t2,
+                                .err => &.{},
+                            };
+                            cap += sub.len * 5;
+                        } else |_| {}
+                    }
+                    cap += 5; // closing }
+                    literal_start = close + 1;
+                }
+                if (inner_end > literal_start) cap += 5;
+            }
         }
         var data = try std.ArrayList(u32).initCapacity(arena, cap);
 
