@@ -605,7 +605,19 @@ pub fn assert_(args: []const Data, vm: *VM) !HostResult {
 /// panics if the value is falsy
 pub fn assert_eq(args: []const Data, vm: *VM) !HostResult {
     if (vm.compare(args[0], args[1]) != .eq) {
-        return .other("neq");
+        var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
+        defer buf.deinit();
+        try buf.writer.writeAll("assert_eq failed: ");
+        try append_data(&buf.writer, args[0], vm, .display);
+        try buf.writer.writeAll(" (");
+        try buf.writer.writeAll(typeof(args[0], vm));
+        try buf.writer.writeAll(") != ");
+        try append_data(&buf.writer, args[1], vm, .display);
+        try buf.writer.writeAll(" (");
+        try buf.writer.writeAll(typeof(args[1], vm));
+        try buf.writer.writeAll(")");
+        try vm.setPanicMessage(buf.written());
+        return .other("panic");
     }
     return .okData(args[0]);
 }
