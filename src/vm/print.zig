@@ -86,7 +86,18 @@ fn writeEscapedString(writer: *std.Io.Writer, s: []const u8) anyerror!void {
             '\n' => try writer.writeAll("\\n"),
             '\r' => try writer.writeAll("\\r"),
             '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
+            8 => try writer.writeAll("\\b"),
+            12 => try writer.writeAll("\\f"),
+            11 => try writer.writeAll("\\v"),
+            0 => try writer.writeAll("\\0"),
+            else => if (c < 32 or c >= 127) {
+                const hex = "0123456789abcdef";
+                try writer.writeAll("\\x");
+                try writer.writeByte(hex[c >> 4]);
+                try writer.writeByte(hex[c & 0xF]);
+            } else {
+                try writer.writeByte(c);
+            },
         }
     }
     try writer.writeByte('"');
@@ -124,11 +135,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             },
         },
         .atom => {
-            if (mode == .decimal) {
-                try writer.writeAll("<un-number-able>");
-            } else {
-                try styledPrint(writer, mode, color_accent, ":{s}", .{vm.atomName(self.asAtom().?)});
-            }
+            try styledPrint(writer, mode, color_accent, ":{s}", .{vm.atomName(self.asAtom().?)});
         },
         .function => {
             const id = self.asFunction().?;
@@ -219,11 +226,24 @@ pub fn writeTuple(t: *revo.tuple.Tuple, writer: *std.Io.Writer, vm: *revo.VM, mo
     try writer.writeAll(")");
 }
 
+fn writeTableKey(key: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
+    const colored = mode == .pretty;
+    switch (key.tag()) {
+        .atom => {
+            if (colored) try style(writer, color_accent);
+            try writer.writeAll(vm.atomName(key.asAtom().?));
+            if (colored) try style(writer, color_reset);
+        },
+        .string => {
+            if (colored) try style(writer, color_string);
+            try writeEscapedString(writer, vm.stringValue(key.asString().?));
+            if (colored) try style(writer, color_reset);
+        },
+        else => try writeData(key, writer, vm, mode),
+    }
+}
+
 pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
-    // pretty mode delegates straight to writePrettyTable, which does its own
-    // cycle guarding (it's also re-entered directly by writePrettyDataValue
-    // for nested tables, bypassing this function, so it has to guard itself
-    // regardless, guarding here too would just double-count the top level)
     if (mode == .pretty) {
         try writePrettyTable(tbl, writer, vm, 0);
         return;
@@ -240,29 +260,47 @@ pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, 
     }
     defer popVisiting();
 
-    try writer.writeAll("{ ");
-    const should_write_idx = tbl.hash.count != 0;
-    for (tbl.array.items, 0..) |val, idx| {
-        if (should_write_idx) {
-            try writeData(Data.new.num(idx), writer, vm, mode);
-            try writer.writeAll(": ");
-        }
-        try writeData(val, writer, vm, mode);
-        try writer.writeAll(", ");
+    if (tbl.array.items.len == 0 and tbl.hash.count == 0) {
+        try writer.writeAll("{}");
+        return;
     }
+
+    try writer.writeAll("{ ");
+    const hash_count = tbl.hash.count;
+    const multi_line = mode == .decimal and hash_count >= 2;
+    var first = true;
+    for (tbl.array.items, 0..) |val, idx| {
+        _ = idx;
+        if (!first) try writer.writeAll(", ");
+        first = false;
+        try writeData(val, writer, vm, mode);
+    }
+
     var cur = tbl.hash.first;
     while (cur != revo.table.NULL_ID) {
         const key = tbl.hash.buckets[cur].key;
         const val = tbl.hash.buckets[cur].val;
-        if (should_write_idx) {
-            try writeData(key, writer, vm, mode);
-            try writer.writeAll(": ");
+        if (multi_line) {
+            if (!first) try writer.writeAll(",");
+            try writer.writeAll("\n  ");
+            try writeTableKey(key, writer, vm, mode);
+            try writer.writeAll(" = ");
+            try writeData(val, writer, vm, mode);
+        } else {
+            if (!first) try writer.writeAll(", ");
+            first = false;
+            try writeTableKey(key, writer, vm, mode);
+            try writer.writeAll(" = ");
+            try writeData(val, writer, vm, mode);
         }
-        try writeData(val, writer, vm, mode);
-        try writer.writeAll(", ");
         cur = tbl.hash.buckets[cur].next;
     }
-    try writer.writeAll("}");
+
+    if (multi_line) {
+        try writer.writeAll("\n}");
+    } else {
+        try writer.writeAll(" }");
+    }
 }
 
 fn writePrettyTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, indent_level: usize) anyerror!void {
@@ -284,40 +322,53 @@ fn writePrettyTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM
     }
     defer popVisiting();
 
+    if (tbl.array.items.len == 0 and tbl.hash.count == 0) {
+        try style(writer, color_brace);
+        try writer.writeAll("{");
+        try style(writer, color_reset);
+        try style(writer, color_brace);
+        try writer.writeAll("}");
+        try style(writer, color_reset);
+        return;
+    }
+
     const indent = "  ";
     try style(writer, color_brace);
     try writer.writeAll("{");
     try style(writer, color_reset);
     try writer.writeAll("\n");
 
-    for (tbl.array.items, 0..) |val, idx| {
+    if (tbl.array.items.len > 0) {
         var i: usize = 0;
         while (i < indent_level + 1) : (i += 1) {
             try writer.writeAll(indent);
         }
-        try style(writer, color_accent);
-        try writer.print("[{d}]", .{idx});
-        try style(writer, color_reset);
-        try writer.writeAll(" = ");
-        try writePrettyDataValue(val, writer, vm, indent_level + 1);
-        try writer.writeAll("\n");
+        var first = true;
+        for (tbl.array.items) |val| {
+            if (!first) try writer.writeAll(", ");
+            first = false;
+            try writePrettyDataValue(val, writer, vm, indent_level + 1);
+        }
+        try writer.writeAll(",\n");
     }
 
     var cur = tbl.hash.first;
     while (cur != revo.table.NULL_ID) {
         const key = tbl.hash.buckets[cur].key;
         const val = tbl.hash.buckets[cur].val;
+        const next = tbl.hash.buckets[cur].next;
         var i: usize = 0;
         while (i < indent_level + 1) : (i += 1) {
             try writer.writeAll(indent);
         }
-        try style(writer, color_accent);
-        try writeData(key, writer, vm, .debug);
-        try style(writer, color_reset);
+        try writeTableKey(key, writer, vm, .pretty);
         try writer.writeAll(" = ");
         try writePrettyDataValue(val, writer, vm, indent_level + 1);
+        if (next != revo.table.NULL_ID) {
+            try writer.writeAll(",");
+        }
         try writer.writeAll("\n");
-        cur = tbl.hash.buckets[cur].next;
+        cur = next;
     }
 
     var j: usize = 0;
