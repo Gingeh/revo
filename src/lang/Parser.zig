@@ -126,13 +126,16 @@ stop_token: ?TokenType = null,
 allow_bare_calls: bool = true, // permit `f "str"`, disabled in pattern positions
 stop_on_stmt_start: bool = false, // treat statement-starting tokens as expr boundaries
 errors: std.ArrayList(diagnostic.Part) = .empty,
+error_depths: std.ArrayList(usize) = .empty,
 errors_inited: bool = false,
 first_error_kind: ?Kind = null,
 first_error_message: []const u8 = "",
 had_errors: bool = false,
+depth: usize = 0,
 
 fn initErrors(self: *Parser) !void {
     self.errors = try std.ArrayList(diagnostic.Part).initCapacity(self.alloc, 8);
+    self.error_depths = try std.ArrayList(usize).initCapacity(self.alloc, 8);
     self.errors_inited = true;
 }
 
@@ -155,7 +158,31 @@ fn hasErrors(self: *Parser) bool {
 }
 
 fn finishFailure(self: *Parser) anyerror!ParseFailure {
-    const parts = try self.errors.toOwnedSlice(self.alloc);
+    var parts = try self.errors.toOwnedSlice(self.alloc);
+    const depths = try self.error_depths.toOwnedSlice(self.alloc);
+    defer self.alloc.free(depths);
+
+    if (parts.len >= 2 and depths.len > 0) {
+        var max_depth: usize = 0;
+        for (depths) |d| {
+            if (d > max_depth) max_depth = d;
+        }
+        var kept = try std.ArrayList(diagnostic.Part).initCapacity(self.alloc, parts.len);
+        defer kept.deinit(self.alloc);
+        for (depths, 0..) |d, idx| {
+            if (d == max_depth) {
+                const base = idx * 2;
+                if (base + 1 < parts.len) {
+                    try kept.append(self.alloc, parts[base]);
+                    try kept.append(self.alloc, parts[base + 1]);
+                }
+            }
+        }
+        if (kept.items.len > 0 and kept.items.len < parts.len) {
+            self.alloc.free(parts);
+            parts = try kept.toOwnedSlice(self.alloc);
+        }
+    }
     const msg = for (parts) |p| {
         if (p == .@"error") break p.@"error";
     } else "";
@@ -177,6 +204,7 @@ fn recordError(self: *Parser, kind: Kind, message: []const u8, span: ast.Span) !
     }
     try self.errors.append(self.alloc, .{ .@"error" = owned });
     try self.errors.append(self.alloc, .{ .span = .{ .span = span, .role = .primary } });
+    try self.error_depths.append(self.alloc, self.depth);
 }
 
 fn syncToNextStatement(self: *Parser, terminator: TokenType) void {
@@ -191,6 +219,8 @@ fn syncToNextStatement(self: *Parser, terminator: TokenType) void {
 /// starts with a prefix node, then consumes infix/postfix ops while binding power allows
 /// min_bp is the floor; if an operator's left power is below this, itll stop and return
 fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
+    self.depth += 1;
+    defer self.depth -= 1;
     var left = try self.parsePrefix();
 
     while (true) {
@@ -425,6 +455,8 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
 
 /// literals, keywords, unary ops, and statement forms
 fn parsePrefix(self: *Parser) anyerror!*Node {
+    self.depth += 1;
+    defer self.depth -= 1;
     const token = self.advance();
     return switch (token.type) {
         .number => blk: {
