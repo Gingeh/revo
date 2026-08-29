@@ -41,7 +41,7 @@ pub fn maybeCollectGarbage(self: *VM) void {
         for (pending_list.items) |id| {
             const entry = self.gc_finalizers.fetchRemove(id) orelse continue;
             const table_val = revo.Data.new.table(id);
-            _ = self.callFunction(entry.value, &.{table_val}) catch {};
+            _ = self.callFunctionParts(entry.value, null, &.{table_val}, null) catch {};
         }
         pending_list.deinit(self.runtime.alloc);
     }

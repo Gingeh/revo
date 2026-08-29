@@ -631,14 +631,14 @@ fn encodeValue(
 fn decodeExprNode(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: Data) ExpandError!*Node {
     const tuple = try expectTuple(vm, data);
     if (tuple.items.len == 0 or tuple.items[0].asAtom() == null) return error.InvalidProcReturn;
-    const tag = vm.atomName(tuple.items[0].asAtom().?);
+    const tag = vm.stringValue(tuple.items[0].asAtom().?);
 
     if (std.mem.eql(u8, tag, "number")) {
         if (tuple.items.len < 2) return error.InvalidProcReturn;
         const value = tuple.items[1].asNum() orelse return error.InvalidProcReturn;
         const is_float = tuple.items.len >= 3 and tuple.items[2].asAtom() != null and std.mem.eql(
             u8,
-            vm.atomName(tuple.items[2].asAtom().?),
+            vm.stringValue(tuple.items[2].asAtom().?),
             "float",
         );
 
@@ -706,7 +706,7 @@ fn decodeValue(
         .bool => switch (data.tag()) {
             .atom => blk: {
                 const atom = data.asAtom().?;
-                const name = vm.atomName(atom);
+                const name = vm.stringValue(atom);
                 if (std.mem.eql(u8, name, "true")) break :blk true;
                 if (std.mem.eql(u8, name, "false")) break :blk false;
                 return error.InvalidProcReturn;
@@ -746,7 +746,7 @@ fn decodeValue(
         },
         .@"enum" => {
             const name = switch (data.tag()) {
-                .atom => vm.atomName(data.asAtom().?),
+                .atom => vm.stringValue(data.asAtom().?),
                 else => return error.InvalidProcReturn,
             };
             const info = @typeInfo(T).@"enum";
@@ -758,7 +758,7 @@ fn decodeValue(
         .@"union" => |un| {
             const union_tuple = try expectTuple(vm, data);
             if (union_tuple.items.len == 0 or !union_tuple.items[0].isAtom()) return error.InvalidProcReturn;
-            const union_tag = vm.atomName(union_tuple.items[0].asAtom().?);
+            const union_tag = vm.stringValue(union_tuple.items[0].asAtom().?);
 
             inline for (un.fields) |field| {
                 if (std.mem.eql(u8, field.name, union_tag)) {
@@ -864,7 +864,7 @@ fn decodeSliceValue(
 
 fn isNilData(vm: *revo.VM, data: Data) bool {
     return switch (data.tag()) {
-        .atom => std.mem.eql(u8, vm.atomName(data.asAtom().?), "nil"),
+        .atom => std.mem.eql(u8, vm.stringValue(data.asAtom().?), "nil"),
         else => false,
     };
 }
@@ -948,7 +948,7 @@ fn consumed(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
 fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const expected_atom = args[1].asAtom() orelse return .errType(1, "atom", revo.std_lib.typeof(args[1], vm));
-    const expected_name = vm.atomName(expected_atom);
+    const expected_name = vm.stringValue(expected_atom);
 
     const item = (try iterStep(args[0..1], vm, true)).ok;
     if (item.asAtom() == revo.core_atoms.atomId(.nil)) {
@@ -972,13 +972,13 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
         try vm.setPanicMessage("proc iter:next_of expected tagged tuple node");
         return .panic();
     }
-    if (!std.mem.eql(u8, vm.atomName(tuple.items[0].asAtom().?), expected_name)) {
+    if (!std.mem.eql(u8, vm.stringValue(tuple.items[0].asAtom().?), expected_name)) {
         var panic_msg = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 64);
         defer panic_msg.deinit(vm.runtime.alloc);
         try panic_msg.appendSlice(vm.runtime.alloc, "proc iter:next_of expected :");
         try panic_msg.appendSlice(vm.runtime.alloc, expected_name);
         try panic_msg.appendSlice(vm.runtime.alloc, " got :");
-        try panic_msg.appendSlice(vm.runtime.alloc, vm.atomName(tuple.items[0].asAtom().?));
+        try panic_msg.appendSlice(vm.runtime.alloc, vm.stringValue(tuple.items[0].asAtom().?));
         try vm.setPanicMessage(panic_msg.items);
         return .panic();
     }
@@ -999,7 +999,7 @@ fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     );
 
     const iter_value = try makeIterValue(vm, args[1]);
-    const result = try vm.callFunction(callee, &.{iter_value});
+    const result = try vm.callFunctionParts(callee, null, &.{iter_value}, null);
     return .okData(try normalizeProcValue(vm, result));
 }
 

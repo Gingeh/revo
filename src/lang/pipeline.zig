@@ -441,11 +441,11 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     {
         var cit = vm.const_globals.keyIterator();
         while (cit.next()) |atom_id| {
-            try known_globals.append(vm.runtime.alloc, vm.atomName(atom_id.*));
+            try known_globals.append(vm.runtime.alloc, vm.stringValue(atom_id.*));
         }
         var git = vm.globals.iterator();
         while (git.next()) |entry| {
-            try known_globals.append(vm.runtime.alloc, vm.atomName(entry.key_ptr.*));
+            try known_globals.append(vm.runtime.alloc, vm.stringValue(entry.key_ptr.*));
         }
     }
 

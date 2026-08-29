@@ -157,7 +157,7 @@ pub export fn revo_call(
     for (0..@as(usize, @intCast(argc))) |i|
         buf[i] = argv[i];
 
-    const result = v.callFunction(callee, buf[0..@as(usize, @intCast(argc))]) catch return false;
+    const result = v.callFunctionParts(callee, null, buf[0..@as(usize, @intCast(argc))], null) catch return false;
     out.* = result;
     return true;
 }

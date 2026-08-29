@@ -100,12 +100,12 @@ fn addFieldCompletions(
     const target_atom = vm.internAtom(target) catch return;
     // stdlib modules registered as globals (string, table, math, etc.)
     if (vm.globals.get(target_atom)) |val| {
-        if (val.isTable()) {
+        if (val.tag() == .table) {
             const table = try vm.tables.get(val.asTable().?);
             var hash_it = table.hash.orderedIterator();
             while (hash_it.next()) |entry| {
-                if (entry.key.isAtom()) {
-                    const name = vm.atomName(entry.key.asAtom().?);
+                if (entry.key.tag() == .atom) {
+                    const name = vm.stringValue(entry.key.asAtom().?);
                     if (std.mem.startsWith(u8, name, prefix)) {
                         items.append(arena, .{
                             .label = name,
@@ -149,13 +149,13 @@ fn addGeneralCompletions(
     {
         var git = vm.globals.iterator();
         while (git.next()) |entry| {
-            const name = vm.atomName(entry.key_ptr.*);
+            const name = vm.stringValue(entry.key_ptr.*);
             if (!std.mem.startsWith(u8, name, prefix)) continue;
-            const kind: ?T.completion.Item.Kind = if (entry.value_ptr.isFunction())
+            const kind: ?T.completion.Item.Kind = if (entry.value_ptr.tag() == .function)
                 .Function
-            else if (entry.value_ptr.isTable())
+            else if (entry.value_ptr.tag() == .table)
                 .Module
-            else if (entry.value_ptr.isStructType())
+            else if (entry.value_ptr.tag() == .struct_type)
                 .Struct
             else
                 .Variable;
@@ -165,7 +165,7 @@ fn addGeneralCompletions(
             var detail: ?[]const u8 = null;
             var doc_copy: ?[]const u8 = null;
 
-            if (entry.value_ptr.isFunction()) {
+            if (entry.value_ptr.tag() == .function) {
                 if (revo.std_lib.api.find(name)) |spec| {
                     doc_copy = if (spec.doc.len > 0) (arena.dupe(u8, spec.doc) catch null) else null;
                     const names = try arena.alloc([]const u8, spec.params.len);
@@ -217,7 +217,7 @@ fn addGeneralCompletions(
             var duped = false;
             var git = vm.globals.iterator();
             while (git.next()) |entry| {
-                if (std.mem.eql(u8, sym.name, vm.atomName(entry.key_ptr.*))) {
+                if (std.mem.eql(u8, sym.name, vm.stringValue(entry.key_ptr.*))) {
                     duped = true;
                     break;
                 }

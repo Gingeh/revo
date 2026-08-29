@@ -297,7 +297,7 @@ pub const FunctionPool = struct {
         if (self.function_marks.isSet(id)) return;
         if (self.functions.items[id] == null) return;
         self.function_marks.set(id);
-        vm.pushMarkFunction(id);
+        vm.gc_mark_stack.append(vm.runtime.alloc, .{ .function = id }) catch @panic("OOM in GC marking");
     }
 
     pub fn markUpvalue(self: *FunctionPool, id: UpvalueID, vm: *revo.VM) void {
@@ -305,7 +305,7 @@ pub const FunctionPool = struct {
         if (self.upvalue_marks.isSet(id)) return;
         if (self.upvalues.items[id] == null) return;
         self.upvalue_marks.set(id);
-        vm.pushMarkUpvalue(id);
+        vm.gc_mark_stack.append(vm.runtime.alloc, .{ .upvalue = id }) catch @panic("OOM in GC marking");
     }
 
     pub fn sweep(self: *FunctionPool) void {

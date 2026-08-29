@@ -66,7 +66,7 @@ fn parsePermissions(vm: *VM, value: Data) !File.Permissions {
         },
         .atom => {
             const id = value.asAtom().?;
-            const name = vm.atomName(id);
+            const name = vm.stringValue(id);
             inline for (@typeInfo(File.Permissions).@"enum".fields) |field| {
                 if (std.mem.eql(u8, field.name, name)) {
                     return @as(File.Permissions, @enumFromInt(field.value));

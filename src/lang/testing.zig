@@ -96,8 +96,8 @@ fn expectTopAtom(result: *TopResult, expected: []const u8) !void {
         std.debug.print("result was not a atom, it was {s}\n", .{revo.std_lib.typeof(result.value, &result.vm)});
         return error.TypeMismatch;
     };
-    std.testing.expectEqualStrings(expected, result.vm.atomName(s)) catch {
-        std.debug.print("wanted :{s}, got :{s}\n", .{ expected, result.vm.atomName(s) });
+    std.testing.expectEqualStrings(expected, result.vm.stringValue(s)) catch {
+        std.debug.print("wanted :{s}, got :{s}\n", .{ expected, result.vm.stringValue(s) });
         return error.AtomsDontMatch;
     };
 }

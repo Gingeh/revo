@@ -179,7 +179,7 @@ pub fn reduce_fn(args: []const Data, vm: *VM) !HostResult {
     var v: Data = undefined;
     var idx: Data = undefined;
     while (try pullStep(vm, st_id, &v, &idx))
-        acc = try vm.callFunction(args[1], &[_]Data{ acc, v });
+        acc = try vm.callFunctionParts(args[1], null, &[_]Data{ acc, v }, null);
     return .{ .ok = acc };
 }
 
@@ -198,7 +198,7 @@ pub fn fold_fn(args: []const Data, vm: *VM) !HostResult {
             acc = v;
             got = true;
         } else {
-            acc = try vm.callFunction(args[1], &[_]Data{ acc, v });
+            acc = try vm.callFunctionParts(args[1], null, &[_]Data{ acc, v }, null);
         }
     }
     if (!got) return .okData(revo.Data.new.core(.nil));
@@ -208,9 +208,9 @@ pub fn fold_fn(args: []const Data, vm: *VM) !HostResult {
 /// call fn with (value, index) when it takes 2+ params, else (value)
 fn callPred(vm: *VM, f: Data, v: Data, idx: Data) !Data {
     return if (passesIndex(vm, f))
-        try vm.callFunction(f, &[_]Data{ v, idx })
+        try vm.callFunctionParts(f, null, &[_]Data{ v, idx }, null)
     else
-        try vm.callFunction(f, &[_]Data{v});
+        try vm.callFunctionParts(f, null, &[_]Data{v}, null);
 }
 
 /// > each(collection: any, fn: function) -> atom
@@ -411,7 +411,7 @@ fn zipNext(st_id: mem.TableID, vm: *VM) !HostResult {
     while (true) : (i += 1) {
         const ups = vm.tuples.get(ups_id) catch return .okData(revo.Data.new.core(.done));
         if (i >= ups.items.len) break;
-        const v = try vm.callFunction(ups.items[i], &.{});
+        const v = try vm.callFunctionParts(ups.items[i], null, &.{}, null);
         if (isDone(v)) return .okData(revo.Data.new.core(.done));
         try vals.append(vm.runtime.alloc, v);
     }
@@ -438,7 +438,7 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !HostResult {
                 continue;
             }
         }
-        const val = try vm.callFunction(cur, &.{});
+        const val = try vm.callFunctionParts(cur, null, &.{}, null);
         if (isDone(val)) {
             st = try vm.tables.get(st_id);
             try st.putRawAtom(revo.core_atoms.cur.atomId(), revo.Data.new.core(.nil), vm);
@@ -469,7 +469,7 @@ fn rangeNext(st_id: mem.TableID, vm: *VM) !HostResult {
 fn wrapIterable(vm: *VM, obj: Data) !?Data {
     if (obj.isFunction()) return obj;
     if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atomId())) |mm|
-        return try vm.callFunction(mm, &[_]Data{obj});
+        return try vm.callFunctionParts(mm, null, &[_]Data{obj}, null);
     if (obj.isTable() and try vm.getMetamethodByAtom(obj, revo.core_atoms.__call.atomId()) != null)
         return obj;
     if (obj.isString() or obj.isTuple() or obj.isTable()) return obj;
@@ -541,7 +541,7 @@ fn pullStep(vm: *VM, st_id: mem.TableID, out: *Data, out_idx: *Data) !bool {
     const callable = up.isFunction() or
         (up.isTable() and try vm.getMetamethodByAtom(up, revo.core_atoms.__call.atomId()) != null);
     if (callable) {
-        const v = try vm.callFunction(up, &.{});
+        const v = try vm.callFunctionParts(up, null, &.{}, null);
         if (isDone(v)) return false;
         st = try vm.tables.get(st_id);
         const idx_val = st.getRawAtom(revo.core_atoms.idx.atomId(), vm) orelse Data.new.num(0);

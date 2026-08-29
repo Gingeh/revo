@@ -345,7 +345,7 @@ pub fn deinit(self: *VM) void {
             const func = entry.value_ptr.*;
             if (id < self.tables.tables.items.len) {
                 if (self.tables.tables.items[id] != null) {
-                    _ = self.callFunction(func, &.{Data.new.table(id)}) catch {};
+                    _ = self.callFunctionParts(func, null, &.{Data.new.table(id)}, null) catch {};
                 }
             }
         }
@@ -619,10 +619,6 @@ pub fn internAtom(self: *VM, name: []const u8) !mem.AtomID {
     const owned = self.strings.getAssumeAlive(id);
     try self.atoms.put(owned, id);
     return id;
-}
-
-pub inline fn atomName(self: *VM, id: mem.AtomID) []const u8 {
-    return self.strings.get(id) catch "<dead>";
 }
 
 pub fn dataAtom(self: *VM, name: []const u8) !Data {
@@ -1057,11 +1053,6 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
     const result = fiber.registers[callee_slot];
     fiber.registers_len = callee_slot;
     return result;
-}
-
-// TODO inline everywhere
-pub inline fn callFunction(self: *VM, callee: Data, args: []const Data) EvalError!Data {
-    return self.callFunctionParts(callee, null, args, null);
 }
 
 /// reroute a parked callee's wake-up or ret to a dispatch result register.
@@ -1802,7 +1793,7 @@ pub fn structInitInstance(
                 try self.setRuntimeMessageFmt(
                     "unknown field `{s}` for struct `{s}`",
                     .{
-                        self.atomName(k_atom),
+                        self.stringValue(k_atom),
                         desc.name,
                     },
                 );
@@ -1820,7 +1811,7 @@ pub fn structInitInstance(
             try self.setRuntimeMessageFmt(
                 "missing field `{s}` for struct `{s}`",
                 .{
-                    self.atomName(f.name_atom),
+                    self.stringValue(f.name_atom),
                     desc.name,
                 },
             );
@@ -1882,7 +1873,7 @@ pub fn setStructField(
         if (cached.is_method) {
             try self.setRuntimeMessageFmt(
                 "field `{s}` on `{s}` is a method and can't be assigned",
-                .{ self.atomName(field_atom), desc.name },
+                .{ self.stringValue(field_atom), desc.name },
             );
             return error.Panic;
         } else cached.offset
@@ -1890,7 +1881,7 @@ pub fn setStructField(
         const i = desc.field_index.get(field_atom) orelse {
             try self.setRuntimeMessageFmt(
                 "unknown field `{s}` for struct `{s}`",
-                .{ self.atomName(field_atom), desc.name },
+                .{ self.stringValue(field_atom), desc.name },
             );
             return error.Panic;
         };

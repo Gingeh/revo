@@ -112,7 +112,7 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
 
     var s_it = vm.stdlib_globals.iterator();
     while (s_it.next()) |entry| {
-        const name = vm.atomName(entry.key_ptr.*);
+        const name = vm.stringValue(entry.key_ptr.*);
         if (std.mem.startsWith(u8, name, wslice)) {
             const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
             _ = isocline_c.ic_add_completion(cenv, n_c);
@@ -121,7 +121,7 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
 
     var g_it = vm.globals.iterator();
     while (g_it.next()) |entry| {
-        const name = vm.atomName(entry.key_ptr.*);
+        const name = vm.stringValue(entry.key_ptr.*);
         if (std.mem.startsWith(u8, name, wslice)) {
             const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
             _ = isocline_c.ic_add_completion(cenv, n_c);

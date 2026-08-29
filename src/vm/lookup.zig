@@ -80,7 +80,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("op
                     return .{ .value = instance.fields[cached.offset], .from_meta = false };
                 }
                 // check methods first
-                if (desc.methods.get(self.atomName(atom))) |method| {
+                if (desc.methods.get(self.stringValue(atom))) |method| {
                     self.structCacheInsert(instance.type_id, atom, true, 0, method);
                     return .{ .value = method, .from_meta = true };
                 }
@@ -96,7 +96,7 @@ pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("op
             const desc = self.struct_types.getType(type_id) orelse return null;
 
             if (key.asAtom()) |atom| {
-                if (desc.methods.get(self.atomName(atom))) |method| {
+                if (desc.methods.get(self.stringValue(atom))) |method| {
                     return .{ .value = method, .from_meta = true };
                 }
             }

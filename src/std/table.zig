@@ -325,7 +325,7 @@ fn sort_by(args: []const Data, vm: *VM) !HostResult {
         vm: *VM,
         fn_data: Data,
         pub fn compare(ctx: @This(), a: Data, b: Data) bool {
-            const result = ctx.vm.callFunction(ctx.fn_data, &[_]Data{ a, b }) catch return false;
+            const result = ctx.vm.callFunctionParts(ctx.fn_data, null, &[_]Data{ a, b }, null) catch return false;
             return !revo.isFalse(result);
         }
     };

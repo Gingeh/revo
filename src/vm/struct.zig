@@ -165,7 +165,7 @@ pub const StructInstancePool = struct {
         if (self.marks.isSet(id)) return;
         if (self.instances.items[id] == null) return;
         self.marks.set(id);
-        vm.pushMarkStructInstance(id);
+        vm.gc_mark_stack.append(vm.runtime.alloc, .{ .struct_instance = id }) catch @panic("OOM in GC marking");
     }
 
     pub fn sweep(self: *StructInstancePool) void {

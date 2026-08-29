@@ -426,7 +426,7 @@ pub const Table = struct {
             if (mt.getRawAtom(revo.core_atoms.atomId(.__newindex), vm)) |newindex_method| {
                 if (newindex_method.asFunction()) |f| {
                     const table_data = Data.new.table(table_id);
-                    _ = try vm.callFunction(Data.new.function(f), &[_]Data{ table_data, key, val });
+                    _ = try vm.callFunctionParts(Data.new.function(f), null, &[_]Data{ table_data, key, val }, null);
                     return;
                 }
             }

@@ -51,7 +51,7 @@ fn writeJsonValue(data: Data, vm: *VM, writer: *std.Io.Writer) anyerror!void {
         .string => try writeJsonString(writer, vm.stringValue(data.asString().?)),
         .atom => blk: {
             const id = data.asAtom().?;
-            const atom = vm.atomName(id);
+            const atom = vm.stringValue(id);
             if (std.mem.eql(u8, atom, "nil")) break :blk try writer.writeAll("null");
             if (std.mem.eql(u8, atom, "true")) break :blk try writer.writeAll("true");
             if (std.mem.eql(u8, atom, "false")) break :blk try writer.writeAll("false");
@@ -104,7 +104,7 @@ fn writeTableJson(id: revo.memory.TableID, vm: *VM, writer: *std.Io.Writer) anye
         if (!first) try writer.writeByte(',');
         first = false;
         const key_str = switch (entry.key.tag()) {
-            .atom => vm.atomName(entry.key.asAtom().?),
+            .atom => vm.stringValue(entry.key.asAtom().?),
             .string => vm.stringValue(entry.key.asString().?),
             else => return error.UnsupportedJsonValue,
         };

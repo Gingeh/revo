@@ -117,8 +117,8 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
         .debug, .pretty => try vm.getMetamethodByAtom(self, revo.core_atoms.__debug.atomId()),
     };
     if (metamethod) |mm| {
-        if (!mm.isFunction()) return error.TypeError;
-        return writeData(try vm.callFunction(mm, &.{self}), writer, vm, mode);
+        if (mm.tag() != .function) return error.TypeError;
+        return writeData(try vm.callFunctionParts(mm, null, &.{self}, null), writer, vm, mode);
     }
 
     switch (self.tag()) {
@@ -133,7 +133,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             },
         },
         .atom => {
-            try styledPrint(writer, mode, color_accent, ":{s}", .{vm.atomName(self.asAtom().?)});
+            try styledPrint(writer, mode, color_accent, ":{s}", .{vm.stringValue(self.asAtom().?)});
         },
         .function => {
             const id = self.asFunction().?;
@@ -184,7 +184,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             try writer.writeAll("{ ");
             for (desc.fields, 0..) |f, i| {
                 if (i != 0) try writer.writeAll(", ");
-                try writer.writeAll(vm.atomName(f.name_atom));
+                try writer.writeAll(vm.stringValue(f.name_atom));
                 try writer.writeAll(" = ");
                 try writeData(instance.fields[i], writer, vm, mode);
             }
@@ -229,7 +229,7 @@ fn writeTableKey(key: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Ren
     switch (key.tag()) {
         .atom => {
             if (colored) try style(writer, color_accent);
-            try writer.writeAll(vm.atomName(key.asAtom().?));
+            try writer.writeAll(vm.stringValue(key.asAtom().?));
             if (colored) try style(writer, color_reset);
         },
         .string => {
@@ -380,7 +380,7 @@ fn writePrettyTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM
 }
 
 fn writePrettyDataValue(val: Data, writer: *std.Io.Writer, vm: *revo.VM, indent_level: usize) anyerror!void {
-    if (val.isTable()) {
+    if (val.tag() == .table) {
         const tbl = vm.tables.get(val.asTable().?) catch {
             try writer.writeAll("<dead-table>");
             return;

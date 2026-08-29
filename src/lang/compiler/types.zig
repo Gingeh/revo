@@ -276,10 +276,6 @@ pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
     ti.* = .never;
 }
 
-pub fn isNumeric(T: TypeInfo) bool {
-    return T == .number;
-}
-
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
     if (from == .never) return true;
     if (to == .never) return false;
@@ -352,9 +348,7 @@ fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
     if (value != .tuple) return false;
     if (value.tuple.len != variant.types.len) return false;
     for (variant.types, value.tuple) |expected, actual| {
-        // numbers are a single runtime type,,,, num/num payloads are
-        // interchangeable inside a tagged union
-        if (numericCompatible(actual, expected)) continue;
+        if (actual == .number and expected == .number) continue;
         if (!canCoerce(actual, expected)) return false;
     }
     return true;
@@ -365,36 +359,31 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     if (target != .tuple) return false;
     if (target.tuple.len != variant.types.len) return false;
     for (variant.types, target.tuple) |source, expected| {
-        if (numericCompatible(source, expected)) continue;
+        if (source == .number and expected == .number) continue;
         if (!canCoerce(source, expected)) return false;
     }
     return true;
-}
-
-/// num is a single runtime type
-fn numericCompatible(a: TypeInfo, b: TypeInfo) bool {
-    return a == .number and b == .number;
 }
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
         .@"union", .concat => .any,
         .add, .sub, .mul, .div, .mod, .pow => blk: {
-            if (isNumeric(l) and isNumeric(r)) break :blk .number;
+            if (l == .number and r == .number) break :blk .number;
             break :blk .any;
         },
         .int_div => blk: {
-            if (isNumeric(l) and isNumeric(r)) break :blk .number;
+            if (l == .number and r == .number) break :blk .number;
             break :blk .any;
         },
-        .band, .bor, .bxor, .shl, .shr => if (isNumeric(l) and isNumeric(r)) .number else .any,
+        .band, .bor, .bxor, .shl, .shr => if (l == .number and r == .number) .number else .any,
         .eq, .neq, .lt, .gt, .lte, .gte => .bool,
     };
 }
 
 pub fn inferUnaryOp(op: ast.UnOp, T: TypeInfo) TypeInfo {
     return switch (op) {
-        .negate => if (isNumeric(T)) T else .any,
+        .negate => if (T == .number) T else .any,
         .not => .bool,
         else => .any,
     };
@@ -758,18 +747,15 @@ test "types: TypeInfo equality" {
 }
 
 test "types: numeric type check" {
-    const types = revo.lang.compiler.types;
-    try std.testing.expect(types.isNumeric(.number));
-    try std.testing.expect(types.isNumeric(.number));
-    try std.testing.expect(!types.isNumeric(.string));
-    try std.testing.expect(!types.isNumeric(.any));
+    try std.testing.expect(.number == .number);
+    try std.testing.expect(.string != .number);
+    try std.testing.expect(.any != .number);
 }
 
 test "types: type coercion" {
     const types = revo.lang.compiler.types;
     try std.testing.expect(types.canCoerce(.number, .number));
-    try std.testing.expect(types.canCoerce(.number, .number));
-    try std.testing.expect(!types.canCoerce(.number, .number)); // num doesn't coerce to num
+    try std.testing.expect(!types.canCoerce(.string, .number));
     try std.testing.expect(types.canCoerce(.number, .any)); // anything to any
     try std.testing.expect(types.canCoerce(.any, .number)); // any to anything (optimistic)
 }

@@ -163,7 +163,7 @@ test "string literals survive source free" {
     }
 
     const value = try vm.pop();
-    try std.testing.expect(value.isString());
+    try std.testing.expect(value.tag() == .string);
     try std.testing.expectEqualStrings("hello", vm.stringValue(value.asString().?));
 }
 

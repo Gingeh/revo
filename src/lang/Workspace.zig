@@ -2120,11 +2120,11 @@ fn getKnownGlobals(ws: *Workspace, alloc: std.mem.Allocator) ![]const []const u8
     var list = try std.ArrayList([]const u8).initCapacity(alloc, 64);
     var cit = vm.const_globals.keyIterator();
     while (cit.next()) |atom_id| {
-        try list.append(alloc, vm.atomName(atom_id.*));
+        try list.append(alloc, vm.stringValue(atom_id.*));
     }
     var git = vm.globals.iterator();
     while (git.next()) |entry| {
-        try list.append(alloc, vm.atomName(entry.key_ptr.*));
+        try list.append(alloc, vm.stringValue(entry.key_ptr.*));
     }
     return list.toOwnedSlice(alloc);
 }

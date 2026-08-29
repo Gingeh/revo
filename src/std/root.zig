@@ -304,7 +304,7 @@ pub fn dotest(args: []const Data, vm: *VM) !HostResult {
 
     w.interface.print("* test \"{s}\"...\n", .{try vm.strings.get(name)}) catch {};
     w.flush() catch {};
-    const res = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
+    const res = vm.callFunctionParts(Data.new.function(body), null, &[0]Data{}, null) catch |err| {
         const failure = vm.evalFailure(err);
         failure.render(vm.runtime.alloc, &w.interface, vm.currentDebugSource() orelse "") catch {
             try revo.pretty.printError(&w.interface, "hard-fail - {s}", .{@errorName(err)});
@@ -337,7 +337,7 @@ pub fn dosuite(args: []const Data, vm: *VM) !HostResult {
     var sbuf: [128]u8 = undefined;
     var sw = revo.stdout().writerStreaming(vm.runtime.io, &sbuf);
     defer sw.flush() catch {};
-    _ = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
+    _ = vm.callFunctionParts(Data.new.function(body), null, &[0]Data{}, null) catch |err| {
         const failure = vm.evalFailure(err);
         var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
         defer buf.deinit();
@@ -858,7 +858,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: Data.RenderMode
 
 pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) HostResult {
     if (!mm.isFunction()) return .errType(0, "function", typeof(mm, vm));
-    const result = vm.callFunction(mm, &.{val}) catch |err| {
+    const result = vm.callFunctionParts(mm, null, &.{val}, null) catch |err| {
         return .other(@errorName(err));
     };
     return .{ .ok = result };

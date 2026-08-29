@@ -33,8 +33,8 @@ pub fn deinit(bs: *BackendState) void {
 }
 
 fn wakeTuple(vm: *revo.VM, fiber_id: revo.VM.FiberID, tag: revo.core_atoms, payload: revo.Data) !void {
-    const items = [_]revo.Data{ revo.Data.new.atom(@intFromEnum(tag)), payload };
-    try vm.sched.wakeFiber(fiber_id, revo.Data.new.tuple(try vm.tuples.create(&items)));
+    const items = [_]revo.Data{ revo.Data.boxed(.atom, @intFromEnum(tag)), payload };
+    try vm.sched.wakeFiber(fiber_id, revo.Data.boxed(.tuple, try vm.tuples.create(&items)));
 }
 
 const CompletionRecord = extern struct {

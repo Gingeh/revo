@@ -232,7 +232,7 @@ fn dataText(vm: *revo.VM, val: revo.Data, buf: []u8) []const u8 {
         return fmt(buf, "{d}", .{n});
     }
     if (val.asAtom()) |id| {
-        const name = vm.atomName(id);
+        const name = vm.stringValue(id);
         if (std.mem.eql(u8, name, "<dead>")) return "<dead>";
         return fmt(buf, ":{s}", .{name});
     }
@@ -291,12 +291,12 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
         .load_nil => return fmt(buf, "r{d}", .{a}),
         .load_small_int => return fmt(buf, "r{d}, {d}", .{ a, bx }),
         .load_global => {
-            const name = vm.atomName(bx);
+            const name = vm.stringValue(bx);
             if (std.mem.eql(u8, name, "<dead>")) return fmt(buf, "r{d}, ?", .{a});
             return fmt(buf, "r{d}, :{s}", .{ a, name });
         },
         .store_global, .store_global_const => {
-            const name = vm.atomName(bx);
+            const name = vm.stringValue(bx);
             if (std.mem.eql(u8, name, "<dead>")) return fmt(buf, "?, r{d}", .{a});
             return fmt(buf, ":{s}, r{d}", .{ name, a });
         },
@@ -317,12 +317,12 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
         .tuple_get, .table_set, .table_get => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }),
         .table_new => return fmt(buf, "r{d}", .{a}),
         .table_set_atom => {
-            const name = vm.atomName(bx);
+            const name = vm.stringValue(bx);
             if (std.mem.eql(u8, name, "<dead>")) return fmt(buf, "r{d}, ?, r{d}", .{ a, c });
             return fmt(buf, "r{d}, :{s}, r{d}", .{ a, name, c });
         },
         .table_get_atom => {
-            const name = vm.atomName(bx);
+            const name = vm.stringValue(bx);
             if (std.mem.eql(u8, name, "<dead>")) return fmt(buf, "r{d}, r{d}, ?", .{ a, b });
             return fmt(buf, "r{d}, r{d}, :{s}", .{ a, b, name });
         },

@@ -99,7 +99,7 @@ pub const Data = extern struct {
     }
 
     // pack type+payload into nanbox. debug-assert payload fits PAYLOAD_MASK
-    inline fn boxed(t: Type, val: usize) Data {
+    pub inline fn boxed(t: Type, val: usize) Data {
         if (val != std.math.maxInt(usize)) std.debug.assert(val <= PAYLOAD_MASK);
         const pl = @as(u64, @intCast(val)) & PAYLOAD_MASK;
         return .{ .bits = BOX_TAG | (@as(u64, @intFromEnum(t)) << TAG_SHIFT) | pl };

@@ -720,7 +720,7 @@ inline fn execFiberDispatch(
             const method = regRead(regs, base, instr.c);
             const desc = self.struct_types.getType(type_id) orelse
                 return self.fail(error.TypeError, "struct type not found", .{});
-            try desc.methods.put(self.atomName(name_atom), method);
+            try desc.methods.put(self.stringValue(name_atom), method);
             self.structCacheInvalidate(type_id);
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -772,7 +772,7 @@ inline fn execFiberDispatch(
         },
         .load_global => {
             const value = self.globals.get(instr.bx) orelse
-                return self.fail(error.UndefinedVariable, "undefined variable `{s}`", .{self.atomName(instr.bx)});
+                return self.fail(error.UndefinedVariable, "undefined variable `{s}`", .{self.stringValue(instr.bx)});
             regWrite(regs, base, instr.a, value);
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -783,7 +783,7 @@ inline fn execFiberDispatch(
                 return self.fail(
                     error.UndefinedVariable,
                     "undefined stdlib variable `{s}`",
-                    .{self.atomName(instr.bx)},
+                    .{self.stringValue(instr.bx)},
                 );
 
             regWrite(regs, base, instr.a, value);
@@ -1424,7 +1424,7 @@ noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instructi
         }
         break :blk null;
     } orelse {
-        const key_name = if (key.asAtom()) |atom| self.atomName(atom) else revo.std_lib.typeof(key, self);
+        const key_name = if (key.asAtom()) |atom| self.stringValue(atom) else revo.std_lib.typeof(key, self);
         try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{ key_name, revo.std_lib.typeof(object, self) });
         return error.NotAFunction;
     };
