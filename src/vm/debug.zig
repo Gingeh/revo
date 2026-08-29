@@ -312,7 +312,7 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
             }
             return fmt(buf, "r{d}, proto#{d}", .{ a, bx });
         },
-        .negate, .negate_int, .negate_float, .not => return fmt(buf, "r{d}, r{d}", .{ a, b }),
+        .negate, .negate_int, .not => return fmt(buf, "r{d}, r{d}", .{ a, b }),
         .tuple_new => return fmt(buf, "r{d}, r{d}, n={d}", .{ a, b, bx }),
         .tuple_get, .table_set, .table_get => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }),
         .table_new => return fmt(buf, "r{d}", .{a}),

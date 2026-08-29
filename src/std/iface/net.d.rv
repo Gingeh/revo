@@ -3,16 +3,16 @@
 !##
 
 #* connects to a remote host and port, returns a socket handle *#
-pub declare net.connect = fn(host: string, port: number) -> !table
+pub declare net.connect = fn(host: string, port: num) -> !table
 
 #* listens for incoming connections on the given port, returns server socket *#
-pub declare net.listen = fn(port: number, backlog: number?...) -> !table
+pub declare net.listen = fn(port: num, backlog: num?...) -> !table
 
 #* accepts an incoming client connection on a server socket *#
 pub declare socket.accept = fn(self: table) -> !table
 
 #* sends data over the socket, returns number of bytes sent *#
-pub declare socket.send = fn(self: table, data: string) -> !number
+pub declare socket.send = fn(self: table, data: string) -> !num
 
 #* receives data according to opts.mode (:read_some | :read_all | :read_line) *#
 pub declare socket.recv = fn(self: table, opts: table) -> !string

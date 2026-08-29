@@ -35,13 +35,13 @@ pub const impls: []const api.Impl = &.{
 // method
 //
 
-/// > string:with(idx: number, char: string|number) -> string
+/// > string:with(idx: num, char: string|num) -> string
 /// replaces character at index with given char or byte
 /// index is 0-based
 fn set(args: []const Data, vm: *VM) !HostResult {
     const str_handle = args[0].asString().?;
 
-    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.typeof(args[1], vm));
+    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "num", root.typeof(args[1], vm));
 
     const existing_str = vm.stringValue(str_handle);
     if (idx >= existing_str.len) return .{ .ok = revo.Data.new.core(.missing) };
@@ -68,18 +68,18 @@ fn set(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = result };
 }
 
-/// > string:len() -> number
+/// > string:len() -> num
 /// returns length of string
 fn len_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     return .{ .ok = Data.new.num(str.len) };
 }
 
-/// > string[idx: number] -> string
+/// > string[idx: num] -> string
 /// returns character at index as single-char string
 fn index_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
-    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.typeof(args[1], vm));
+    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "num", root.typeof(args[1], vm));
     if (idx >= str.len) return .okData(revo.Data.new.core(.missing));
     const result = try vm.ownDataStringNoDedup(str[idx .. idx + 1]);
     return .okData(result);
@@ -115,15 +115,15 @@ fn lower_f(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = result };
 }
 
-/// > string * n: number -> string
+/// > string * n: num -> string
 /// repeats string n times
 fn mul_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     const times = if (args[1].asNum()) |n|
-        root.numToInt(i64, n) orelse return .errType(1, "integer number", root.typeof(args[1], vm))
+        root.numToInt(i64, n) orelse return .errType(1, "integer num", root.typeof(args[1], vm))
     else
-        return .errType(1, "number", root.typeof(args[1], vm));
-    if (times < 0) return .errType(1, "positive number", root.typeof(args[1], vm));
+        return .errType(1, "num", root.typeof(args[1], vm));
+    if (times < 0) return .errType(1, "positive num", root.typeof(args[1], vm));
 
     const count: usize = @intCast(times);
     const buf = try vm.runtime.alloc.alloc(u8, str.len * count);
@@ -134,12 +134,12 @@ fn mul_f(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = result_str };
 }
 
-/// > string:sub(start: number, length: number) -> string
+/// > string:sub(start: num, length: num) -> string
 /// extracts substring from start with given length
 fn sub_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
-    const start = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "number", root.typeof(args[1], vm));
-    const length = if (args[2].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(2, "number", root.typeof(args[2], vm));
+    const start = if (args[1].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(1, "num", root.typeof(args[1], vm));
+    const length = if (args[2].asNum()) |n| @as(i64, @intFromFloat(n)) else return .errType(2, "num", root.typeof(args[2], vm));
 
     if (start < 0 or length < 0 or start >= str.len) {
         const empty = try vm.ownDataString("");
@@ -152,7 +152,7 @@ fn sub_f(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = result };
 }
 
-/// > string:find(needle: string) -> number|atom
+/// > string:find(needle: string) -> num|atom
 /// finds first occurrence of needle in string
 /// returns index or :missing if not found
 fn find_f(args: []const Data, vm: *VM) !HostResult {
@@ -253,7 +253,7 @@ fn to_table(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = Data.new.table(table_id) };
 }
 
-/// > string:ascii() -> number
+/// > string:ascii() -> num
 /// returns ASCII code of first character
 /// "a":ascii() => 97
 fn ascii_f(args: []const Data, vm: *VM) !HostResult {
@@ -305,7 +305,7 @@ fn contains(args: []const Data, vm: *VM) !HostResult {
     return .okBool(std.mem.find(u8, str, search) != null);
 }
 
-/// > string:index_of(substr: string) -> number | nil
+/// > string:index_of(substr: string) -> num | nil
 /// ret 0-based index of substring or nil
 fn index_of(args: []const Data, vm: *VM) !HostResult {
     const str_id = args[0].asString().?;

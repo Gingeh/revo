@@ -3,19 +3,19 @@
 !##
 
 #* Statically sets the seed used for generation of pseudo-random numbers. *#
-pub declare rng.set_seed = fn(seed: number)
+pub declare rng.set_seed = fn(seed: num)
 
 #* Reverts seed back to using the current time at the time of generation. *#
 pub declare rng.revert_seed = fn()
 
 #* Returns a random integer in the range [0, upper_bound] *#
-pub declare rng.rand = fn(upper_bound: number) -> number
+pub declare rng.rand = fn(upper_bound: num) -> num
 
 #* Returns a random integer in the range [lower_bound, upper_bound] *#
-pub declare rng.range = fn(lower_bound: number, upper_bound: number) -> number
+pub declare rng.range = fn(lower_bound: num, upper_bound: num) -> num
 
 #* Returns a random float in the range [0, 1] *#
-pub declare rng.rand_float = fn() -> number
+pub declare rng.rand_float = fn() -> num
 
 #* Returns a random element from a table (note: this function *ignores* key value pairs.) *#
 pub declare rng.choice = fn(input: table) -> any

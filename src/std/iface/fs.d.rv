@@ -21,7 +21,7 @@ pub declare fs.exists? = fn(path: string) -> !bool
 pub declare fs.remove = fn(path: string) -> !atom
 
 #* creates a directory, using default permissions when omitted *#
-pub declare fs.mkdir = fn(path: string, permissions: atom|number?...) -> !atom
+pub declare fs.mkdir = fn(path: string, permissions: atom|num?...) -> !atom
 
 #* renames a file or directory *#
 pub declare fs.rename = fn(old_path: string, new_path: string) -> !atom
@@ -33,13 +33,13 @@ pub declare file.read = fn(self: table) -> !string
 overwrites the file with the provided string
 optional permissions default to the platform file default
 *#
-pub declare file.write = fn(self: table, data: any, permissions: atom|number?...) -> !number
+pub declare file.write = fn(self: table, data: any, permissions: atom|num?...) -> !num
 
 #*
 appends data to the file, creating it if needed
 optional permissions default to the platform file default
 *#
-pub declare file.append = fn(self: table, data: any, permissions: atom|number?...) -> !number
+pub declare file.append = fn(self: table, data: any, permissions: atom|num?...) -> !num
 
 #* get file metadata as a table *#
 pub declare file.stat = fn(self: table) -> !table

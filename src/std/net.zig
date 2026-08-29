@@ -427,12 +427,12 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
     vm.unregisterFinalizer(socket_data.asTable().?);
 }
 
-/// > net:connect(host: string, port: number) -> socket
+/// > net:connect(host: string, port: num) -> socket
 /// connects to a remote host and port, returns a socket handle
 fn connect_fn(args: []const Data, vm: *VM) !HostResult {
     const host = vm.stringValue(args[0].asString().?);
     const port: u16 = root.numToInt(u16, args[1].asNum().?) orelse
-        return .errType(1, "port number 0..65535", root.typeof(args[1], vm));
+        return .errType(1, "port num 0..65535", root.typeof(args[1], vm));
 
     const host_to_use = if (std.mem.eql(u8, host, "localhost")) "127.0.0.1" else host;
     const addr = std.Io.net.IpAddress.parseIp4(host_to_use, port) catch |err| {
@@ -489,13 +489,13 @@ fn connect_fn(args: []const Data, vm: *VM) !HostResult {
     return try .Ok(vm, try wrapSocket(vm, entry_ptr, false));
 }
 
-/// > net:listen(port: number [, backlog: number]) -> socket
+/// > net:listen(port: num [, backlog: num]) -> socket
 /// listens for incoming connections on the given port, returns server socket
 fn listen_fn(args: []const Data, vm: *VM) !HostResult {
     const port: u16 = root.numToInt(u16, args[0].asNum().?) orelse
-        return .errType(0, "port number 0..65535", root.typeof(args[0], vm));
+        return .errType(0, "port num 0..65535", root.typeof(args[0], vm));
     const backlog: u31 = if (args.len > 1)
-        root.numToInt(u31, args[1].asNum().?) orelse return .errType(1, "backlog number", root.typeof(args[1], vm))
+        root.numToInt(u31, args[1].asNum().?) orelse return .errType(1, "backlog num", root.typeof(args[1], vm))
     else
         128;
 
@@ -594,8 +594,8 @@ fn accept_fn(args: []const Data, vm: *VM) !HostResult {
     return try .Ok(vm, try wrapSocket(vm, new_entry_ptr, false));
 }
 
-/// > socket:send(data: string) -> number
-/// sends data over the socket, returns number of bytes sent
+/// > socket:send(data: string) -> num
+/// sends data over the socket, returns num of bytes sent
 fn send_fn(args: []const Data, vm: *VM) !HostResult {
     if (builtin.target.os.tag == .windows or builtin.target.os.tag == .wasi) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);

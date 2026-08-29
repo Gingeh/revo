@@ -11,7 +11,7 @@ pub const impls: []const api.Impl = &.{
 
 // -- [impl] ------------------------------------------------------------------
 
-fn num(args: []const Data) f64 {
+fn number(args: []const Data) f64 {
     return args[0].asNum().?;
 }
 
@@ -21,31 +21,31 @@ fn call(args: []const Data, vm: *VM) !HostResult {
 }
 
 fn isNan(args: []const Data, _: *VM) !HostResult {
-    return .okBool(std.math.isNan(num(args)));
+    return .okBool(std.math.isNan(number(args)));
 }
 
 fn isFinite(args: []const Data, _: *VM) !HostResult {
-    return .okBool(std.math.isFinite(num(args)));
+    return .okBool(std.math.isFinite(number(args)));
 }
 
 fn isInf(args: []const Data, _: *VM) !HostResult {
-    return .okBool(std.math.isInf(num(args)));
+    return .okBool(std.math.isInf(number(args)));
 }
 
 fn floor(args: []const Data, _: *VM) !HostResult {
-    return .okData(Data.new.num(@floor(num(args))));
+    return .okData(Data.new.num(@floor(number(args))));
 }
 
 fn ceil(args: []const Data, _: *VM) !HostResult {
-    return .okData(Data.new.num(@ceil(num(args))));
+    return .okData(Data.new.num(@ceil(number(args))));
 }
 
 fn round(args: []const Data, _: *VM) !HostResult {
-    return .okData(Data.new.num(@round(num(args))));
+    return .okData(Data.new.num(@round(number(args))));
 }
 
 fn abs(args: []const Data, _: *VM) !HostResult {
-    return .okData(Data.new.num(@abs(num(args))));
+    return .okData(Data.new.num(@abs(number(args))));
 }
 
 test "number module and metatable" {

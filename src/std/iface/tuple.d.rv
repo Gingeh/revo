@@ -3,7 +3,7 @@
 !##
 
 #* returns length of tuple *#
-pub declare tuple.len = fn(self: tuple) -> number
+pub declare tuple.len = fn(self: tuple) -> num
 
 #* unwraps result tuple, panics if not :ok *#
 pub declare tuple.unwrap = fn(self: tuple) -> any
@@ -15,7 +15,7 @@ pub declare tuple.unwrap_err[T] = fn(self: (:err, T)) -> T
 pub declare tuple.add = fn(self: tuple, other: tuple) -> tuple
 
 #* repeats tuple n times *#
-pub declare tuple.mul = fn(self: tuple, n: number) -> tuple
+pub declare tuple.mul = fn(self: tuple, n: num) -> tuple
 
 #* returns element at index *#
 pub declare tuple:__index = fn(self: tuple, idx: any) -> any

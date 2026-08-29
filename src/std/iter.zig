@@ -54,18 +54,18 @@ pub fn to_iter(args: []const Data, vm: *VM) !HostResult {
 /// returns a lazy arithmetic sequence
 pub fn range_fn(args: []const Data, vm: *VM) !HostResult {
     const start: f64 = if (args.len == 1) 0 else blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
+        const n = args[0].asNum() orelse return .errType(0, "num", typeof(args[0], vm));
         break :blk n;
     };
     const end: f64 = if (args.len == 1) blk: {
-        const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
+        const n = args[0].asNum() orelse return .errType(0, "num", typeof(args[0], vm));
         break :blk n;
     } else blk: {
-        const n = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
+        const n = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
         break :blk n;
     };
     const step: f64 = if (args.len >= 3) blk: {
-        const n = args[2].asNum() orelse return .errType(2, "number", typeof(args[2], vm));
+        const n = args[2].asNum() orelse return .errType(2, "num", typeof(args[2], vm));
         break :blk n;
     } else 1;
     if (step == 0) return .errType(2, "non-zero step", "0");
@@ -97,7 +97,7 @@ fn boundedFn(comptime kind: Kind) root.HostFn {
         fn f(args: []const Data, vm: *VM) anyerror!HostResult {
             const up = (try wrapIterable(vm, args[0])) orelse
                 return .errType(0, "iterable", typeof(args[0], vm));
-            const n = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
+            const n = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
             const it_id = try makeIterator(vm, kind);
             try putState(vm, it_id, .up, up);
             try putState(vm, it_id, .n, Data.new.num(n));
@@ -148,7 +148,7 @@ pub fn collect_fn(args: []const Data, vm: *VM) !HostResult {
 }
 
 /// > collect_string(iterable: any) -> string
-/// collects string/number elements from an iterable into a string
+/// collects string/num elements from an iterable into a string
 pub fn collect_string_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
@@ -163,7 +163,7 @@ pub fn collect_string_fn(args: []const Data, vm: *VM) !HostResult {
         } else if (v.asNum()) |n| {
             try buf.append(vm.runtime.alloc, @as(u8, @intFromFloat(std.math.clamp(@round(n), 0, 255))));
         } else {
-            return .errType(0, "string or number", typeof(v, vm));
+            return .errType(0, "string or num", typeof(v, vm));
         }
     }
     return .{ .ok = try vm.adoptDataString(try buf.toOwnedSlice(vm.runtime.alloc)) };
@@ -268,8 +268,8 @@ pub fn any_fn(args: []const Data, vm: *VM) !HostResult {
     return .okData(Data.new.boolean(false));
 }
 
-/// > count(collection: any, pred: function) -> number
-/// returns the number of elements, or of those where pred is truthy
+/// > count(collection: any, pred: function) -> num
+/// returns the num of elements, or of those where pred is truthy
 pub fn count_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len < 1 or args.len > 2) return .errArity(args.len, 1);
     const st_id = toState(vm, args[0]) catch
@@ -284,7 +284,7 @@ pub fn count_fn(args: []const Data, vm: *VM) !HostResult {
     return .okData(Data.new.num(n));
 }
 
-/// > sum(collection: any) -> number
+/// > sum(collection: any) -> num
 /// sums numeric elements, skipping non-numbers
 pub fn sum_fn(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .errArity(args.len, 1);

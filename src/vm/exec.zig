@@ -470,14 +470,6 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        .negate_float => {
-            const v = regRead(regs, base, instr.b);
-            if (debug_assert_types) std.debug.assert(v.isNumber());
-            regWrite(regs, base, instr.a, Data.new.num(-@as(f64, @bitCast(v.bits))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         inline .add_int, .sub_int, .mul_int => |op| {
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
@@ -499,33 +491,6 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        .div_float => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            if (@as(f64, @bitCast(rhs.bits)) == 0) return self.evalFailure(error.DivisionByZero);
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) / @as(f64, @bitCast(rhs.bits))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .div_floor_float => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const rn: f64 = @bitCast(rhs.bits);
-            if (rn == 0) return self.evalFailure(error.DivisionByZero);
-            regWrite(regs, base, instr.a, Data.new.num(@floor(@as(f64, @bitCast(lhs.bits)) / rn)));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         .pow => {
             if (try execPow(self, regs, base, instr)) |failure| return failure;
 
@@ -534,12 +499,6 @@ inline fn execFiberDispatch(
         },
         .pow_int => {
             if (try execPowInt(self, regs, base, instr)) |failure| return failure;
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .pow_float => {
-            if (try execPowFloat(self, regs, base, instr)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;

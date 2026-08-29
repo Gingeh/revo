@@ -9,7 +9,7 @@ pub declare input = fn(opts: table?...) -> !string
 pub declare cwd = fn() -> string
 
 #* exists the program with a status *#
-pub declare exit = fn(status: number) -> never
+pub declare exit = fn(status: num) -> never
 
 #* runs a subprocess and returns (stdout, stderr) *#
 pub declare system = fn(args: table) -> !(string, string)

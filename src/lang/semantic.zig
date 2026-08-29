@@ -426,7 +426,7 @@ const SemanticChecker = struct {
         }
         // method lookup for string, tuple, and table
         const target: ?revo.std_lib.TypeSpec = switch (object_type) {
-            .int, .float => .number,
+            .number => .number,
             .string => .string,
             .tuple => .tuple,
             .table => .table,
@@ -691,7 +691,7 @@ const SemanticChecker = struct {
                 const iter_type = try self.analyzeNode(v.iter);
                 try self.pushScope();
                 const param_type: types_mod.TypeInfo = if (v.iter.expr == .range_literal)
-                    .int
+                    .number
                 else if (iter_type == .string)
                     .string
                 else
@@ -1144,8 +1144,7 @@ const SemanticChecker = struct {
     }
 
     fn numberAccepts(expected: types_mod.TypeInfo, actual: types_mod.TypeInfo) bool {
-        // `number` (mapped to .int internally) covers both int and float
-        if (expected == .int and actual == .float) return true;
+        if (expected == .number and actual == .number) return true;
         return types_mod.canCoerce(actual, expected);
     }
 

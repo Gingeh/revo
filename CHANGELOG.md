@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** c api values use nanbox: `RevoData` is a single u64 now, boxed payloads are intern ids instead of pointers
 - **Breaking:** stdlib `read()` renamed to `input()`, and only reads stdin lines. use `fs.open()?:read()` to read files
 - **Breaking:** `fmt` and string interpolation now only support `%v` (value, plain), `%?` (debug, quoted strings, multilined tables), `%p` (pretty, debug with colors)
+- **Breaking:** `int`/`float`/`number` now `num` across everywhere. opcodes are gone too
 - `Native` renamed to `Host` throughout the codebase
 - lsp: fn return type hints, nested document symbols, parameter hover and param types in hover signatures
 - semantic: top-level re-declarations shadow the module surface while fn-local bindings no longer leak into it; table methods written as `fn name(self)` inside a table literal get typed

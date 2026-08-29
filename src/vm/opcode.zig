@@ -31,7 +31,6 @@ pub const Opcode = enum(u8) {
     negate, // "R[a] <- -R[b]"
     // typed unary
     negate_int, // "R[a] <- -(int)R[b]"
-    negate_float, // "R[a] <- -(float)R[b]"
     // typed arith
     add_int, // "R[a] <- (int)R[b] + (int)R[c]"
     sub_int, // "R[a] <- (int)R[b] - (int)R[c]"
@@ -48,11 +47,8 @@ pub const Opcode = enum(u8) {
     sub_int_imm, // "R[a] <- (int)R[b] - bx"
     mul_int_imm, // "R[a] <- (int)R[b] * bx"
     band_int_imm, // "R[a] <- (int)R[b] & bx"
-    div_float, // "R[a] <- (float)R[b] / (float)R[c]"
-    div_floor_float, // "R[a] <- floor((float)R[b] / (float)R[c])"
     pow, // "R[a] <- R[b] ^ R[c] (int if both integral, else float)"
     pow_int, // "R[a] <- (int)R[b] ^ (int)R[c] (wraps; negative exp gives float)"
-    pow_float, // "R[a] <- (float)R[b] ^ (float)R[c]"
     /// "R[a] <- R[b] == R[c]"
     eq,
     neq, // "R[a] <- R[b] != R[c]"

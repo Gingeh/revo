@@ -72,14 +72,14 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "abs", .f = root.define(&.{.number}, makeUnary(MathOps.abs)) },
     .{ .name = "floor", .f = root.define(&.{.number}, makeUnary(MathOps.floor)) },
     .{ .name = "ceil", .f = root.define(&.{.number}, makeUnary(MathOps.ceil)) },
-    .{ .name = "sqrt", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.sqrt, Pred.nonNegative, "non-negative number")) },
+    .{ .name = "sqrt", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.sqrt, Pred.nonNegative, "non-negative num")) },
     .{ .name = "pow", .f = root.define(&.{ .number, .number }, makeBinary(MathOps.pow)) },
     .{ .name = "min", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.less)) },
     .{ .name = "max", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.greater)) },
     .{ .name = "sin", .f = root.define(&.{.number}, makeUnary(MathOps.sin)) },
     .{ .name = "cos", .f = root.define(&.{.number}, makeUnary(MathOps.cos)) },
     .{ .name = "tan", .f = root.define(&.{.number}, makeUnary(MathOps.tan)) },
-    .{ .name = "log", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.log, Pred.positive, "positive number")) },
+    .{ .name = "log", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.log, Pred.positive, "positive num")) },
     .{ .name = "exp", .f = root.define(&.{.number}, makeUnary(MathOps.exp)) },
 };
 

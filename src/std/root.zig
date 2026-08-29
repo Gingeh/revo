@@ -118,8 +118,6 @@ pub fn defineVariadic(
 pub const ResultTag = enum { ok, err };
 
 pub const TypeSpec = union(enum) {
-    integer,
-    float,
     number,
     string,
     atom,
@@ -132,7 +130,7 @@ pub const TypeSpec = union(enum) {
     pub fn matches(self: TypeSpec, data: Data) bool {
         return switch (self) {
             .any => true,
-            .number, .integer, .float => data.isNumber(),
+            .number => data.isNumber(),
             .bool => if (data.asAtom()) |a| isBoolAtom(a) else false,
             .string => data.isString(),
             .atom => data.isAtom(),
@@ -146,9 +144,9 @@ pub const TypeSpec = union(enum) {
 /// type name -> TypeSpec, for parsing sig heads (`tuple:len` -> .tuple)
 pub fn typeFromName(name: []const u8) ?TypeSpec {
     const tbl = std.StaticStringMap(TypeSpec).initComptime(.{
-        .{ "int", .integer },
-        .{ "float", .float },
         .{ "number", .number },
+        .{ "number", .number },
+        .{ "int", .number },
         .{ "string", .string },
         .{ "atom", .atom },
         .{ "function", .function },
@@ -169,8 +167,8 @@ fn isBoolAtom(atom: mem.AtomID) bool {
     return atom == true_id or atom == false_id;
 }
 
-/// converts a number to an integer of type T; null when the value is not a
-/// finite integral number representable in T
+/// converts a num to an integer of type T; null when the value is not a
+/// finite integral num representable in T
 pub const numToInt = revo.vm.memory.numToInt;
 
 pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !HostResult {
@@ -400,7 +398,7 @@ pub fn debug_(args: []const Data, vm: *VM) !HostResult {
     return .okData(Data.new.table(out_id));
 }
 
-/// > len(arg0: any) -> number|nil
+/// > len(arg0: any) -> num|nil
 /// returns length of string or table
 /// for strings: byte length, for tables: array + map parts
 /// uses __len metamethod if available
@@ -439,7 +437,7 @@ pub fn typeof(d: Data, vm: *VM) []const u8 {
 
 /// > typeof(arg0: any) -> atom|type
 /// returns type of arg0 as atom
-/// possible values: nil, number, string, atom, function, table, tuple,
+/// possible values: nil, num, string, atom, function, table, tuple,
 /// type, foreign; struct values return the struct type itself, which is callable
 pub fn typeof_(args: []const Data, vm: *VM) !HostResult {
     if (args[0].asStructVal()) |instance_id| {
@@ -501,7 +499,7 @@ fn as_stack_index(value: Data) ?usize {
     return revo.asIndex(num) catch null;
 }
 
-/// > chan(capacity?: number) -> tuple
+/// > chan(capacity?: num) -> tuple
 /// creates a new channel with optional buffer size
 ///     chan()        # unbuffered
 ///     chan(5)       # buffer of 5
@@ -565,7 +563,7 @@ pub fn number_(args: []const Data, vm: *VM) !HostResult {
         const parsed = try std.fmt.parseFloat(f64, vm.stringValue(id));
         return .Ok(vm, Data.new.num(parsed));
     }
-    return .errType(0, "number, string", typeof(args[0], vm));
+    return .errType(0, "num, string", typeof(args[0], vm));
 }
 
 /// > expect(what: any) -> !what
@@ -866,7 +864,7 @@ pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) HostResult {
     return .{ .ok = result };
 }
 
-/// > sleep(ms: number) -> parked
+/// > sleep(ms: num) -> parked
 /// sleeps current fiber for given milliseconds
 /// parks fiber instead of blocking
 pub fn sleep(args: []const Data, vm: *VM) !HostResult {
@@ -968,22 +966,22 @@ pub fn typeUtils(vm: *VM) !void {
         try vm.stdlib_globals.put(atom, val);
     }
     const is_number = struct {
-        fn num(args: []const Data, _: *VM) !HostResult {
+        fn number(args: []const Data, _: *VM) !HostResult {
             for (args) |arg| {
                 if (!arg.isNumber()) return .okBool(false);
             }
             return .okBool(true);
         }
-    }.num;
+    }.number;
     const id = try vm.functions.create(.{ .host = define(&[_]TypeSpec{.any}, is_number) });
-    const atom = try vm.internAtom("number?");
+    const atom = try vm.internAtom("num?");
     const val = Data.new.function(id);
     try vm.globals.put(atom, val);
     try vm.stdlib_globals.put(atom, val);
 }
 
 test "type predicates" {
-    try testing.topTrue("number?(42)");
+    try testing.topTrue("num?(42)");
     try testing.topTrue("string?(\"hello\")");
     try testing.topTrue("table?({})");
     try testing.topTrue("atom?(:ok)");

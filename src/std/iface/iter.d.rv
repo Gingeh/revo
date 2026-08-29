@@ -25,7 +25,7 @@ generates a lazy arithmetic sequence
    range(0, 10, 2)    # 0, 2, 4, 6, 8
    range(5, 0, -1)    # 5, 4, 3, 2, 1
 *#
-pub declare iter.range = fn(end: number, rest: number...) -> function
+pub declare iter.range = fn(end: num, rest: num...) -> function
 
 #*
 returns a lazy iterator that transforms each element
@@ -45,13 +45,13 @@ pub declare iter.filter = fn(collection: any, fn: function) -> function
 returns a lazy iterator of the first n elements
    iter.collect(iter.take((1, 2, 3, 4), 2))
 *#
-pub declare iter.take = fn(collection: any, n: number) -> function
+pub declare iter.take = fn(collection: any, n: num) -> function
 
 #*
 returns a lazy iterator without the first n elements
    iter.collect(iter.drop((1, 2, 3, 4), 2))
 *#
-pub declare iter.drop = fn(collection: any, n: number) -> function
+pub declare iter.drop = fn(collection: any, n: num) -> function
 
 #*
 returns a lazy iterator of tuples, one element from each iterable
@@ -70,7 +70,7 @@ pub declare iter.enumerate = fn(collection: any) -> function
 returns a lazy iterator of n-element table chunks
    iter.collect(iter.chunk((1, 2, 3, 4, 5), 2))   # ({1, 2}, {3, 4}, {5})
 *#
-pub declare iter.chunk = fn(collection: any, n: number) -> function
+pub declare iter.chunk = fn(collection: any, n: num) -> function
 
 #*
 maps each element to an iterable and yields its elements lazily
@@ -85,7 +85,7 @@ collects all values from an iterable into a table
 pub declare iter.collect = fn(iterable: any) -> table
 
 #*
-collects string/number elements from an iterable into a string
+collects string/num elements from an iterable into a string
 numbers are clamped to byte values
    iter.collect_string(iter.filter("hello", fn(c) c != "l"))
 *#
@@ -135,11 +135,11 @@ returns the number of elements, or of those where pred is truthy
    iter.count((1, 2, 3, 4))
    iter.count((1, 2, 3, 4), fn(x) x > 2)
 *#
-pub declare iter.count = fn(collection: any, pred: function...) -> number
+pub declare iter.count = fn(collection: any, pred: function...) -> num
 
 #*
 sums numeric elements, skipping non-numbers
    iter.sum((1, 2, "x", 3))
 *#
-pub declare iter.sum = fn(collection: any) -> number
+pub declare iter.sum = fn(collection: any) -> num
 

@@ -122,35 +122,35 @@ pub fn compileRangeLoopBody(
         value_slot = try state.declareLocal(self, params[0].name, false);
         if (params[0].type_name) |tn| {
             const declared = try type_check.evalTypeExpr(self, tn);
-            if (declared != .int) {
+            if (declared != .number) {
                 const msg = try std.fmt.allocPrint(
                     self.alloc,
-                    "range loop variable must be int, got {s}",
+                    "range loop variable must be num, got {s}",
                     .{@tagName(declared)},
                 );
                 try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
                 return error.LoweringFailed;
             }
         }
-        state.setLocalType(self, value_slot.?, .int);
-        try state.setLocalTypeHint(self, params[0].name, .int);
+        state.setLocalType(self, value_slot.?, .number);
+        try state.setLocalTypeHint(self, params[0].name, .number);
     }
     if (params.len == 2 and !ast.isDiscardName(params[1].name)) {
         index_slot = try state.declareLocal(self, params[1].name, false);
         if (params[1].type_name) |tn| {
             const declared = try type_check.evalTypeExpr(self, tn);
-            if (declared != .int) {
+            if (declared != .number) {
                 const msg = try std.fmt.allocPrint(
                     self.alloc,
-                    "range loop variable must be int, got {s}",
+                    "range loop variable must be num, got {s}",
                     .{@tagName(declared)},
                 );
                 try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
                 return error.LoweringFailed;
             }
         }
-        state.setLocalType(self, index_slot.?, .int);
-        try state.setLocalTypeHint(self, params[1].name, .int);
+        state.setLocalType(self, index_slot.?, .number);
+        try state.setLocalTypeHint(self, params[1].name, .number);
     }
 
     // L_body: the top of the loop body, where range_loop backbranches
@@ -707,10 +707,10 @@ fn typeCompareHint(type_expr: *const Node, value_expr: *const Node) ?TypeHint {
 }
 
 fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
-    if (std.mem.eql(u8, name, "number")) return .{
+    if (std.mem.eql(u8, name, "num") or std.mem.eql(u8, name, "number")) return .{
         .@"union" = &.{
-            .{ .name = "", .types = &.{.int} },
-            .{ .name = "", .types = &.{.float} },
+            .{ .name = "", .types = &.{.number} },
+            .{ .name = "", .types = &.{.number} },
         },
     };
     return types_mod.type_name_map.get(name);
@@ -718,7 +718,7 @@ fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
 
 fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
     return switch (pattern.expr) {
-        .number => |n| if (n.is_float) .float else .int,
+        .number => .number,
         .string, .multiline_string => .string,
         .hash => |name| .{ .atom = name },
         .tuple_pattern => |items| blk: {

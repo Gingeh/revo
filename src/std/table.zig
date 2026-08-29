@@ -44,17 +44,17 @@ pub fn @"try"(args: []const Data, vm: *VM) !HostResult {
     };
 }
 
-/// > table:insert(pos: number, value: any) -> atom
+/// > table:insert(pos: num, value: any) -> atom
 /// inserts value at position, shifting elements right
 fn insert(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 3) return .errArity(args.len, 3);
     const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
-    const pos_num = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
-    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", typeof(args[1], vm));
+    const pos_num = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer num", typeof(args[1], vm));
     const val = args[2];
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
-    if (pos < 0) return .errType(1, "non-negative number", typeof(args[1], vm));
+    if (pos < 0) return .errType(1, "non-negative num", typeof(args[1], vm));
 
     const pos_usize: usize = @intCast(pos);
     if (pos_usize <= table.array.items.len) {
@@ -66,13 +66,13 @@ fn insert(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = revo.Data.new.core(.ok) };
 }
 
-/// > table:remove(pos: number) -> any
+/// > table:remove(pos: num) -> any
 /// removes element at position, returns removed value
 fn remove(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
-    const pos_num = args[1].asNum() orelse return .errType(1, "number", typeof(args[1], vm));
-    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer number", typeof(args[1], vm));
+    const pos_num = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer num", typeof(args[1], vm));
 
     const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
     if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", typeof(args[1], vm));
@@ -171,7 +171,7 @@ fn values(args: []const Data, vm: *VM) !HostResult {
     return .okData(Data.new.table(result_table));
 }
 
-/// > table:len() -> number
+/// > table:len() -> num
 /// returns total entry count (array + map)
 fn len(args: []const Data, vm: *VM) !HostResult {
     const table = try vm.tables.get(args[0].asTable().?);
@@ -389,7 +389,7 @@ fn flatten(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = Data.new.table(result_id) };
 }
 
-/// > table:index_of(value) -> number | nil
+/// > table:index_of(value) -> num | nil
 /// ret 0-based index of value or nil if not found
 fn index_of(args: []const Data, vm: *VM) !HostResult {
     const table_id = args[0].asTable().?;

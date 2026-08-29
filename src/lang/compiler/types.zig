@@ -9,8 +9,7 @@ pub const UnionVariant = struct {
 
 pub const TypeInfo = union(enum) {
     bool, // TODO: remove, make this be atom union of :true | :false
-    int, // TODO: unify int and float, make it only be number
-    float,
+    number,
     string,
     atom: []const u8,
     tuple: []const TypeInfo,
@@ -28,8 +27,7 @@ pub const TypeInfo = union(enum) {
     pub fn eql(self: TypeInfo, other: TypeInfo) bool {
         return switch (self) {
             .bool => other == .bool,
-            .int => other == .int,
-            .float => other == .float,
+            .number => other == .number,
             .string => other == .string,
             .atom => |a| if (other == .atom) std.mem.eql(u8, atomPayload(a), atomPayload(other.atom)) else false,
             .struct_type => |s| if (other == .struct_type) std.mem.eql(u8, s, other.struct_type) else false,
@@ -190,7 +188,7 @@ pub fn typeName(T: TypeInfo) []const u8 {
 /// deep-clone a TypeInfo into a new allocator
 pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
     return switch (ti) {
-        .bool, .int, .float, .string, .any, .never => ti,
+        .bool, .number, .string, .any, .never => ti,
         .atom => |s| TypeInfo{ .atom = try alloc.dupe(u8, s) },
         .struct_type => |s| TypeInfo{ .struct_type = try alloc.dupe(u8, s) },
         .type_var => |s| TypeInfo{ .type_var = try alloc.dupe(u8, s) },
@@ -242,7 +240,7 @@ pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
 /// free all heap-allocated memory owned by a TypeInfo
 pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
     switch (ti.*) {
-        .bool, .int, .float, .string, .any, .never => {},
+        .bool, .number, .string, .any, .never => {},
         .atom, .struct_type, .type_var => |s| if (s.len > 0) alloc.free(s),
         .tuple => |items| {
             for (items) |*item| deinitType(@constCast(item), alloc);
@@ -279,7 +277,7 @@ pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
 }
 
 pub fn isNumeric(T: TypeInfo) bool {
-    return T == .int or T == .float;
+    return T == .number;
 }
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
@@ -346,7 +344,7 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         }
         return true;
     }
-    return from == .int and to == .float;
+    return from == .number and to == .number;
 }
 
 fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
@@ -354,7 +352,7 @@ fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
     if (value != .tuple) return false;
     if (value.tuple.len != variant.types.len) return false;
     for (variant.types, value.tuple) |expected, actual| {
-        // numbers are a single runtime type,,,, int/float payloads are
+        // numbers are a single runtime type,,,, num/num payloads are
         // interchangeable inside a tagged union
         if (numericCompatible(actual, expected)) continue;
         if (!canCoerce(actual, expected)) return false;
@@ -373,26 +371,23 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     return true;
 }
 
-/// int and float are the same runtime type,,, inside a tagged union a
-/// payload annotated with either accepts the other
+/// num is a single runtime type
 fn numericCompatible(a: TypeInfo, b: TypeInfo) bool {
-    return (a == .int or a == .float) and (b == .int or b == .float);
+    return a == .number and b == .number;
 }
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
         .@"union", .concat => .any,
         .add, .sub, .mul, .div, .mod, .pow => blk: {
-            if (l == .int and r == .int) break :blk .int;
-            if (isNumeric(l) and isNumeric(r)) break :blk .float;
+            if (isNumeric(l) and isNumeric(r)) break :blk .number;
             break :blk .any;
         },
         .int_div => blk: {
-            if (l == .int and r == .int) break :blk .int;
-            if (isNumeric(l) and isNumeric(r)) break :blk .float;
+            if (isNumeric(l) and isNumeric(r)) break :blk .number;
             break :blk .any;
         },
-        .band, .bor, .bxor, .shl, .shr => if (l == .int and r == .int) .int else .any,
+        .band, .bor, .bxor, .shl, .shr => if (isNumeric(l) and isNumeric(r)) .number else .any,
         .eq, .neq, .lt, .gt, .lte, .gte => .bool,
     };
 }
@@ -517,10 +512,9 @@ pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.Ar
 }
 
 pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInfo).initComptime(.{
-    .{ "int", .int },
-    .{ "float", .float },
-    .{ "num", .int },
-    .{ "number", .int },
+    .{ "number", .number },
+    .{ "num", .number },
+    .{ "int", .number },
     .{ "string", .string },
     .{ "bool", .bool },
     .{ "any", .any },
@@ -542,7 +536,7 @@ pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
 
 pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
     return switch (node.expr) {
-        .number => |n| if (n.is_float) .float else .int,
+        .number => .number,
         .string, .multiline_string => .string,
         .hash => |name| .{ .atom = name },
         .nil => .{ .atom = ":nil" },
@@ -580,7 +574,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .comp_block => |cb| inferExprType(ctx, cb.expr),
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
-        .range_literal, .slice_literal => .int,
+        .range_literal, .slice_literal => .number,
         .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .any,
         .struct_def => |def| .{ .struct_type = def.name },
     };
@@ -617,7 +611,7 @@ fn inferTableType(ctx: anytype, entries: []const ast.TableEntry) TypeInfo {
         return .{ .table = .{ .key = null, .value = value_ptr } };
     }
 
-    if (saw_implicit_key) key_type = mergeInferredType(key_type, .int);
+    if (saw_implicit_key) key_type = mergeInferredType(key_type, .number);
     const key_ptr = ctx.alloc.create(TypeInfo) catch return .any;
     key_ptr.* = key_type;
     return .{ .table = .{ .key = key_ptr, .value = value_ptr } };
@@ -637,7 +631,7 @@ fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
     if (current == .any) return next;
     if (next == .any) return current;
     if (current.eql(next)) return current;
-    if ((current == .int and next == .float) or (current == .float and next == .int)) return .float;
+    if ((current == .number and next == .number) or (current == .number and next == .number)) return .number;
     return .any;
 }
 
@@ -755,56 +749,56 @@ pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anyty
 }
 
 test "types: TypeInfo equality" {
-    const int_type: revo.lang.compiler.types.TypeInfo = .int;
+    const int_type: revo.lang.compiler.types.TypeInfo = .number;
     const any_type: revo.lang.compiler.types.TypeInfo = .any;
 
-    try std.testing.expect(int_type.eql(.int));
-    try std.testing.expect(!int_type.eql(.float));
+    try std.testing.expect(int_type.eql(.number));
+    try std.testing.expect(!int_type.eql(.number));
     try std.testing.expect(any_type.eql(.any));
 }
 
 test "types: numeric type check" {
     const types = revo.lang.compiler.types;
-    try std.testing.expect(types.isNumeric(.int));
-    try std.testing.expect(types.isNumeric(.float));
+    try std.testing.expect(types.isNumeric(.number));
+    try std.testing.expect(types.isNumeric(.number));
     try std.testing.expect(!types.isNumeric(.string));
     try std.testing.expect(!types.isNumeric(.any));
 }
 
 test "types: type coercion" {
     const types = revo.lang.compiler.types;
-    try std.testing.expect(types.canCoerce(.int, .int));
-    try std.testing.expect(types.canCoerce(.int, .float));
-    try std.testing.expect(!types.canCoerce(.float, .int)); // float doesn't coerce to int
-    try std.testing.expect(types.canCoerce(.int, .any)); // anything to any
-    try std.testing.expect(types.canCoerce(.any, .int)); // any to anything (optimistic)
+    try std.testing.expect(types.canCoerce(.number, .number));
+    try std.testing.expect(types.canCoerce(.number, .number));
+    try std.testing.expect(!types.canCoerce(.number, .number)); // num doesn't coerce to num
+    try std.testing.expect(types.canCoerce(.number, .any)); // anything to any
+    try std.testing.expect(types.canCoerce(.any, .number)); // any to anything (optimistic)
 }
 
 test "types: binary op inference - arithmetic" {
     const types = revo.lang.compiler.types;
-    const add_int_int = types.inferBinaryOp(.add, .int, .int);
-    try std.testing.expect(add_int_int.eql(.int));
+    const add_int_int = types.inferBinaryOp(.add, .number, .number);
+    try std.testing.expect(add_int_int.eql(.number));
 
-    const add_float_float = types.inferBinaryOp(.add, .float, .float);
-    try std.testing.expect(add_float_float.eql(.float));
+    const add_float_float = types.inferBinaryOp(.add, .number, .number);
+    try std.testing.expect(add_float_float.eql(.number));
 
-    const add_int_float = types.inferBinaryOp(.add, .int, .float);
-    try std.testing.expect(add_int_float.eql(.float));
+    const add_int_float = types.inferBinaryOp(.add, .number, .number);
+    try std.testing.expect(add_int_float.eql(.number));
 }
 
 test "types: binary op inference - comparison" {
     const types = revo.lang.compiler.types;
-    const cmp = types.inferBinaryOp(.eq, .int, .int);
+    const cmp = types.inferBinaryOp(.eq, .number, .number);
     try std.testing.expect(cmp.eql(.bool));
 
-    const cmp2 = types.inferBinaryOp(.lt, .float, .float);
+    const cmp2 = types.inferBinaryOp(.lt, .number, .number);
     try std.testing.expect(cmp2.eql(.bool));
 }
 
 test "types: empty tuple/atom sentinel coercion" {
     const types = revo.lang.compiler.types;
     const empty_tuple: types.TypeInfo = .{ .tuple = &.{} };
-    const int_tuple: types.TypeInfo = .{ .tuple = &.{.int} };
+    const int_tuple: types.TypeInfo = .{ .tuple = &.{.number} };
     try std.testing.expect(types.canCoerce(empty_tuple, int_tuple));
     try std.testing.expect(types.canCoerce(int_tuple, empty_tuple));
     try std.testing.expect(types.canCoerce(empty_tuple, empty_tuple));
@@ -818,8 +812,8 @@ test "types: empty tuple/atom sentinel coercion" {
 
 test "types: unary op inference" {
     const types = revo.lang.compiler.types;
-    const negate_int = types.inferUnaryOp(.negate, .int);
-    try std.testing.expect(negate_int.eql(.int));
+    const negate_int = types.inferUnaryOp(.negate, .number);
+    try std.testing.expect(negate_int.eql(.number));
 
     const not_bool = types.inferUnaryOp(.not, .bool);
     try std.testing.expect(not_bool.eql(.bool));
@@ -832,76 +826,77 @@ const lang = revo.lang;
 const t = lang.testing;
 const VM = revo.VM;
 
-test "typed binding int accepts int literal" {
+test "typed binding num accepts int literal" {
     try t.topNumber(
-        \\ let x: int = 42
+        \\ let x: num = 42
         \\ x
     , 42);
 }
 
-test "typed binding float accepts float literal" {
+test "typed binding num accepts float literal" {
     try t.topNumber(
-        \\ let x: float = 3.14
+        \\ let x: num = 3.14
         \\ x
     , 3.14);
 }
 
-test "typed binding int accepts int literal coerced to float" {
+test "typed binding num accepts num literal coerced to num" {
     try t.topNumber(
-        \\ let x: float = 10
+        \\ let x: num = 10
         \\ x
     , 10.0);
 }
 
-test "typed binding rejects string for int" {
+test "typed binding rejects string for num" {
     try t.expectCompileError(
-        \\ let x: int = "hello"
+        \\ let x: num = "hello"
     , .ParseError);
 }
 
-test "typed binding rejects float for int" {
-    try t.expectCompileError(
-        \\ let x: int = 3.14
-    , .ParseError);
+test "typed binding num accepts float literal as num" {
+    try t.topNumber(
+        \\ let x: num = 3.14
+        \\ x
+    , 3.14);
 }
 
-test "typed binding rejects int for string" {
+test "typed binding rejects num for string" {
     try t.expectCompileError(
         \\ let x: string = 42
     , .ParseError);
 }
 
-test "typed binding table<int> accepts positional table literal" {
+test "typed binding table<num> accepts positional table literal" {
     try t.topNumber(
-        \\ let nums: table<int> = { 1, 2, 3 }
+        \\ let nums: table<num> = { 1, 2, 3 }
         \\ 1
     , 1);
 }
 
-test "typed binding table<string, int> accepts keyed table literal" {
+test "typed binding table<string, num> accepts keyed table literal" {
     try t.topNumber(
-        \\ let pairs: table<string, int> = { a = 1, b = 2 }
+        \\ let pairs: table<string, num> = { a = 1, b = 2 }
         \\ 1
     , 1);
 }
 
 test "typed function params accept correct types" {
     try t.topNumber(
-        \\ const add = fn(a: int, b: int) a + b
+        \\ const add = fn(a: num, b: num) a + b
         \\ add(3, 4)
     , 7);
 }
 
 test "typed function rejects wrong arg type" {
     try t.expectCompileError(
-        \\ const add = fn(a: int, b: int) a + b
+        \\ const add = fn(a: num, b: num) a + b
         \\ add(3, "wrong")
     , .ParseError);
 }
 
 test "typed function rejects first arg wrong type" {
     try t.expectCompileError(
-        \\ const add = fn(a: int, b: int) a + b
+        \\ const add = fn(a: num, b: num) a + b
         \\ add("wrong", 4)
     , .ParseError);
 }
@@ -934,7 +929,7 @@ test "typed struct field access" {
         .text =
         \\ struct User {
         \\     name: string = "",
-        \\     age: number = 0,
+        \\     age: num = 0,
         \\ }
         \\ let u: User = User { name = "alice", age = 30 }
         \\ u.age
@@ -955,7 +950,7 @@ test "typed struct field assignment rejects wrong type" {
     try t.expectCompileError(
         \\ struct User {
         \\     name: string = "",
-        \\     age: int = 0,
+        \\     age: num = 0,
         \\ }
         \\ let u: User = User { name = "alice", age = 30 }
         \\ u.name = 42
@@ -966,7 +961,7 @@ test "typed struct field assignment accepts correct type" {
     try t.topNumber(
         \\ struct User {
         \\     name: string = "",
-        \\     age: number = 0,
+        \\     age: num = 0,
         \\ }
         \\ let u: User = User { name = "alice", age = 30 }
         \\ u.age = 42
@@ -974,14 +969,14 @@ test "typed struct field assignment accepts correct type" {
     , 42);
 }
 
-test "binary int + int emits add" {
+test "binary num + num emits add" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: int = 5
-        \\ let b: int = 3
+        \\ let a: num = 5
+        \\ let b: num = 3
         \\ a + b
         ,
     }, .{});
@@ -996,14 +991,14 @@ test "binary int + int emits add" {
     try std.testing.expect(saw_add);
 }
 
-test "binary float + float emits add" {
+test "binary float literal + float emits add" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: float = 1.5
-        \\ let b: float = 2.5
+        \\ let a: num = 1.5
+        \\ let b: num = 2.5
         \\ a + b
         ,
     }, .{});
@@ -1018,13 +1013,13 @@ test "binary float + float emits add" {
     try std.testing.expect(saw_add);
 }
 
-test "negate int emits negate_int" {
+test "negate num emits negate_int" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let x: int = 5
+        \\ let x: num = 5
         \\ let y = -x
         \\ y
         ,
@@ -1040,14 +1035,14 @@ test "negate int emits negate_int" {
     try std.testing.expect(saw_neg);
 }
 
-test "comparison int == int emits eq_int" {
+test "comparison num == num emits eq_int" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: int = 5
-        \\ let b: int = 5
+        \\ let a: num = 5
+        \\ let b: num = 5
         \\ a == b
         ,
     }, .{});
@@ -1074,14 +1069,14 @@ test "untyped code still works" {
     , "hello");
 }
 
-test "mixed int and float falls back to generic add" {
+test "mixed num and num falls back to generic add" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: int = 5
-        \\ let b: float = 2.5
+        \\ let a: num = 5
+        \\ let b: num = 2.5
         \\ a + b
         ,
     }, .{});
@@ -1098,8 +1093,8 @@ test "mixed int and float falls back to generic add" {
 
 test "nested function with typed params" {
     try t.topNumber(
-        \\ const outer = fn(x: int) do
-        \\     const inner = fn(y: int) y * 2
+        \\ const outer = fn(x: num) do
+        \\     const inner = fn(y: num) y * 2
         \\     inner(x) + 1
         \\ end
         \\ outer(5)
@@ -1108,7 +1103,7 @@ test "nested function with typed params" {
 
 test "function call with multiple typed params" {
     try t.topNumber(
-        \\ const calc = fn(a: int, b: float, c: int) do
+        \\ const calc = fn(a: num, b: num, c: num) do
         \\     a + b + c
         \\ end
         \\ calc(1, 2.5, 3)
@@ -1117,7 +1112,7 @@ test "function call with multiple typed params" {
 
 test "return type validation accepts correct type" {
     try t.topNumber(
-        \\ const get_num = fn() -> int do
+        \\ const get_num = fn() -> num do
         \\     return 42
         \\ end
         \\ get_num()
@@ -1126,7 +1121,7 @@ test "return type validation accepts correct type" {
 
 test "atoms<->any relationship" {
     try t.topNumber(
-        \\ const get_num = fn() -> int do
+        \\ const get_num = fn() -> num do
         \\     return 42
         \\ end
         \\ get_num()
@@ -1136,9 +1131,9 @@ test "atoms<->any relationship" {
 //
 // typed const bindings
 //
-test "typed const binding int" {
+test "typed const binding num int" {
     try t.topNumber(
-        \\ const x: int = 42
+        \\ const x: num = 42
         \\ x
     , 42);
 }
@@ -1150,32 +1145,32 @@ test "typed const binding string" {
     , "hello");
 }
 
-test "typed const binding float" {
+test "typed const binding num float" {
     try t.topNumber(
-        \\ const x: float = 3.14
+        \\ const x: num = 3.14
         \\ x
     , 3.14);
 }
 
 test "typed const binding rejects wrong type" {
     try t.expectCompileError(
-        \\ const x: int = "hello"
+        \\ const x: num = "hello"
     , .ParseError);
 }
 
 //
 // typed global bindings
 //
-test "typed global binding int" {
+test "typed global binding num int" {
     try t.topNumber(
-        \\ global x: int = 42
+        \\ global x: num = 42
         \\ x
     , 42);
 }
 
-test "typed global binding float" {
+test "typed global binding num float" {
     try t.topNumber(
-        \\ global x: float = 1.5
+        \\ global x: num = 1.5
         \\ x
     , 1.5);
 }
@@ -1185,7 +1180,7 @@ test "typed global binding float" {
 //
 test "type alias used in function param" {
     try t.topNumber(
-        \\ type MyInt = int
+        \\ type MyInt = num
         \\ const double = fn(x: MyInt) -> MyInt x * 2
         \\ double(21)
     , 42);
@@ -1199,25 +1194,25 @@ test "type alias used in binding" {
     , "alice");
 }
 
-test "type alias int | float accepts int" {
+test "type alias num accepts num" {
     try t.topNumber(
-        \\ type Num = int | float
-        \\ const add = fn(a: Num, b: Num) -> float a + b
+        \\ type Num = num
+        \\ const add = fn(a: Num, b: Num) -> num a + b
         \\ add(3, 4)
     , 7);
 }
 
-test "type alias int | float accepts float" {
+test "type alias num accepts float literal" {
     try t.topNumber(
-        \\ type Num = int | float
-        \\ const add = fn(a: Num, b: Num) -> float a + b
+        \\ type Num = num
+        \\ const add = fn(a: Num, b: Num) -> num a + b
         \\ add(3.5, 4.2)
     , 7.7);
 }
 
 test "type alias rejects type not in union" {
     try t.expectCompileError(
-        \\ type MyInt = int
+        \\ type MyInt = num
         \\ const x: MyInt = "string"
     , .ParseError);
 }
@@ -1248,15 +1243,15 @@ test "named union variant err result" {
 //
 test "return type mismatch detects wrong explicit return" {
     try t.expectCompileError(
-        \\ fn get() -> int do
+        \\ fn get() -> num do
         \\     return "hello"
         \\ end
     , .ParseError);
 }
 
-test "coercion in return type int to float" {
+test "coercion in return type num to num" {
     try t.topNumber(
-        \\ fn get() -> float do
+        \\ fn get() -> num do
         \\     return 42
         \\ end
         \\ get()
@@ -1265,7 +1260,7 @@ test "coercion in return type int to float" {
 
 test "explicit return matches return type" {
     try t.topNumber(
-        \\ fn get() -> int do
+        \\ fn get() -> num do
         \\     return 99
         \\ end
         \\ get()
@@ -1275,9 +1270,9 @@ test "explicit return matches return type" {
 //
 // if/else branch type unification
 //
-test "if/else typed branches unify to number" {
+test "if/else typed branches unify to num" {
     try t.topNumber(
-        \\ let x: int = 5
+        \\ let x: num = 5
         \\ let y = if x > 0 10 else 20
         \\ y
     , 10);
@@ -1285,7 +1280,7 @@ test "if/else typed branches unify to number" {
 
 test "if/else typed branches unify to string" {
     try t.topString(
-        \\ let x: int = 0
+        \\ let x: num = 0
         \\ let y = if x > 0 "pos" else "non-pos"
         \\ y
     , "non-pos");
@@ -1424,7 +1419,7 @@ test "tuple slice empty result" {
 //
 test "struct field access returns correct type" {
     try t.topNumber(
-        \\ struct User { name: string = "", age: int = 0 }
+        \\ struct User { name: string = "", age: num = 0 }
         \\ let u = User { name = "alice", age = 30 }
         \\ u.age + 12
     , 42);
@@ -1433,7 +1428,7 @@ test "struct field access returns correct type" {
 //
 // any type accepts everything
 //
-test "any typed param accepts int" {
+test "any typed param accepts num" {
     try t.topNumber(
         \\ const id = fn(x: any) x
         \\ id(42)
@@ -1468,7 +1463,7 @@ test "any typed binding accepts anything" {
 //
 test "block type propagates last expression type" {
     try t.topNumber(
-        \\ let x: int = do
+        \\ let x: num = do
         \\     let a = 1
         \\     let b = 2
         \\     a + b
@@ -1479,7 +1474,7 @@ test "block type propagates last expression type" {
 
 test "block type error on type mismatch" {
     try t.expectCompileError(
-        \\ let x: int = do
+        \\ let x: num = do
         \\     "hello"
         \\ end
     , .ParseError);
@@ -1494,9 +1489,9 @@ test "chained typed math emits add and mul" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: int = 1
-        \\ let b: int = 2
-        \\ let c: int = 3
+        \\ let a: num = 1
+        \\ let b: num = 2
+        \\ let c: num = 3
         \\ a + b * c
         ,
     }, .{});
@@ -1554,20 +1549,20 @@ test "typed binding with void returns nil" {
 
 test "global typed binding rejects type mismatch" {
     try t.expectCompileError(
-        \\ const x: int = "hello"
+        \\ const x: num = "hello"
     , .ParseError);
 }
 
 test "global typed binding accepts matching type" {
     try t.topNumber(
-        \\ const x: int = 42
+        \\ const x: num = 42
         \\ x
     , 42);
 }
 
 test "typed assignment rejects type mismatch" {
     try t.expectCompileError(
-        \\ let x: int = 5
+        \\ let x: num = 5
         \\ x = "hello"
     , .ParseError);
 }
@@ -1605,7 +1600,7 @@ test "not operator on bool stays bool" {
 
 test "implicit return validates block-local variable type" {
     try t.expectCompileError(
-        \\ fn f() -> int do
+        \\ fn f() -> num do
         \\   let x = "hello"
         \\   x
         \\ end
@@ -1623,7 +1618,7 @@ test "loop expression infers correct return type" {
 test "upvalue assignment respects type annotation" {
     try t.expectCompileError(
         \\ const outer = fn() do
-        \\     let x: int = 5
+        \\     let x: num = 5
         \\     const inner = fn() do x = "hello" end
         \\ end
     , .ParseError);
@@ -1631,7 +1626,7 @@ test "upvalue assignment respects type annotation" {
 
 test "dynamic callee validates argument types" {
     try t.expectCompileError(
-        \\ const f: function = fn(x: int) x
+        \\ const f: function = fn(x: num) x
         \\ f("hello")
     , .ParseError);
 }
@@ -1642,9 +1637,9 @@ test "tuple pattern binding respects type annotation" {
     , .ParseError);
 }
 
-test "for loop expression produces int type" {
+test "for loop expression produces num type" {
     try t.topNumber(
-        \\ fn f() -> int do
+        \\ fn f() -> num do
         \\   for i in 0..5 do i end
         \\ end
         \\ f()
@@ -1654,8 +1649,8 @@ test "for loop expression produces int type" {
 test "type alias gets unaliased" {
     try t.topTrue(
         \\ type Als =
-        \\       (:aa, int)
-        \\     | (:bb, float)
+        \\       (:aa, num)
+        \\     | (:bb, num)
         \\ 
         \\ let x: Als = (:aa, 55)
         \\ let y: Als = (:bb, 100.1)
@@ -1666,14 +1661,14 @@ test "type alias gets unaliased" {
 
 test "tuple type annotation" {
     try t.topTrue(
-        \\ let x: (:aa, int) | (:bb, float) = (:aa, 55)
-        \\ let y: (:aa, int) | (:bb, float) = (:bb, 100.1)
+        \\ let x: (:aa, num) | (:bb, num) = (:aa, 55)
+        \\ let y: (:aa, num) | (:bb, num) = (:bb, 100.1)
         \\ 
         \\ x[1] + y[1] == 155.1
     );
 }
 
-test "comp block infers int from literal" {
+test "comp block infers num from literal" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1696,20 +1691,20 @@ test "comp block infers int from literal" {
 
 test "never collapses in if and orelse inference" {
     // `panic` is `never`: a branch that diverges contributes no type
-    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferIfType(.never, .{ .int = {} }));
-    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferIfType(.{ .int = {} }, .never));
+    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferIfType(.never, .{ .number = {} }));
+    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferIfType(.{ .number = {} }, .never));
     try std.testing.expectEqual(TypeInfo{ .never = {} }, inferIfType(.never, .never));
-    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferOrelseType(.never, .{ .int = {} }));
-    try std.testing.expectEqual(TypeInfo{ .int = {} }, inferOrelseType(.{ .int = {} }, .never));
+    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferOrelseType(.never, .{ .number = {} }));
+    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferOrelseType(.{ .number = {} }, .never));
     // unknown left stays unknown: the value may be anything or diverge
     try std.testing.expectEqual(TypeInfo{ .any = {} }, inferOrelseType(.any, .never));
 }
 
 test "never arms don't poison match result type" {
-    // the panic arm is `never`: the match result is the `:ok` payload (int),
+    // the panic arm is `never`: the match result is the `:ok` payload (num),
     // so `?` on it is rejected as a non-result (it would pass as `.any`)
     try t.expectCompileError(
-        \\ type Res = (:ok, int) | (:err, string)
+        \\ type Res = (:ok, num) | (:err, string)
         \\ let x: Res = (:ok, 42)
         \\ let r = match x
         \\ | (:ok, v) => v
@@ -1719,13 +1714,13 @@ test "never arms don't poison match result type" {
 }
 
 test "match narrowing enables specialized add_int from union payload" {
-    // narrowing should make `v` int instead of any, so `v + 1` should emit add_int
+    // narrowing should make `v` num instead of any, so `v + 1` should emit add_int
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ type Res = (:ok, int) | (:err, string)
+        \\ type Res = (:ok, num) | (:err, string)
         \\ let x: Res = (:ok, 42)
         \\ match x
         \\ | (:ok, v) => v + 1
@@ -1751,7 +1746,7 @@ test "match narrowing works for call subjects" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ type Res = (:ok, int) | (:err, string)
+        \\ type Res = (:ok, num) | (:err, string)
         \\ fn g() -> Res do (:ok, 42) end
         \\ match g()
         \\ | (:ok, v) => v + 1
@@ -1775,7 +1770,7 @@ test "return type propagation: const binding with annotated fn" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ const add = fn(a: int, b: int) a + b
+        \\ const add = fn(a: num, b: num) a + b
         \\ let x = add(3, 4)
         \\ x + 1
         ,
@@ -1819,7 +1814,7 @@ test "annotated function return type propagates to caller via pointer" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ fn add(a: int, b: int) a + b
+        \\ fn add(a: num, b: num) a + b
         \\ let x = add(3, 4)
         \\ x + 1
         ,
@@ -1855,14 +1850,14 @@ test "types: type_var equality" {
     const c = TI{ .type_var = "U" };
     try std.testing.expect(a.eql(b));
     try std.testing.expect(!a.eql(c));
-    try std.testing.expect(!a.eql(.int));
+    try std.testing.expect(!a.eql(.number));
 }
 
 test "types: type_var coercion" {
     const types = revo.lang.compiler.types;
     const tv = types.TypeInfo{ .type_var = "T" };
-    try std.testing.expect(types.canCoerce(tv, .int));
-    try std.testing.expect(types.canCoerce(.int, tv));
+    try std.testing.expect(types.canCoerce(tv, .number));
+    try std.testing.expect(types.canCoerce(.number, tv));
     try std.testing.expect(types.canCoerce(tv, .any));
     try std.testing.expect(types.canCoerce(.any, tv));
     try std.testing.expect(types.canCoerce(tv, tv));
@@ -1873,10 +1868,10 @@ test "substituteTypeParams direct type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .int);
+    try subst.put("T", .number);
 
     const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .type_var = "T" }, subst);
-    try std.testing.expect(result.eql(.int));
+    try std.testing.expect(result.eql(.number));
 }
 
 test "substituteTypeParams unknown type var becomes any" {
@@ -1894,13 +1889,13 @@ test "substituteTypeParams tuple with type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .int);
+    try subst.put("T", .number);
 
     const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, .string } };
     const result = try types.substituteTypeParams(alloc, input, subst);
     try std.testing.expect(result == .tuple);
     try std.testing.expect(result.tuple.len == 2);
-    try std.testing.expect(result.tuple[0].eql(.int));
+    try std.testing.expect(result.tuple[0].eql(.number));
     try std.testing.expect(result.tuple[1].eql(.string));
     alloc.free(result.tuple);
 }
@@ -1910,14 +1905,14 @@ test "substituteTypeParams multiple type vars" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .int);
+    try subst.put("T", .number);
     try subst.put("U", .string);
 
     const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, types.TypeInfo{ .type_var = "U" } } };
     const result = try types.substituteTypeParams(alloc, input, subst);
     try std.testing.expect(result == .tuple);
     try std.testing.expect(result.tuple.len == 2);
-    try std.testing.expect(result.tuple[0].eql(.int));
+    try std.testing.expect(result.tuple[0].eql(.number));
     try std.testing.expect(result.tuple[1].eql(.string));
     alloc.free(result.tuple);
 }
@@ -1927,7 +1922,7 @@ test "substituteTypeParams function sig with type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .int);
+    try subst.put("T", .number);
 
     const sig = try alloc.create(types.FunctionSignature);
     sig.* = .{
@@ -1939,8 +1934,8 @@ test "substituteTypeParams function sig with type var" {
     const result = try types.substituteTypeParams(alloc, input, subst);
     try std.testing.expect(result == .function);
     try std.testing.expect(result.function.params.len == 1);
-    try std.testing.expect(result.function.params[0].eql(.int));
-    try std.testing.expect(result.function.return_type.eql(.int));
+    try std.testing.expect(result.function.params[0].eql(.number));
+    try std.testing.expect(result.function.return_type.eql(.number));
     alloc.destroy(sig);
     alloc.free(result.function.params);
     alloc.destroy(result.function);
@@ -2051,17 +2046,17 @@ test "generics repeated type param works" {
     try std.testing.expect(saw_add_int);
 }
 
-test "explicit call-site type args make[int]() resolves return type" {
+test "explicit call-site type args make[num]() resolves return type" {
     try t.topNumber(
         \\ fn make[T]() -> T 5
-        \\ make[int]()
+        \\ make[num]()
     , 5);
 }
 
-test "explicit call-site type args id[int](42) resolves return type" {
+test "explicit call-site type args id[num](42) resolves return type" {
     try t.topNumber(
         \\ fn id[T](x: T) -> T x
-        \\ id[int](42)
+        \\ id[num](42)
     , 42);
 }
 
@@ -2095,21 +2090,21 @@ test "stdlib sigs: global return types reach the compiler" {
     // against .any now errors before codegen
     try t.expectCompileError(
         \\ let x = cwd()
-        \\ let n: int = x
+        \\ let n: num = x
     , .ParseError);
     try t.expectCompileError(
         \\ let x = read({delimiter = :eof})
-        \\ let n: int = x?
+        \\ let n: num = x?
     , .ParseError);
 }
 
 test "stdlib sigs source fn shadows stdlib global" {
     try t.topNumber(
-        \\ const cwd = fn(x: int) x + 1
+        \\ const cwd = fn(x: num) x + 1
         \\ cwd(41)
     , 42);
     try t.expectCompileError(
-        \\ const cwd = fn(x: int) x + 1
+        \\ const cwd = fn(x: num) x + 1
         \\ cwd("nope")
     , .ParseError);
 }
@@ -2215,7 +2210,7 @@ test "error-union sugar and the literal form are the same union" {
 
 test "declare typed const is usable in type positions" {
     try t.topNumber(
-        \\ declare MAX_ITEMS = number
+        \\ declare MAX_ITEMS = num
         \\ const x: MAX_ITEMS = 5
         \\ x
     , 5);
@@ -2223,7 +2218,7 @@ test "declare typed const is usable in type positions" {
 
 test "declare fn calls typecheck and run into undefined variable" {
     try t.expectRuntimeError(
-        \\ declare lamp = fn(volume: number, label: string) -> bool
+        \\ declare lamp = fn(volume: num, label: string) -> bool
         \\ lamp(1, "x")
     , .UndefinedVariable);
 }
@@ -2234,7 +2229,7 @@ test "declare fn return type reaches the compiler" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ declare add = fn(a: number, b: number) -> number
+        \\ declare add = fn(a: num, b: num) -> num
         \\ add(1, 2) + 1
         ,
     }, .{});
@@ -2251,15 +2246,15 @@ test "declare fn return type reaches the compiler" {
 
 test "declare rejects duplicate names" {
     try t.expectCompileError(
-        \\ declare MAX_ITEMS = number
-        \\ declare MAX_ITEMS = number
+        \\ declare MAX_ITEMS = num
+        \\ declare MAX_ITEMS = num
     , .ParseError);
 }
 
 test "declare rejects non-top-level placement" {
     try t.expectCompileError(
         \\ fn f() do
-        \\     declare y = number
+        \\     declare y = num
         \\ end
     , .ParseError);
 }
@@ -2269,7 +2264,7 @@ test ".d.rv import typechecks calls and never executes the file" {
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "audio.d.rv",
-        .data = "pub declare ring = fn(volume: number, label: string) -> bool\nundefined_poison()\n",
+        .data = "pub declare ring = fn(volume: num, label: string) -> bool\nundefined_poison()\n",
     });
     const module_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
     defer std.testing.allocator.free(module_dir);

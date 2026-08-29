@@ -383,7 +383,7 @@ pub const Compiler = struct {
         var result_reg: Register = 0;
 
         switch (op) {
-            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .div_float, .div_floor_float, .pow, .pow_int, .pow_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
+            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .pow, .pow_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
                 std.debug.assert(d >= 2);
                 result_reg = try toRegister(d - 2);
                 d -= 1;
@@ -391,7 +391,7 @@ pub const Compiler = struct {
                 const lhs = try self.pop();
                 _ = try self.record(op, &.{ .{ .inst = lhs }, .{ .inst = rhs } }, true, result_reg, 0);
             },
-            .negate, .not, .negate_int, .negate_float => {
+            .negate, .not, .negate_int => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 const opnd = try self.pop();
@@ -611,14 +611,7 @@ pub const Compiler = struct {
             .unary => |u| switch (u.op) {
                 .negate => {
                     try self.compile(u.expr, true);
-                    const op_type = type_check.inferExprType(self, u.expr);
-                    const specialized: Opcode = if (op_type == .int)
-                        .negate_int
-                    else if (op_type == .float)
-                        .negate_float
-                    else
-                        .negate;
-                    try self.emit(specialized, 0);
+                    try self.emit(.negate, 0);
                 },
                 .not => {
                     try self.compile(u.expr, true);
@@ -664,24 +657,22 @@ pub const Compiler = struct {
                 const left_type = type_check.inferExprType(self, b.left);
                 const right_type = type_check.inferExprType(self, b.right);
 
-                const both_numeric = (left_type == .int or left_type == .float) and
-                    (right_type == .int or right_type == .float);
-                const any_float = left_type == .float or right_type == .float;
+                const both_numeric = left_type == .number and right_type == .number;
 
                 const specialized_op: Opcode = if (both_numeric)
                     switch (b.op) {
-                        .add => if (any_float) .add else .add_int,
-                        .sub => if (any_float) .sub else .sub_int,
-                        .mul => if (any_float) .mul else .mul_int,
-                        .div => .div_float,
-                        .int_div => if (any_float) .div_floor_float else .div_int,
-                        .mod => if (any_float) .mod else .mod_int,
-                        .pow => if (any_float) .pow_float else .pow_int,
-                        .band => if (any_float) .band else .band_int,
-                        .bor => if (any_float) .bor else .bor_int,
-                        .bxor => if (any_float) .bxor else .bxor_int,
-                        .shl => if (any_float) .shl else .shl_int,
-                        .shr => if (any_float) .shr else .shr_int,
+                        .add => .add,
+                        .sub => .sub,
+                        .mul => .mul,
+                        .div => .div,
+                        .int_div => .int_div,
+                        .mod => .mod,
+                        .pow => .pow,
+                        .band => .band,
+                        .bor => .bor,
+                        .bxor => .bxor,
+                        .shl => .shl,
+                        .shr => .shr,
                         .concat => .concat,
                         .eq => .eq_int,
                         .neq => .neq_int,
@@ -700,7 +691,7 @@ pub const Compiler = struct {
                 // skipping its materialization (and a dispatch at runtime).
                 // when both operands are literals, keep the two-register form
                 // so the constant fold pass still collapses them at compile time
-                if (both_numeric and !any_float and immInt(b.left) == null) {
+                if (both_numeric and immInt(b.left) == null) {
                     if (immOpFor(b.op)) |op_imm| {
                         if (immInt(b.right)) |k| {
                             try self.compile(b.left, true);

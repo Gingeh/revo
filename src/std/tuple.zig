@@ -15,7 +15,7 @@ fn len(args: []const Data, vm: *VM) !HostResult {
 
 fn index(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
+    const n = args[1].asNum() orelse return .errType(1, "num", root.typeof(args[1], vm));
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
     if (idx >= t.items.len) return .okData(revo.Data.new.core(.missing));
@@ -36,9 +36,9 @@ fn add(args: []const Data, vm: *VM) !HostResult {
 
 fn mul(args: []const Data, vm: *VM) !HostResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "number", root.typeof(args[1], vm));
-    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer number", root.typeof(args[1], vm));
-    if (times < 0) return .errType(1, "non-negative number", "negative number");
+    const n = args[1].asNum() orelse return .errType(1, "num", root.typeof(args[1], vm));
+    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer num", root.typeof(args[1], vm));
+    if (times < 0) return .errType(1, "non-negative num", "negative num");
     const tuple = try vm.tuples.get(tuple_id);
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, tuple.items.len * @as(usize, @intCast(times)));
     defer items.deinit(vm.runtime.alloc);

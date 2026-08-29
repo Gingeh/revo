@@ -3,17 +3,17 @@
 !##
 
 #* returns current wall-clock time in milliseconds *#
-pub declare time.now = fn() -> number
+pub declare time.now = fn() -> num
 
 #* returns current wall-clock time in nanoseconds since the first call *#
-pub declare time.now_ns = fn() -> number
+pub declare time.now_ns = fn() -> num
 
 #* returns monotonic clock in milliseconds *#
-pub declare time.monotonic = fn() -> number
+pub declare time.monotonic = fn() -> num
 
 #* returns monotonic clock in nanoseconds since the first call *#
-pub declare time.monotonic_ns = fn() -> number
+pub declare time.monotonic_ns = fn() -> num
 
 #* parks current fiber for given milliseconds *#
-pub declare time.sleep = fn(ms: number) -> parked
+pub declare time.sleep = fn(ms: num) -> parked
 

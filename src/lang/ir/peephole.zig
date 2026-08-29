@@ -70,7 +70,7 @@ pub fn peepholeIr(self: *Compiler) !void {
             .store_local, .bind_local => eliminateSelfLoad(i, insts, live, is_target),
             .table_set_atom, .struct_set_offset => eliminateFieldRefetch(i, insts, live, is_target),
             .table_get_atom, .struct_get_offset => reuseObjectLoad(i, insts, live, is_target),
-            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_int, .sub_int, .mul_int, .mod_int, .div_int, .div_float, .div_floor_float, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
+            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_int, .sub_int, .mul_int, .mod_int, .div_int, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
             .jump => {
                 if (inst.op_arg == i + 1) live[i] = false;
             },
@@ -619,7 +619,7 @@ fn commutative(op: Opcode) bool {
 fn identityWith(op: Opcode, c: i64) bool {
     return switch (op) {
         .add, .add_int, .add_int_imm, .sub, .sub_int, .sub_int_imm, .bor_int, .bxor_int, .shl_int, .shr_int => c == 0,
-        .mul, .mul_int, .mul_int_imm, .div, .div_int, .div_float, .div_floor_float, .int_div => c == 1,
+        .mul, .mul_int, .mul_int_imm, .div, .div_int, .int_div => c == 1,
         else => false,
     };
 }

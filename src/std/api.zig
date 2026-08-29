@@ -600,7 +600,7 @@ pub fn specFromFn(
     };
 }
 
-/// type expr back to the compact sig text: `number|atom`, `table?`,
+/// type expr back to the compact sig text: `num|atom`, `table?`,
 /// `(:err, T)`, `!table`. `?`-suffixed idents come back from the parser as
 /// a 2-union ending in `:nil` and are re-rendered with the `?` for docgen
 fn renderType(alloc: std.mem.Allocator, out: *std.ArrayList(u8), te: *const ast.TypeExpr) !void {
@@ -804,7 +804,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     const src =
         \\# random comment is skipped
         \\#* single-line doc *#
-        \\pub declare iter.range = fn(bound: number, rest: number...) -> function
+        \\pub declare iter.range = fn(bound: num, rest: num...) -> function
         \\
         \\#*
         \\finds first occurrence
@@ -818,7 +818,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
         \\fizz(1) => 2
         \\```
         \\*#
-        \\pub declare number.__call = fn(value: any) -> number
+        \\pub declare num.__call = fn(value: any) -> num
         \\
         \\#* generic suffix *#
         \\pub declare tuple.unwrap_err[T] = fn(self: (:err, T)) -> T
@@ -835,12 +835,12 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
 
     const range = specs[0];
     try testing.expectEqualStrings("range", range.name);
-    try testing.expectEqualStrings("iter.range(bound: number, rest: number...) -> function", range.sig);
+    try testing.expectEqualStrings("iter.range(bound: num, rest: num...) -> function", range.sig);
     try testing.expectEqual(@as(usize, 2), range.params.len);
     try testing.expectEqualStrings("bound", range.params[0][0]);
     try testing.expectEqualStrings("number", range.params[0][1]);
     try testing.expectEqualStrings("rest", range.params[1][0]);
-    try testing.expectEqualStrings("number...", range.params[1][1]);
+    try testing.expectEqualStrings("num...", range.params[1][1]);
     try testing.expect(range.variadic);
     try testing.expectEqualStrings("single-line doc", range.doc);
 
@@ -850,7 +850,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     try testing.expectEqualStrings("finds first occurrence\nwith a second line", idx.doc);
 
     const call = specs[2];
-    try testing.expectEqualStrings("number.__call(value: any) -> number", call.sig);
+    try testing.expectEqualStrings("num.__call(value: any) -> num", call.sig);
     try testing.expectEqual(revo.core_atoms.__call, call.core_key.?);
     try testing.expectEqualStrings("converts value\n\nfizz(1) => 2", call.doc);
 

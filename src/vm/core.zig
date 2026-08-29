@@ -61,12 +61,10 @@ pub const core_atoms = enum(usize) {
     SendFailed,
     CannotRecvOnServer,
     RecvFailed,
-    int,
     bool,
-    integer,
-    float,
     number,
     num,
+    int,
     // iterator state keys
     kind,
     func,

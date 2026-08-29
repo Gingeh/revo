@@ -22,10 +22,10 @@ pub fn foldIr(self: *Compiler) !void {
 
 fn tryFoldInst(self: *Compiler, inst: *ir.IrInst) !bool {
     switch (inst.opcode) {
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .div_floor_float, .pow, .pow_int, .pow_float, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .pow, .pow_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
             return tryFoldBinary(self, inst);
         },
-        .negate, .not, .negate_int, .negate_float => {
+        .negate, .not, .negate_int => {
             return tryFoldUnary(self, inst);
         },
         else => return false,
@@ -102,11 +102,11 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             else => false,
         };
         const is_floor_div = switch (inst.opcode) {
-            .int_div, .div_int, .div_floor_float => true,
+            .int_div, .div_int => true,
             else => false,
         };
         const is_pow = switch (inst.opcode) {
-            .pow, .pow_int, .pow_float => true,
+            .pow, .pow_int => true,
             else => false,
         };
         if (is_int_only or is_floor_div or is_pow) {
@@ -145,11 +145,8 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
                 return true;
             }
             if (is_pow) {
-                // .pow_float always does a true float pow in the vm, so it
-                // never takes the integer fast path; .pow and .pow_int do
-                const is_float_pow = inst.opcode == .pow_float;
-                const li = if (is_float_pow) null else revo.memory.numToI64(ln);
-                const ri = if (is_float_pow) null else revo.memory.numToI64(rn);
+                const li = revo.memory.numToI64(ln);
+                const ri = revo.memory.numToI64(rn);
                 const raw: f64 = if (li != null and ri != null and ri.? >= 0) blk: {
                     break :blk @floatFromInt(revo.memory.ipow(li.?, ri.?));
                 } else std.math.pow(f64, ln, rn);
@@ -164,7 +161,7 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             .add, .add_int => ln + rn,
             .sub, .sub_int => ln - rn,
             .mul, .mul_int => ln * rn,
-            .div, .div_float => if (rn == 0.0) return false else ln / rn,
+            .div => if (rn == 0.0) return false else ln / rn,
             // mirror the vm's .mod: i32-range integers mod via i64 @mod
             // (sign of divisor), everything else fmod (sign of dividend)
             .mod => blk: {
@@ -234,7 +231,7 @@ fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {
     const n = val.asNum().?;
     const is_not = inst.opcode == .not;
     const raw: f64 = switch (inst.opcode) {
-        .negate, .negate_int, .negate_float => -n,
+        .negate, .negate_int => -n,
         .not => if (n == 0.0) 1.0 else 0.0,
         else => return false,
     };

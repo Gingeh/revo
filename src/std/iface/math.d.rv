@@ -3,38 +3,38 @@
 !##
 
 #* absolute value *#
-pub declare math.abs = fn(x: number) -> number
+pub declare math.abs = fn(x: num) -> num
 
 #* floor of x *#
-pub declare math.floor = fn(x: number) -> number
+pub declare math.floor = fn(x: num) -> num
 
 #* ceiling of x *#
-pub declare math.ceil = fn(x: number) -> number
+pub declare math.ceil = fn(x: num) -> num
 
 #* square root, errors if x is negative *#
-pub declare math.sqrt = fn(x: number) -> number
+pub declare math.sqrt = fn(x: num) -> num
 
 #* base raised to exponent *#
-pub declare math.pow = fn(base: number, exponent: number) -> number
+pub declare math.pow = fn(base: num, exponent: num) -> num
 
 #* min of all arguments, at least one required *#
-pub declare math.min = fn(first: number, args: number...) -> number
+pub declare math.min = fn(first: num, args: num...) -> num
 
 #* max of all arguments, at least one required *#
-pub declare math.max = fn(first: number, args: number...) -> number
+pub declare math.max = fn(first: num, args: num...) -> num
 
 #* sine of x (x in radians) *#
-pub declare math.sin = fn(x: number) -> number
+pub declare math.sin = fn(x: num) -> num
 
 #* cosine of x (x in radians) *#
-pub declare math.cos = fn(x: number) -> number
+pub declare math.cos = fn(x: num) -> num
 
 #* tangent of x (x in radians) *#
-pub declare math.tan = fn(x: number) -> number
+pub declare math.tan = fn(x: num) -> num
 
 #* natural logarithm, panics if x <= 0 *#
-pub declare math.log = fn(x: number) -> number
+pub declare math.log = fn(x: num) -> num
 
 #* e raised to x *#
-pub declare math.exp = fn(x: number) -> number
+pub declare math.exp = fn(x: num) -> num
 

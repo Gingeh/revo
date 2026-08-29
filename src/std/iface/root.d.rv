@@ -7,7 +7,7 @@ string literals also support `#{expr}`, `#{expr:?}`, and `#{expr:p}` interpolati
 pub declare fmt = fn(format: string, args: any...) -> string
 
 #* returns length of string or table *#
-pub declare len = fn(value: any) -> number
+pub declare len = fn(value: any) -> num
 
 #* prints one value and returns it back *#
 pub declare inspect = fn(value: any) -> any
@@ -21,7 +21,7 @@ pub declare set_metatable = fn(value: any, meta: table|:nil) -> any
 #* returns type of value as atom; struct values return the type itself, which is callable *#
 pub declare type = fn(value: any) -> atom|type
 
-#* returns type of value as atom: nil, number, string, atom, function, table, tuple, type, foreign; struct values return the struct type, which is callable *#
+#* returns type of value as atom: nil, num, string, atom, function, table, tuple, type, foreign; struct values return the struct type, which is callable *#
 pub declare typeof = fn(value: any) -> atom|type
 
 #* used in tests, returns value or :err *#
@@ -46,7 +46,7 @@ pub declare debug = fn() -> table
 pub declare unwrap = fn(result: tuple) -> any
 
 #* creates a new channel with optional buffer size *#
-pub declare chan = fn(capacity: number?...) -> tuple
+pub declare chan = fn(capacity: num?...) -> tuple
 
 #* sends value to channel *#
 pub declare send = fn(chan: tuple, value: any) -> :ok
@@ -55,7 +55,7 @@ pub declare send = fn(chan: tuple, value: any) -> :ok
 pub declare recv = fn(chan: tuple) -> any
 
 #* sleeps current fiber for given milliseconds *#
-pub declare sleep = fn(ms: number) -> parked
+pub declare sleep = fn(ms: num) -> parked
 
 #* panics with given message *#
 pub declare panic = fn(args: any...) -> never

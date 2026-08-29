@@ -18,13 +18,13 @@ pub declare table.set_meta = fn(self: table, meta: :nil|table) -> table
 pub declare table.unwrap = fn(self: table) -> any
 
 #* inserts value at position, shifting elements right *#
-pub declare table.insert = fn(self: table, pos: number, value: any) -> atom
+pub declare table.insert = fn(self: table, pos: num, value: any) -> atom
 
 #* inserts elements as last *#
 pub declare table.push = fn(self: table, values: any...) -> table
 
 #* removes element at position, returns removed value *#
-pub declare table.remove = fn(self: table, pos: number) -> any
+pub declare table.remove = fn(self: table, pos: num) -> any
 
 #* joins array elements with delimiter *#
 pub declare table.join = fn(self: table, delim: string) -> string
@@ -66,7 +66,7 @@ pub declare table.reverse = fn(self: table) -> table
 pub declare table.flatten = fn(self: table) -> table
 
 #* ret 0-based index of value or nil if not found *#
-pub declare table.index_of = fn(self: table, value: any) -> number|:nil
+pub declare table.index_of = fn(self: table, value: any) -> num|:nil
 
 #* checks if table contains value *#
 pub declare table.contains? = fn(self: table, value: any) -> bool
@@ -75,7 +75,7 @@ pub declare table.contains? = fn(self: table, value: any) -> bool
 pub declare table.unique = fn(self: table) -> table
 
 #* returns length of table array part *#
-pub declare table.len = fn(self: table) -> number
+pub declare table.len = fn(self: table) -> num
 
 #* merges two tables (union) *#
 pub declare table.add = fn(self: table, other: table) -> table
