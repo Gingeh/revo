@@ -184,6 +184,7 @@ pub const FnParam = struct {
     name_span: Span,
     type_name: ?*TypeExpr = null,
     optional: bool = false,
+    default_value: ?*Node = null,
     /// type position only: trailing `...` marks an open arg list
     variadic: bool = false,
 };

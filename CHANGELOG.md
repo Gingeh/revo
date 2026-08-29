@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `revo docs` now outputs markdown by default, `revo docs --html` outputs real html
   `--splice` flag needed to splice into piped markdown templates (was implied by `--html`)
 
-    ```revo
+    ```ruby
     #* this is a struct *#
     struct S {
       #* holds a number *#
@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `revo.dofile(path)`
 
     like `revo.eval` but reads the source from a file, relative paths resolve against the current module's directory like `import`, then cwd
+- default arguments
+    ```ruby
+        # vvvvv here
+    fn f(a = 2, ?b) do
+      (a, b)
+    end; hi()
+    # => (2, :none)
+    ```
+- semicolons act as boundaries
+    ```ruby
+    fn g() do
+      foo = bar
+      (10, 11, 12)
+    end; g()
+    # was: tried to call bar(10, 11, 12) and assign that to foo
+    # now: foo = bar; return (10, 11, 12)
+    ```
 - zig extensions, examples for zig extensions (`examples/zig`)
 - access tuple fields via dot: `(:a, :b).0 == :a`
 - `HACKING.md`

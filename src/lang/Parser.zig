@@ -194,6 +194,7 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
     var left = try self.parsePrefix();
 
     while (true) {
+        if (self.check(.semicolon)) break;
         if (self.stop_token) |stop| if (self.check(stop)) break;
         if (self.stop_on_stmt_start and self.isStatementBoundary(left)) break;
 
@@ -1518,6 +1519,7 @@ fn parseParamList(self: *Parser, terminator: TokenType) anyerror![]ast.FnParam {
         const name = try self.expectIdent();
         var param: ast.FnParam = .{ .name = name.text, .name_span = name.span(), .optional = optional };
         if (self.match(.colon)) param.type_name = try self.parseTypeExpr();
+        if (self.match(.assign)) param.default_value = try self.parseExpression(0);
         try params.append(self.alloc, param);
         if (!self.match(.comma)) break;
     }
@@ -1560,6 +1562,8 @@ fn parseExprListUntil(self: *Parser, terminator: TokenType) anyerror![]*Node {
     errdefer exprs.deinit(self.alloc);
 
     while (!self.check(terminator) and !self.check(.eof)) {
+        while (self.match(.semicolon)) {}
+        if (self.check(terminator) or self.check(.eof)) break;
         const start_pos = self.pos;
         const expr = self.parseStatementExpression(0) catch |err| switch (err) {
             error.UnexpectedToken, error.ExpectedIdentifier, error.ExpectedMatchArm => {

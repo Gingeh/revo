@@ -627,17 +627,39 @@ pub const Compiler = struct {
                 },
                 .spawn => switch (u.expr.expr) {
                     .call => |call| {
+                        var spawn_args: []const *Node = call.args;
+                        var spawn_expanded: ?[]const *Node = null;
+                        defer if (spawn_expanded) |ea| if (ea.ptr != call.args.ptr) self.alloc.free(ea);
+                        switch (call.callee.expr) {
+                            .ident => |nm| {
+                                const ra = try validateCallArgs(self, nm, call.args);
+                                if (ra.ptr != call.args.ptr) {
+                                    spawn_expanded = ra;
+                                    spawn_args = ra;
+                                }
+                            },
+                            .fn_expr => |fe| {
+                                const ea = try expandDirectFnArgs(self, fe.params, call.args);
+                                if (ea.ptr != call.args.ptr) {
+                                    spawn_expanded = ea;
+                                    spawn_args = ea;
+                                }
+                            },
+                            else => {},
+                        }
                         try self.compile(call.callee, true);
                         if (call.implicit_self) switch (call.callee.expr) {
                             .field => |field| try self.compile(field.object, true),
                             .index => |index| try self.compile(index.object, true),
                             else => {},
                         };
-                        for (call.args) |arg| try self.compile(arg, true);
+                        for (spawn_args) |arg| {
+                            if (arg.expr == .assign_expr) try self.compile(arg.expr.assign_expr.value, true) else try self.compile(arg, true);
+                        }
                         try self.emit(
                             .spawn,
                             @intCast(
-                                call.args.len + @intFromBool(call.implicit_self),
+                                spawn_args.len + @intFromBool(call.implicit_self),
                             ),
                         );
                     },
@@ -1001,17 +1023,24 @@ pub const Compiler = struct {
                 try self.emit(
                     .call,
                     @intCast(
-                        call.args.len + @intFromBool(call.implicit_self),
+                        args_to_compile.len + @intFromBool(call.implicit_self),
                     ),
                 );
             },
             .fn_expr => {
+                const params = call.callee.expr.fn_expr.params;
+                const expanded = try expandDirectFnArgs(self, params, call.args);
+                defer if (expanded.ptr != call.args.ptr) self.alloc.free(expanded);
                 try self.compile(call.callee, true);
-                for (call.args) |arg| try self.compile(arg, true);
+                for (expanded) |arg| {
+                    if (arg.expr == .assign_expr) {
+                        try self.compile(arg.expr.assign_expr.value, true);
+                    } else try self.compile(arg, true);
+                }
                 try self.emit(
                     .call,
                     @intCast(
-                        call.args.len + @intFromBool(call.implicit_self),
+                        expanded.len + @intFromBool(call.implicit_self),
                     ),
                 );
             },
@@ -1324,8 +1353,79 @@ pub const Compiler = struct {
                 else => |e| return e,
             };
         }
+        // insert missing optional/default args
+        if (reordered_args.len < sig.param_types.len) {
+            var full_args = try self.alloc.alloc(*Node, sig.param_types.len);
+            errdefer self.alloc.free(full_args);
+            for (reordered_args, 0..) |arg, idx| full_args[idx] = arg;
+            for (reordered_args.len..sig.param_types.len) |idx| {
+                if (sig.default_values[idx]) |def_node| {
+                    full_args[idx] = def_node;
+                } else {
+                    // bare `?a` without explicit default defaults to :none
+                    const span = if (reordered_args.len > 0) reordered_args[0].span else if (args.len > 0) args[0].span else ast.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
+                    const none_node = try self.alloc.create(ast.Node);
+                    none_node.* = .{ .span = span, .expr = .{ .hash = "none" } };
+                    full_args[idx] = none_node;
+                }
+            }
+            // type-check the inserted defaults
+            for (reordered_args.len..sig.param_types.len) |idx| {
+                const expected_type = sig.param_types[idx];
+                if (expected_type == .any or expected_type == .type_var) continue;
+                const actual_type = type_check.inferExprType(self, full_args[idx]);
+                type_check.checkType(expected_type, actual_type) catch |err| switch (err) {
+                    error.TypeError => {
+                        const expected_str = try expected_type.formatType(self.alloc);
+                        const actual_str = try actual_type.formatType(self.alloc);
+                        try self.appendFailureReport(.ParseError, &.{
+                            .{ .@"error" = try std.fmt.allocPrint(self.alloc, "default for `{s}` wants {s}, got {s}", .{ sig.param_names[idx], expected_str, actual_str }) },
+                        });
+                        had_error = true;
+                    },
+                    else => |e| return e,
+                };
+            }
+            if (had_error) return error.LoweringFailed;
+            // leak the original reordered slice if it was allocated
+            if (reordered_args.ptr != args.ptr) self.alloc.free(reordered_args);
+            return full_args;
+        }
         if (had_error) return error.LoweringFailed;
         return reordered_args;
+    }
+
+    fn expandDirectFnArgs(
+        self: *Compiler,
+        params: []const ast.FnParam,
+        args: []const *Node,
+    ) InternalLowerError![]const *Node {
+        if (args.len >= params.len) return args;
+        var required: usize = 0;
+        for (params) |p| {
+            if (!p.optional and p.default_value == null) required += 1;
+        }
+
+        if (args.len < required) return args;
+        var full = try self.alloc.alloc(*Node, params.len);
+        errdefer self.alloc.free(full);
+
+        for (args, 0..) |a, i| full[i] = a;
+        for (args.len..params.len) |i| {
+            if (params[i].default_value) |def| {
+                full[i] = def;
+            } else {
+                const span = if (args.len > 0)
+                    args[0].span
+                else
+                    ast.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
+
+                const n = try self.alloc.create(ast.Node);
+                n.* = .{ .span = span, .expr = .{ .hash = "none" } };
+                full[i] = n;
+            }
+        }
+        return full;
     }
 
     pub fn resolveTypedStructFieldOffset(
@@ -1541,6 +1641,17 @@ pub const Compiler = struct {
         };
 
         const sig = try state_mod.allocFnSig(self, params, return_type, type_params);
+        if (own_sig and self.functions.items.len >= 2) {
+            const parent = &self.functions.items[self.functions.items.len - 2];
+            if (parent.fn_signatures.get(name)) |old| {
+                self.alloc.free(old.param_types);
+                self.alloc.free(old.param_names);
+                if (old.default_values.len > 0) self.alloc.free(old.default_values);
+                self.alloc.destroy(old);
+                _ = parent.fn_signatures.remove(name);
+            }
+            parent.fn_signatures.put(name, sig) catch {};
+        }
 
         // set up params on the function state in the array
         const fn_state = &self.functions.items[self.functions.items.len - 1];
@@ -1578,12 +1689,13 @@ pub const Compiler = struct {
 
         var required_count: u8 = @intCast(params.len);
         for (params) |p| {
-            if (p.optional) required_count -= 1;
+            if (p.optional or p.default_value != null) required_count -= 1;
         }
         self.active_registers = params.len;
         self.max_registers = params.len;
         self.upvalue_cache.clearRetainingCapacity();
-        if (own_sig) try s.fn_signatures.put(name, sig);
+        // signature already placed in parent for caller validation
+        // dont need inner map entry (recursion finds parent)
 
         try self.compile(body, true);
         if (return_type) |rt| {

@@ -160,6 +160,7 @@ pub const FunctionSignature = struct {
     is_any_fn_sig: bool = false,
     required_count: usize = 0,
     type_params: []const []const u8 = &.{},
+    default_values: []const ?*ast.Node = &.{},
 };
 
 /// sentinel "any function" type,,, matches any callable value

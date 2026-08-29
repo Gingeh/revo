@@ -540,7 +540,7 @@ const SemanticChecker = struct {
         for (fn_expr.params) |p| {
             try param_names.append(self.alloc, p.name);
             try param_types.append(self.alloc, if (p.type_name) |tn| try type_parser.evalTypeExpr(self, tn) else .any);
-            if (!p.optional) required_count += 1;
+            if (!p.optional and p.default_value == null) required_count += 1;
         }
         const params_slice = try param_types.toOwnedSlice(self.alloc);
         const names_slice = try param_names.toOwnedSlice(self.alloc);

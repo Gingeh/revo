@@ -99,6 +99,7 @@ pub const TokenType = enum {
     dotdot,
     colon,
     comma,
+    semicolon,
     pipe,
     pipe_forward,
     huh,
@@ -120,7 +121,7 @@ pub const TokenType = enum {
             .string, .multiline_string, .backtick_string => .string,
             .hash => .enum_member,
             .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub, .kw_declare => .keyword,
-            .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
+            .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .semicolon, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
             .doc_comment => .comment,
             .ident, .eof => null,
@@ -341,7 +342,7 @@ pub fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
 fn next(self: *Lexer) !Token {
     while (!self.atEnd()) {
         const c = self.peek();
-        if (std.ascii.isWhitespace(c) or c == ';') {
+        if (std.ascii.isWhitespace(c)) {
             _ = self.advance();
             continue;
         }
@@ -436,6 +437,7 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.dotdot, start, self.pos, line, column)
         else
             self.makeToken(.dot, start, self.pos, line, column),
+        ';' => self.makeToken(.semicolon, start, self.pos, line, column),
         '?' => self.makeToken(.huh, start, self.pos, line, column),
         '~' => if (self.matchChar('='))
             self.makeToken(.concat_assign, start, self.pos, line, column)

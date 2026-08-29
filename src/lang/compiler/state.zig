@@ -52,6 +52,7 @@ pub const FunctionState = struct {
         required_count: usize,
         type_params: []const []const u8 = &.{},
         return_type: types.TypeInfo = .any,
+        default_values: []const ?*ast.Node = &.{},
     };
 
     pub fn init(alloc: std.mem.Allocator) !FunctionState {
@@ -176,6 +177,7 @@ pub fn declareLocal(self: *Compiler, name: []const u8, mutable: bool) !LocalSlot
     const local: LocalVar = .{ .name = name, .slot = slot, .mutable = mutable, .initialized = false };
     try state.locals.append(self.alloc, local);
     try state.all_locals.append(self.alloc, local);
+    state.name_cache.put(name, .{ .idx = state.locals.items.len - 1, .gen = state.cache_gen }) catch {};
     return slot;
 }
 
@@ -468,8 +470,12 @@ pub fn allocFnSig(
 
     var required_count: usize = params.len;
     for (params) |p| {
-        if (p.optional) required_count -= 1;
+        if (p.optional or p.default_value != null) required_count -= 1;
     }
+
+    var default_values = try std.ArrayList(?*ast.Node).initCapacity(self.alloc, params.len);
+    errdefer default_values.deinit(self.alloc);
+    for (params) |p| try default_values.append(self.alloc, p.default_value);
 
     sig.* = .{
         .param_names = try param_names.toOwnedSlice(self.alloc),
@@ -480,6 +486,7 @@ pub fn allocFnSig(
             type_parser.evalTypeExpr(self, rt) catch .any
         else
             .any,
+        .default_values = try default_values.toOwnedSlice(self.alloc),
     };
     return sig;
 }
@@ -493,7 +500,13 @@ pub fn declareFnSignature(
 ) !void {
     const state = currentFunctionState(self) orelse return;
     if (ast.isDiscardName(name)) return;
-    if (state.fn_signatures.get(name) != null) return;
+    if (state.fn_signatures.get(name)) |old| {
+        self.alloc.free(old.param_types);
+        self.alloc.free(old.param_names);
+        if (old.default_values.len > 0) self.alloc.free(old.default_values);
+        self.alloc.destroy(old);
+        _ = state.fn_signatures.remove(name);
+    }
     const sig = try allocFnSig(self, params, return_type, type_params);
     errdefer {
         self.alloc.free(sig.param_types);

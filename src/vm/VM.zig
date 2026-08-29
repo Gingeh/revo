@@ -1455,20 +1455,13 @@ fn callNonClosureFunction(
     }
 }
 
-fn fillOptionalSlots(regs: []Data, base: usize, argc: usize, total_arity: u8, register_count: u8) void {
-    if (argc >= total_arity and total_arity >= register_count) return;
-    if (argc < total_arity) {
-        @memset(
-            regs[base + argc .. base + total_arity],
-            revo.Data.new.core(.no),
-        );
-    }
-    if (total_arity < register_count) {
-        @memset(
-            regs[base + total_arity .. base + register_count],
-            revo.Data.new.core(.missing),
-        );
-    }
+// TODO: remove
+inline fn fillMissingSlots(regs: []Data, base: usize, total_arity: u8, register_count: u8) void {
+    if (total_arity >= register_count) return;
+    @memset(
+        regs[base + total_arity .. base + register_count],
+        revo.Data.new.core(.missing),
+    );
 }
 
 pub fn callRegister(
@@ -1548,10 +1541,9 @@ pub fn callRegister(
                             try ensureRegCapacity(fiber, self.runtime.alloc, tail_needed);
                             fiber.registers_len = tail_needed;
                         }
-                        fillOptionalSlots(
+                        fillMissingSlots(
                             fiber.registers,
                             tail_frame.base,
-                            argc,
                             closure.total_arity,
                             closure.register_count,
                         );
@@ -1570,10 +1562,9 @@ pub fn callRegister(
                     try ensureRegCapacity(fiber, self.runtime.alloc, call_needed);
                     fiber.registers_len = call_needed;
                 }
-                fillOptionalSlots(
+                fillMissingSlots(
                     fiber.registers,
                     new_base,
-                    argc,
                     closure.total_arity,
                     closure.register_count,
                 );
@@ -2058,14 +2049,6 @@ pub inline fn spawnRegister(
         else
             revo.Data.new.core(.missing);
     }
-
-    fillOptionalSlots(
-        child.registers,
-        0,
-        argc,
-        closure.total_arity,
-        closure.register_count,
-    );
 
     const child_closure_id = if (closure.sharable_upvalues)
         closure_id
