@@ -489,10 +489,8 @@ fn renderHtmlGroup(w: *Writer, title: []const u8, planned: []const Planned) !voi
     try w.print("<h3>{s}</h3>\n\n", .{title});
     try renderHtmlToc(w, planned);
     try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned, 0..) |p, i| {
-        try renderHtmlFn(w, p);
-        if (i + 1 < planned.len) try w.writeAll("<hr>\n\n");
-    }
+    for (planned) |p| try renderHtmlFn(w, p);
+
     try w.writeAll("</details>\n\n");
 }
 
@@ -509,10 +507,8 @@ fn renderHtmlSection(
 
     try renderHtmlToc(w, planned);
     try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned, 0..) |p, i| {
-        try renderHtmlFn(w, p);
-        if (i + 1 < planned.len) try w.writeAll("<hr>\n\n");
-    }
+    for (planned) |p| try renderHtmlFn(w, p);
+
     try w.writeAll("</details>\n\n");
 }
 
@@ -528,12 +524,12 @@ fn renderHtmlToc(w: *Writer, planned: []const Planned) !void {
 fn renderHtmlFn(w: *Writer, p: Planned) !void {
     const spec = p.spec;
 
-    try w.print("<h4 id=\"{s}\">{s}</h4>\n\n", .{ p.slug, spec.name });
+    // try w.print("<h4 id=\"{s}\">{s}</h4>\n\n", .{ p.slug, spec.name });
 
     if (spec.is_value) {
         try w.writeAll("<p>(value)</p>\n\n");
     } else {
-        try w.writeAll("<pre><code class=\"language-ruby\">");
+        try w.print("<pre><code class=\"signature\" id=\"{s}\">", .{spec.name});
         try writeHtmlEscaped(w, spec.sig);
         try w.writeAll("</code></pre>\n\n");
     }
@@ -594,7 +590,7 @@ fn renderHtmlDoc(w: *Writer, doc: []const u8) !void {
         }
         if (min_indent == std.math.maxInt(usize)) min_indent = 0;
 
-        try w.writeAll("<p>");
+        try w.writeAll("<p class=\"desc\">");
         var it = std.mem.splitScalar(u8, prose, '\n');
         var first = true;
         while (it.next()) |line| {

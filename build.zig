@@ -14,6 +14,8 @@ const release_targets: []const []const u8 = &.{
     // "x86_64-macos",
     "aarch64-macos",
     "x86_64-windows",
+    "wasm32-freestanding",
+    "wasm32-wasi",
     "wasm64-freestanding",
 };
 
@@ -108,21 +110,23 @@ pub fn build(b: *Build) !void {
     // TODO: nan-boxing stores pointer tags in the high bits of a 64-bit value
     // 32bit builds are unsupported until a good implementation of tagged data is made
     // (wasm32 is fine: 32-bit pointers fit below the tag region)
-    const is_freestanding = target.result.os.tag == .freestanding or
-        target.result.cpu.arch.isWasm();
+    const is_freestanding = target.result.os.tag == .freestanding;
+    const is_wasm = target.result.cpu.arch.isWasm();
 
     const optimize = b.standardOptimizeOption(.{});
 
     // botch: wasm64 has a codegen bug in Debug mode that causes "memory access out of
     // bounds" at runtime for some reason
     // force ReleaseSmall for ALL modules linked into the wasm binary, so the VM code gets the fix too
-    const effective_optimize = if (is_freestanding) .ReleaseSmall else optimize;
+    const effective_optimize = if (is_wasm) .ReleaseSmall else optimize;
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, zig_backend") orelse
-        // isocline needs libc, lsp is untested on freestanding
-        if (is_freestanding) "" else "isocline,lsp,regex,mimalloc";
+        // isocline needs libc and not wasm; wasi gets lsp but not isocline
+        if (is_freestanding) ""
+        else if (is_wasm) "lsp,regex,mimalloc"
+        else "isocline,lsp,regex,mimalloc";
 
     const test_filters = b.option(
         []const []const u8,
@@ -209,7 +213,7 @@ pub fn build(b: *Build) !void {
         } else &.{},
     });
     const exe_mod = b.createModule(.{
-        .root_source_file = b.path(if (is_freestanding) "src/main_wasm.zig" else "src/main.zig"),
+        .root_source_file = b.path(if (is_wasm) "src/main_wasm.zig" else "src/main.zig"),
         .target = target,
         .optimize = effective_optimize,
         .link_libc = !is_freestanding,
@@ -401,9 +405,9 @@ pub fn build(b: *Build) !void {
 
         for (release_targets, release_target_queries) |target_str, query| {
             const release_target = b.resolveTargetQuery(query);
-            const release_is_fs = release_target.result.os.tag == .freestanding or
-                release_target.result.cpu.arch == .wasm64;
-            const release_optimize: std.builtin.OptimizeMode = if (release_is_fs) .ReleaseSmall else .ReleaseFast;
+            const release_is_fs = release_target.result.os.tag == .freestanding;
+            const release_is_wasm = release_target.result.cpu.arch.isWasm();
+            const release_optimize: std.builtin.OptimizeMode = if (release_is_wasm) .ReleaseSmall else .ReleaseFast;
 
             const release_lsp_enabled = features.lsp and !release_is_fs;
             const release_isocline_enabled = features.isocline and !release_is_fs;
@@ -483,7 +487,7 @@ pub fn build(b: *Build) !void {
             });
 
             const release_mod = b.createModule(.{
-                .root_source_file = b.path(if (release_is_fs) "src/main_wasm.zig" else "src/main.zig"),
+                .root_source_file = b.path(if (release_is_wasm) "src/main_wasm.zig" else "src/main.zig"),
                 .target = release_target,
                 .optimize = release_optimize,
                 .link_libc = !release_is_fs,

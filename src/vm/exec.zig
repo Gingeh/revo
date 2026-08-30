@@ -34,8 +34,9 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
         const has_sleepers = self.sched.sleepers.items.len > 0;
         const has_io_waiters = self.sched.io_waiters.items.len > 0;
         const has_waiting = self.sched.waiting_cnt > 0;
+        const has_runnable = self.sched.ring_head != self.sched.ring_tail;
 
-        if (!has_sleepers and !has_waiting) {
+        if (!has_sleepers and !has_waiting and !has_runnable) {
             @branchHint(.unlikely);
             break;
         }

@@ -296,6 +296,30 @@ export fn revo_wasm_eval(source_ptr: [*]const u8, source_len: usize, out_ptr: [*
     }
 }
 
+export fn revo_wasm_check(source_ptr: [*]const u8, source_len: usize, out_ptr: [*]u8, out_cap: usize) usize {
+    wasm_last_call_ok = true;
+    const vm = global_vm orelse {
+        wasm_last_call_ok = false;
+        return 0;
+    };
+    defer vm.runtime.resetDiagArena();
+    const source = source_ptr[0..source_len];
+    const out = out_ptr[0..out_cap];
+    const build_result = revo.lang.build(vm, .{ .name = "(wasm)", .text = source }, .{}) catch {
+        wasm_last_call_ok = false;
+        return 0;
+    };
+    switch (build_result) {
+        .ok => |art| {
+            vm.runtime.alloc.free(art.instructions);
+            vm.runtime.alloc.free(art.spans);
+            wasm_last_call_ok = true;
+            return 0;
+        },
+        .err => |failure| return renderErrorToBuf(source, out, failure),
+    }
+}
+
 export fn revo_wasm_deinit() void {
     if (global_vm) |vm| {
         vm.deinit();

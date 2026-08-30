@@ -29,16 +29,22 @@
  */
 
 const OUT_SIZE = 65536
+const ENOSYS = 52
 
-/**
- * compiled module cache, keyed by url
- * @type {Map<string, WebAssembly.Module>}
- */
-const moduleCache = new Map()
+/** module-level cache of compiled wasm, keyed by url */
+const compiledModuleCache = new Map()
 
-/**
- * wasm runtime error (allocation, init failure, etc.)
- */
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '')
+
+function decodeUtf8(memory, ptr, len) {
+	return new TextDecoder().decode(new Uint8Array(memory.buffer, Number(ptr), Number(len)))
+}
+
+/** same as {@link decodeUtf8} but also strips ansi codes, for use with wasi output */
+function decodeWasiText(memory, ptr, len) {
+	return stripAnsi(decodeUtf8(memory, ptr, len))
+}
+
 export class RevoError extends Error {
 	/** @param {string} msg */
 	constructor(msg) {
@@ -62,10 +68,132 @@ export class RevoError extends Error {
  * @property {string}  value - formatted result or error text
  */
 
+/** fetches raw wasm bytes from a url, in the browser or in node */
+async function fetchWasmBytes(url) {
+	if (typeof fetch !== 'undefined') {
+		const resp = await fetch(url)
+		if (!resp.ok) throw new RevoError(`fetch failed: ${resp.status} ${resp.statusText}`)
+		return await resp.arrayBuffer()
+	}
+	const fs = await import('fs')
+	return fs.readFileSync(url).buffer
+}
+
+/** compiles a wasm module, reusing a cached compile for the same url */
+async function compileFromUrl(url) {
+	let mod = compiledModuleCache.get(url)
+	if (!mod) {
+		const bytes = await fetchWasmBytes(url)
+		mod = await WebAssembly.compile(bytes)
+		compiledModuleCache.set(url, mod)
+	}
+	return mod
+}
+
+/**
+ * minimal wasi_snapshot_preview1 implementation for environments without
+ * a real wasi shim
+ * only implements what revo actually needs; everything else reports ENOSYS
+ *
+ * @param {Revo} self - used for its _stdout/_stderr callbacks
+ * @param {() => WebAssembly.Memory | null} getMemory - lazily reads memory,
+ *   since it is not available until after instantiation
+ */
+function freestandingWasi(self, getMemory) {
+	const enosys = () => ENOSYS
+
+	const impl = {
+		fd_write(fd, iovsPtr, iovsLen, nWrittenPtr) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			const view = new DataView(memory.buffer)
+			let written = 0
+			for (let i = 0; i < Number(iovsLen); i++) {
+				const base = Number(iovsPtr) + i * 8
+				const ptr = view.getUint32(base, true)
+				const len = view.getUint32(base + 4, true)
+				written += len
+				const text = decodeWasiText(memory, ptr, len)
+				if (fd === 2) self._stderr(text)
+				else self._stdout(text)
+			}
+			view.setUint32(Number(nWrittenPtr), written, true)
+			return 0
+		},
+		random_get(ptr, len) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			crypto.getRandomValues(new Uint8Array(memory.buffer, Number(ptr), Number(len)))
+			return 0
+		},
+		clock_time_get(_clockId, _precision, ptr) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			new DataView(memory.buffer).setBigUint64(Number(ptr), BigInt(Date.now()) * 1000000n, true)
+			return 0
+		},
+		clock_res_get(_clockId, ptr) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			new DataView(memory.buffer).setBigUint64(Number(ptr), 1000000n, true)
+			return 0
+		},
+		args_sizes_get(countPtr, bufSizePtr) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			const view = new DataView(memory.buffer)
+			view.setUint32(Number(countPtr), 0, true)
+			view.setUint32(Number(bufSizePtr), 0, true)
+			return 0
+		},
+		args_get() { return 0 },
+		environ_sizes_get(countPtr, bufSizePtr) {
+			const memory = getMemory()
+			if (!memory) return ENOSYS
+			const view = new DataView(memory.buffer)
+			view.setUint32(Number(countPtr), 0, true)
+			view.setUint32(Number(bufSizePtr), 0, true)
+			return 0
+		},
+		environ_get() { return 0 },
+		proc_exit(code) { throw new RevoError(`proc_exit(${code})`) },
+	}
+
+	// any wasi import not listed above resolves to a stub that reports ENOSYS,
+	// instead of throwing "no such import" at instantiation time
+	return new Proxy(impl, { get: (target, prop) => (prop in target ? target[prop] : enosys) })
+}
+
+/**
+ * picks a real wasi shim when running in the browser, falling back to
+ * {@link freestandingWasi} everywhere else (or if the shim fails to load)
+ *
+ * @param {Revo} self
+ * @param {() => WebAssembly.Memory | null} getMemory
+ */
+async function resolveWasiImport(self, getMemory) {
+	if (typeof window !== 'undefined') {
+		try {
+			const { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } = await import('@bjorn3/browser_wasi_shim')
+			const fds = [
+				new OpenFile(new File([])),
+				ConsoleStdout.lineBuffered((line) => self._stdout(line)),
+				ConsoleStdout.lineBuffered((line) => self._stderr(line)),
+				new PreopenDirectory('/', []),
+			]
+			const wasi = new WASI([], [], fds)
+			return { wasi, imports: wasi.wasiImport }
+		} catch {
+			// fall through to the freestanding stub below
+		}
+	}
+	return { wasi: null, imports: freestandingWasi(self, getMemory) }
+}
+
 /**
  * a revo vm in its own wasm instance
  *
- * use {@link Revo.create} or {@link Revo.fromBuffer} -- don't call the constructor
+ * use {@link Revo.create} or {@link Revo.fromBuffer} - don't call the constructor
  */
 export class Revo {
 	/**
@@ -78,13 +206,8 @@ export class Revo {
 	 */
 	static async create(opts = {}) {
 		const wasmUrl = opts.wasmUrl || './revo.wasm'
-		const revo = new Revo(opts)
-		let mod = moduleCache.get(wasmUrl)
-		if (!mod) {
-			const bytes = await Revo._fetchWasm(wasmUrl)
-			mod = await WebAssembly.compile(bytes)
-			moduleCache.set(wasmUrl, mod)
-		}
+		const mod = await compileFromUrl(wasmUrl)
+		const revo = new this(opts)
 		await revo._instantiate(mod)
 		return revo
 	}
@@ -98,29 +221,9 @@ export class Revo {
 	 */
 	static async fromBuffer(buffer, opts = {}) {
 		const mod = await WebAssembly.compile(buffer)
-		const revo = new Revo(opts)
+		const revo = new this(opts)
 		await revo._instantiate(mod)
 		return revo
-	}
-
-	/**
-	 * fetch a wasm binary from a url
-	 *
-	 * works in browsers and node 18+ (global fetch);
-	 * older node falls back to fs.readFileSync
-	 *
-	 * @private
-	 * @param {string} url
-	 * @returns {Promise<ArrayBuffer>}
-	 */
-	static async _fetchWasm(url) {
-		if (typeof fetch !== 'undefined') {
-			const resp = await fetch(url)
-			if (!resp.ok) throw new RevoError(`fetch failed: ${resp.status} ${resp.statusText}`)
-			return await resp.arrayBuffer()
-		}
-		const fs = await import('fs')
-		return fs.readFileSync(url).buffer
 	}
 
 	/**
@@ -129,45 +232,108 @@ export class Revo {
 	 * @param {RevoOptions} opts
 	 */
 	constructor(opts = {}) {
-    /** @private */ this._instance = null
-    /** @private */ this._exports = null
-    /** @private */ this._memory = null
-    /** @private */ this._outSize = opts.outSize || OUT_SIZE
-    /** @private */ this._stdout = opts.stdout || (() => { })
-    /** @private */ this._stderr = opts.stderr || (() => { })
+		/** @private */ this._instance = null
+		/** @private */ this._exports = null
+		/** @private */ this._memory = null
+		/** @private */ this._outSize = opts.outSize || OUT_SIZE
+		/** @private */ this._stdout = opts.stdout || (() => { })
+		/** @private */ this._stderr = opts.stderr || (() => { })
 	}
 
 	/**
-	 * create env imports and finish instantiation
+	 * instantiate the module with plain env imports (js_write_stdout / stderr)
 	 *
-	 * env closures capture `wasmMemory` which is set right after
-	 * instantiation (wasm imports are resolved before we have the
-	 * instance's memory export)
+	 * the env closures capture `memory` by reference, which is only set once
+	 * instantiation finishes -- wasm imports have to be resolved before we
+	 * have the instance's memory export to read from
 	 *
 	 * @private
 	 * @param {WebAssembly.Module} mod
 	 */
 	async _instantiate(mod) {
-		let wasmMemory = null
-		const self = this
+		let memory = null
 		const env = {
-			js_write_stdout: (ptr, len) => {
-				self._stdout(
-					new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, Number(ptr), Number(len))),
-				)
-			},
-			js_write_stderr: (ptr, len) => {
-				self._stderr(
-					new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, Number(ptr), Number(len))),
-				)
-			},
+			js_write_stdout: (ptr, len) => this._stdout(decodeUtf8(memory, ptr, len)),
+			js_write_stderr: (ptr, len) => this._stderr(decodeUtf8(memory, ptr, len)),
 		}
+
 		const instance = await WebAssembly.instantiate(mod, { env })
-		wasmMemory = instance.exports.memory
-		this._memory = wasmMemory
+		memory = instance.exports.memory
+
+		this._memory = memory
 		this._instance = instance
 		this._exports = instance.exports
+
 		if (!this._exports.revo_wasm_init()) throw new RevoError('revo_wasm_init returned false')
+	}
+
+	/**
+	 * converts a plain JS number into whatever numeric type the wasm exports
+	 * expect for pointers/lengths. the base build is always wasm64, so it is
+	 * always BigInt; {@link WasiRevo} overrides this to autodetect wasm32.
+	 * @protected
+	 * @param {number} n
+	 */
+	_num(n) {
+		return BigInt(n)
+	}
+
+	/**
+	 * allocates `n` bytes in the vm and returns the pointer
+	 * @private
+	 */
+	_alloc(n) {
+		const ptr = this._exports.revo_wasm_alloc(this._num(n))
+		if (Number(ptr) === 0) throw new RevoError('allocation failed')
+		return ptr
+	}
+
+	/** @private */
+	_free(ptr, n) {
+		this._exports.revo_wasm_free(ptr, this._num(n))
+	}
+
+	/**
+	 * shared implementation behind {@link eval} and (on {@link WasiRevo})
+	 * `check`: writes `code` into vm memory, calls the given export, reads
+	 * the result back out, and frees both buffers
+	 *
+	 * @private
+	 * @param {string} exportName - e.g. 'revo_wasm_eval' or 'revo_wasm_check'
+	 * @param {string} code
+	 * @param {{ strip?: boolean }} [options] - strip ansi codes from the result
+	 * @returns {EvalResult}
+	 */
+	_run(exportName, code, { strip = false } = {}) {
+		if (!this._exports) throw new RevoError('revo instance is gone')
+		if (code.length === 0) return { ok: true, value: '' }
+
+		const memory = this._memory
+		const source = new TextEncoder().encode(code)
+
+		const srcPtr = this._alloc(source.length)
+		try {
+			new Uint8Array(memory.buffer).set(source, Number(srcPtr))
+
+			const outCap = this._outSize
+			const outPtr = this._alloc(outCap)
+			try {
+				const fn = this._exports[exportName]
+				const n = Number(fn(srcPtr, this._num(source.length), outPtr, this._num(outCap)))
+				const ok = this._exports.revo_wasm_ok()
+
+				let value = ''
+				if (n > 0) {
+					const raw = decodeUtf8(memory, outPtr, Math.min(n, outCap))
+					value = strip ? stripAnsi(raw) : raw
+				}
+				return { ok, value }
+			} finally {
+				this._free(outPtr, outCap)
+			}
+		} finally {
+			this._free(srcPtr, source.length)
+		}
 	}
 
 	/**
@@ -178,33 +344,7 @@ export class Revo {
 	 * @throws {RevoError} on internal failure (oom, destroyed instance)
 	 */
 	eval(code) {
-		if (!this._exports) throw new RevoError('revo instance is gone')
-		if (code.length === 0) return { ok: true, value: '' }
-
-		const e = this._exports
-		const mem = this._memory
-		const src8 = new TextEncoder().encode(code)
-
-		const sp = e.revo_wasm_alloc(BigInt(src8.length))
-		if (sp === 0n) throw new RevoError('source alloc failed')
-		try {
-			new Uint8Array(mem.buffer).set(src8, Number(sp))
-
-			const outCap = this._outSize
-			const op = e.revo_wasm_alloc(BigInt(outCap))
-			if (op === 0n) throw new RevoError('output alloc failed')
-			try {
-				const n = Number(e.revo_wasm_eval(sp, BigInt(src8.length), op, BigInt(outCap)))
-				const ok = e.revo_wasm_ok()
-				let value = ''
-				if (n > 0) value = new TextDecoder().decode(new Uint8Array(mem.buffer, Number(op), Math.min(n, outCap)))
-				return { ok, value }
-			} finally {
-				e.revo_wasm_free(op, BigInt(outCap))
-			}
-		} finally {
-			e.revo_wasm_free(sp, BigInt(src8.length))
-		}
+		return this._run('revo_wasm_eval', code)
 	}
 
 	/**
@@ -224,14 +364,20 @@ export class Revo {
 	 * raw wasm exports (alloc, free, ok, etc.)
 	 * @returns {WebAssembly.Exports | null}
 	 */
-	get raw() { return this._exports }
+	get raw() {
+		return this._exports
+	}
 
 	/**
 	 * tear down the wasm instance
 	 */
 	destroy() {
 		if (this._exports) {
-			try { this._exports.revo_wasm_deinit() } catch { /* ignore trap */ }
+			try {
+				this._exports.revo_wasm_deinit()
+			} catch {
+				// instance may already be trapped; nothing more we can do
+			}
 		}
 		this._exports = null
 		this._instance = null
@@ -240,19 +386,120 @@ export class Revo {
 }
 
 /**
+ * wasi32 build
+ * uses browser_wasi_shim when available, otherwise
+ * freestanding stubs. shares same `Revo` API but defaults to
+ * `revo-wasi.wasm`, adds a typecheck-only `check` method
+ */
+export class WasiRevo extends Revo {
+	static async create(opts = {}) {
+		const wasmUrl = opts.wasmUrl || '/engine/revo-wasi.wasm'
+		const mod = await compileFromUrl(wasmUrl)
+		const revo = new this(opts)
+		await revo._instantiate(mod)
+		return revo
+	}
+
+	/**
+	 * @private
+	 * @param {WebAssembly.Module} mod
+	 */
+	async _instantiate(mod) {
+		let memory = null
+		const self = this
+
+		const { wasi, imports: wasiImports } = await resolveWasiImport(self, () => memory)
+		const wasiProxy = new Proxy(wasiImports, {
+			get: (target, prop) => (prop in target ? target[prop] : () => ENOSYS),
+		})
+
+		const imports = {
+			env: {
+				js_write_stdout: (ptr, len) => self._stdout(decodeWasiText(memory, ptr, len)),
+				js_write_stderr: (ptr, len) => self._stderr(decodeWasiText(memory, ptr, len)),
+			},
+			wasi_snapshot_preview1: wasiProxy,
+		}
+
+		// stub out any other imported module so instantiation never fails
+		// on an unrelated missing import
+		for (const imp of WebAssembly.Module.imports(mod)) {
+			if (imp.module === 'env' || imp.module === 'wasi_snapshot_preview1') continue
+			imports[imp.module] ??= {}
+			imports[imp.module][imp.name] ??= () => ENOSYS
+		}
+
+		const instance = await WebAssembly.instantiate(mod, imports)
+		memory = instance.exports.memory
+
+		this._memory = memory
+		this._instance = instance
+		this._exports = instance.exports
+		this._wasi = wasi
+
+		if (this._wasi) {
+			if (this._wasi.initialize) this._wasi.initialize(instance)
+			else this._wasi.inst = instance
+		}
+
+		this._is64 = this._detectPointerWidth()
+
+		if (!this._exports.revo_wasm_init()) throw new RevoError('revo_wasm_init failed')
+	}
+
+	/**
+	 * wasm32 exports use plain numbers for pointers, wasm64 uses BigInt;
+	 * probe a real export to find out which this build is
+	 * @private
+	 */
+	_detectPointerWidth() {
+		try {
+			const ptr = this._exports.revo_wasm_alloc(BigInt(1))
+			const is64 = typeof ptr === 'bigint'
+			this._exports.revo_wasm_free(ptr, is64 ? BigInt(1) : 1)
+			return is64
+		} catch {
+			return false
+		}
+	}
+
+	/** @protected @override */
+	_num(n) {
+		return this._is64 ? BigInt(n) : Number(n)
+	}
+
+	/**
+	 * typecheck only, does not run the program
+	 * @param {string} code
+	 * @returns {EvalResult}
+	 */
+	check(code) {
+		const exportName = this._exports.revo_wasm_check ? 'revo_wasm_check' : 'revo_wasm_eval'
+		return this._run(exportName, code, { strip: true })
+	}
+
+	/** @override */
+	eval(code) {
+		return this._run('revo_wasm_eval', code, { strip: true })
+	}
+}
+
+export const FreestandingRevo = Revo
+export default WasiRevo
+
+/**
  * makes vm, runs code, destroys vm
  *
  * @param {string} code - revo source
- * @param {RevoOptions & { wasmBuffer?: ArrayBuffer | Uint8Array }} [opts]
+ * @param {RevoOptions & { wasmBuffer?: ArrayBuffer | Uint8Array, useWasi?: boolean }} [opts]
  *   opts are passed to {@link Revo.create}, or if `wasmBuffer` is set
  *   uses {@link Revo.fromBuffer} instead
  * @returns {Promise<EvalResult>}
  */
 export async function run(code, opts = {}) {
-	const { wasmBuffer, ...rest } = opts
-	const revo = wasmBuffer
-		? await Revo.fromBuffer(wasmBuffer, rest)
-		: await Revo.create(opts)
+	const { wasmBuffer, useWasi, ...rest } = opts
+	const Impl = useWasi ? WasiRevo : Revo
+	const revo = wasmBuffer ? await Impl.fromBuffer(wasmBuffer, rest) : await Impl.create(rest)
 	try {
 		return revo.eval(code)
 	} finally {
