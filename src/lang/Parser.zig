@@ -45,6 +45,7 @@ pub const Kind = enum {
     LexUnexpectedCharacter,
     LexUnterminatedComment,
     LexUnterminatedString,
+    LexLateModuleDoc,
     LexUnknown,
     UnexpectedToken,
     ExpectedIdentifier,
@@ -1760,7 +1761,7 @@ fn advance(self: *Parser) Token {
 
 /// peek current token without consuming; skips comment tokens
 fn peek(self: *Parser) Token {
-    while (self.pos < self.tokens.len and self.tokens[self.pos].type == .comment) {
+    while (self.pos < self.tokens.len and (self.tokens[self.pos].type == .comment or self.tokens[self.pos].type == .module_doc)) {
         self.pos += 1;
     }
     return self.tokens[@min(self.pos, self.tokens.len - 1)];
@@ -1769,13 +1770,13 @@ fn peek(self: *Parser) Token {
 /// peek token at offset without consuming; skips comment tokens
 fn peekAt(self: *Parser, offset: usize) Token {
     var p = self.pos;
-    while (p < self.tokens.len and self.tokens[p].type == .comment) {
+    while (p < self.tokens.len and (self.tokens[p].type == .comment or self.tokens[p].type == .module_doc)) {
         p += 1;
     }
     var i: usize = 0;
     while (i < offset) {
         p += 1;
-        while (p < self.tokens.len and self.tokens[p].type == .comment) {
+        while (p < self.tokens.len and (self.tokens[p].type == .comment or self.tokens[p].type == .module_doc)) {
             p += 1;
         }
         i += 1;

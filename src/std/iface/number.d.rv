@@ -1,6 +1,4 @@
-##!
- number parsing and float helpers: is_nan, is_finite, rounding, absolute value
-!##
+#! number parsing and float helpers: is_nan, is_finite, rounding, absolute value !#
 
 #* converts value to number: number("12") => 12 *#
 pub declare number.__call = fn(value: any) -> number

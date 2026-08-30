@@ -694,6 +694,7 @@ pub fn parseSource(allocator: std.mem.Allocator, source: []const u8) !*Node {
             .LexUnexpectedCharacter => error.UnexpectedCharacter,
             .LexUnterminatedComment => error.UnterminatedComment,
             .LexUnterminatedString => error.UnterminatedString,
+            .LexLateModuleDoc => error.LateModuleDoc,
             .UnexpectedToken => error.UnexpectedToken,
             .ExpectedIdentifier => error.ExpectedIdentifier,
             .ExpectedMatchArm => error.ExpectedMatchArm,
@@ -712,6 +713,7 @@ pub fn parseSourceReport(allocator: std.mem.Allocator, source: []const u8) !pars
                 .UnexpectedCharacter => .LexUnexpectedCharacter,
                 .UnterminatedComment => .LexUnterminatedComment,
                 .UnterminatedString => .LexUnterminatedString,
+                .LateModuleDoc => .LexLateModuleDoc,
                 .Unknown => .LexUnknown,
             };
             const parts = try allocator.alloc(diagnostic.Part, 2);

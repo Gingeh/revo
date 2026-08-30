@@ -551,6 +551,7 @@ fn collectAll(
             error.BadCoreKey,
             error.BadDoc,
             => std.debug.print("skipping {s}: {s}\n", .{ f, @errorName(err) }),
+            error.LateModuleDoc => std.debug.print("skipping {s}: module doc must be at the start of the file\n", .{f}),
             else => |e| return e,
         };
     }
@@ -578,6 +579,10 @@ fn addDocsFromPath(
     return addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
         error.IfaceParseFailed => {
             printError(init, "parse error while extracting docs", .{});
+            return error.CompilationError;
+        },
+        error.LateModuleDoc => {
+            printError(init, "module doc must be at the start of the file", .{});
             return error.CompilationError;
         },
         else => |e| return e,

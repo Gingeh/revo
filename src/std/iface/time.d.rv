@@ -1,6 +1,4 @@
-##!
- clocks and parking: wall-clock and monotonic time in milliseconds or nanoseconds
-!##
+#! clocks and parking: wall-clock and monotonic time in milliseconds or nanoseconds !#
 
 #* returns current wall-clock time in milliseconds *#
 pub declare time.now = fn() -> num

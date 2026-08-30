@@ -1,6 +1,4 @@
-##!
- numeric math: rounding, roots, powers, min and max, trig, logarithms
-!##
+#! numeric math: rounding, roots, powers, min and max, trig, logarithms !#
 
 #* absolute value *#
 pub declare math.abs = fn(x: num) -> num

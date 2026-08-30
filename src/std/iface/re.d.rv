@@ -1,6 +1,4 @@
-##!
- regular expressions: compile patterns, test for matches, find and iterate over matches
-!##
+#! regular expressions: compile patterns, test for matches, find and iterate over matches !#
 
 #* compile a regex pattern into a reusable handle *#
 pub declare re.compile = fn(pattern: string) -> table

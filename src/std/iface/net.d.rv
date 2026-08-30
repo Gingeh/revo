@@ -1,6 +1,4 @@
-##!
- tcp sockets: connect, listen, accept, send and receive
-!##
+#! tcp sockets: connect, listen, accept, send and receive !#
 
 #* connects to a remote host and port, returns a socket handle *#
 pub declare net.connect = fn(host: string, port: num) -> !table

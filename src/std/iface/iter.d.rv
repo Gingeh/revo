@@ -1,6 +1,4 @@
-##!
- lazy iterators: range, mapping, filtering, folding and chaining
-!##
+#! lazy iterators: range, mapping, filtering, folding and chaining !#
 
 #*
 wraps any iterable in a zero-arg callable

@@ -1,6 +1,4 @@
-##!
- table manipulation: keys and values, insertion and removal, sorting, joining, shallow copies
-!##
+#! table manipulation: keys and values, insertion and removal, sorting, joining, shallow copies !#
 
 #*
 gets value without metamethods

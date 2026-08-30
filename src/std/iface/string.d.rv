@@ -1,6 +1,4 @@
-##!
- string manipulation: length, case, substrings, search and replace, splitting and joining
-!##
+#! string manipulation: length, case, substrings, search and replace, splitting and joining !#
 
 #* returns length of string *#
 pub declare string.len = fn(self: string) -> num

@@ -1,6 +1,4 @@
-##!
- for compression and decompression
-!##
+#! for compression and decompression !#
 
 #* encodes data as standard base64 with padding *#
 pub declare compress.base64_encode = fn(data: string) -> string

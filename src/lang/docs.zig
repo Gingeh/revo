@@ -15,15 +15,24 @@ pub const Extracted = struct {
     module_doc: []const u8 = "",
 };
 
-/// a `##! ... !##` block before any code is the module's own doc
-fn moduleDoc(src: []const u8) []const u8 {
-    const rest = std.mem.trim(u8, src, " \t\r\n");
-    if (!std.mem.startsWith(u8, rest, "##!")) return "";
-    const end = std.mem.indexOfPos(u8, rest, 3, "!##") orelse return "";
-    return std.mem.trim(u8, rest[3..end], " \t\r\n");
+/// a `#! ... !#` block before any code is the module's own doc
+fn moduleDoc(src: []const u8) ![]const u8 {
+    const result = try revo.lang.lexReportAt(std.heap.page_allocator, src, .{});
+    const tokens = switch (result) {
+        .ok => |t| t,
+        .err => return "",
+    };
+    defer std.heap.page_allocator.free(tokens);
+    for (tokens) |tok| {
+        if (tok.type != .comment) {
+            if (tok.type == .module_doc) return std.mem.trim(u8, tok.text, " \t\r\n");
+            return "";
+        }
+    }
+    return "";
 }
 
-/// `#* ... *#`-attributed decls and a leading `##! ... !##` module doc
+/// `#* ... *#`-attributed decls and a leading `#! ... !#` module doc
 pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) !Extracted {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
@@ -32,7 +41,10 @@ pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) !Extracted {
     const parsed = try revo.lang.parseSourceReport(a, src);
     const root_node = switch (parsed) {
         .ok => |node| node,
-        .err => return error.IfaceParseFailed,
+        .err => |f| {
+            if (f.kind == .LexLateModuleDoc) return error.LateModuleDoc;
+            return error.IfaceParseFailed;
+        },
     };
 
     const specs = try api.collectSpecs(alloc, root_node, false);
@@ -50,7 +62,7 @@ pub fn docsExtract(alloc: std.mem.Allocator, src: []const u8) !Extracted {
     }
 
     alloc.free(specs);
-    return .{ .specs = try kept.toOwnedSlice(alloc), .module_doc = moduleDoc(src) };
+    return .{ .specs = try kept.toOwnedSlice(alloc), .module_doc = try moduleDoc(src) };
 }
 
 pub fn freeSpecs(alloc: std.mem.Allocator, specs: []const FnSpec) void {
@@ -686,11 +698,9 @@ test "docsExtract specs documented non-fn bindings" {
     try testing.expectEqualStrings("b", specs[2].name);
 }
 
-test "docsExtract lifts a ##! module doc" {
+test "docsExtract lifts a #! module doc" {
     const src =
-        \\##!
-        \\ things about numbers
-        \\!##
+        \\#! things about numbers !#
         \\
         \\#* doubles *#
         \\const twice = fn(n: number) -> number n * 2
@@ -701,17 +711,13 @@ test "docsExtract lifts a ##! module doc" {
     try testing.expectEqual(@as(usize, 1), extracted.specs.len);
 }
 
-test "docsExtract skips module doc when code comes first" {
+test "docsExtract rejects module doc after code" {
     const src =
         \\const x = 1
         \\
-        \\##!
-        \\ too late
-        \\!##
+        \\#! too late !#
     ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    try testing.expectEqualStrings("", extracted.module_doc);
+    try testing.expectError(error.LateModuleDoc, docsExtract(testing.allocator, src));
 }
 
 test "docsExtract specs non-function declares" {

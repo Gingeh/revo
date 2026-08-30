@@ -1,6 +1,4 @@
-##!
- pseudo-random numbers with a settable seed
-!##
+#! pseudo-random numbers with a settable seed !#
 
 #* Statically sets the seed used for generation of pseudo-random numbers. *#
 pub declare rng.set_seed = fn(seed: num)

@@ -24,7 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     #* 2 digits of precision *#
     const pi = 3.14
     ```
-
+- multiline module docs via `#! !#`
+    ```ruby
+    #! module does this and that !#
+    ...
+    ```
+    ```ruby
+    #!/usr/bin/env/revo
+    a shebang can just go right there
+    !#
+    ...
+    ```
 - stdlib:
   - `exit(number)`
   - `revo.dofile(path)`

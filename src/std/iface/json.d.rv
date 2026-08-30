@@ -1,6 +1,4 @@
-##!
- encode values as json and decode json back into revo values
-!##
+#! encode values as json and decode json back into revo values !#
 
 #* encodes value as json string *#
 pub declare json.encode = fn(value: any) -> !string

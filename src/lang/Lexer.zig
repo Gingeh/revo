@@ -15,6 +15,7 @@ pub const LexError = struct {
         UnexpectedCharacter,
         UnterminatedComment,
         UnterminatedString,
+        LateModuleDoc,
         Unknown,
     };
 };
@@ -112,6 +113,7 @@ pub const TokenType = enum {
     rsquiggly,
     comment,
     doc_comment,
+    module_doc,
     eof,
     attribute,
 
@@ -124,6 +126,7 @@ pub const TokenType = enum {
             .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .semicolon, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
             .doc_comment => .comment,
+            .module_doc => .comment,
             .ident, .eof => null,
         };
     }
@@ -323,17 +326,23 @@ pub fn lexReportAt(allocator: std.mem.Allocator, source: []const u8, origin: Ori
     return .{ .ok = try tokens.toOwnedSlice(allocator) };
 }
 
-// character-at-a-time, no backtracking
+/// character-at-a-time, no backtracking
 const Lexer = @This();
 
 source: []const u8,
 alloc: std.mem.Allocator,
-pos: usize = 0, // byte offset in source
-base_offset: usize = 0, // added to emitted start/end for fragments
+/// byte offset in source
+pos: usize = 0,
+/// added to emitted start/end for fragments
+base_offset: usize = 0,
 line: u32 = 1,
 column: u32 = 1,
-line_start: bool = true, // at start of line (for indent-sensitive tokens)
-pending_error_span: ?ast.Span = null, // saved for error recovery
+/// at start of line (for indent-sensitive tokens)
+line_start: bool = true,
+/// saved for error recovery
+pending_error_span: ?ast.Span = null,
+/// set after first non-comment token, rejects late module_doc. kind of a botch
+some_seen: bool = false,
 
 pub fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
     return .{ .source = source, .alloc = alloc };
@@ -351,6 +360,8 @@ fn next(self: *Lexer) !Token {
         }
         break;
     }
+
+    self.some_seen = true;
 
     if (self.atEnd()) return self.makeToken(.eof, self.pos, self.pos, 0, 0);
 
@@ -457,6 +468,7 @@ fn lexFailure(self: *const Lexer, err: anyerror) LexError {
         error.UnexpectedCharacter => .{ .kind = .UnexpectedCharacter, .span = span, .message = "unexpected character" },
         error.UnterminatedComment => .{ .kind = .UnterminatedComment, .span = span, .message = "unterminated multiline comment" },
         error.UnterminatedString => .{ .kind = .UnterminatedString, .span = span, .message = "unterminated string" },
+        error.LateModuleDoc => .{ .kind = .LateModuleDoc, .span = span, .message = "module doc must be at the start of the file" },
         else => .{ .kind = .Unknown, .span = span, .message = "lexing failed" },
     };
 }
@@ -534,6 +546,22 @@ fn lexComment(self: *Lexer) !Token {
                 _ = self.advance();
                 _ = self.advance();
                 return self.makeToken(.doc_comment, body_start, body_end, line, column);
+            }
+            _ = self.advance();
+        }
+        return error.UnterminatedComment;
+    }
+    if (self.peek() == '!') {
+        if (self.some_seen) return error.LateModuleDoc;
+        _ = self.advance(); // consume !
+        var body_start = self.pos;
+        while (!self.atEnd()) {
+            if (self.peek() == '!' and self.peekN(1) == '#') {
+                if (body_start < self.pos and self.source[body_start] == '\n') body_start += 1;
+                const body_end = self.pos;
+                _ = self.advance();
+                _ = self.advance();
+                return self.makeToken(.module_doc, body_start, body_end, line, column);
             }
             _ = self.advance();
         }
@@ -1387,6 +1415,35 @@ test "lexes doc comments, body text between the delimiters" {
     try std.testing.expectEqualStrings(" body text ", toks[0].text);
 }
 
+test "lexes module doc comments" {
+    try t.expectTypes(
+        \\#! module docs here !#
+        \\const x = 1
+    , &.{
+        .module_doc,
+        .kw_const,
+        .ident,
+        .assign,
+        .number,
+        .eof,
+    });
+    {
+        const toks = try lexAt(std.testing.allocator, "#! hello !#", .{});
+        defer std.testing.allocator.free(toks);
+        try std.testing.expectEqualStrings(" hello ", toks[0].text);
+    }
+    // leading newline is dropped, like multiline strings
+    {
+        const toks = try lexAt(std.testing.allocator, "#!\n line one\n line two\n!#", .{});
+        defer std.testing.allocator.free(toks);
+        try std.testing.expectEqualStrings(" line one\n line two\n", toks[0].text);
+    }
+}
+
+test "rejects module doc after code" {
+    try std.testing.expectError(error.LateModuleDoc, lexAt(std.testing.allocator, "const x = 1\n#! too late !#", .{}));
+}
+
 test "lexes ident with special symbols" {
     try t.expectTypes(
         \\ one? two!
@@ -1401,6 +1458,7 @@ test "lexer reports unterminated strings comments and unexpected characters" {
     try std.testing.expectError(error.UnterminatedString, lexAt(std.testing.allocator, "\"unterminated", .{}));
     try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "## never closed", .{}));
     try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "#* never closed", .{}));
+    try std.testing.expectError(error.UnterminatedComment, lexAt(std.testing.allocator, "#! never closed", .{}));
     try std.testing.expectError(error.UnexpectedCharacter, lexAt(std.testing.allocator, "@", .{}));
     {
         const toks = try lexAt(std.testing.allocator, "!", .{});
