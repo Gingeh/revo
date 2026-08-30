@@ -93,7 +93,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
     return .ok;
 }
 
-fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
+inline fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
     while (self.sched.dequeueRunnable()) |fid| {
         @branchHint(.unlikely);
         self.sched.current_fiber = fid;

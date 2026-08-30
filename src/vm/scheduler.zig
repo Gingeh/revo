@@ -431,7 +431,7 @@ pub fn parkCurrentForSleepMS(self: *@This(), ms: u64, now_ns: u64) !void {
 }
 
 /// wake any fibers whose sleep timer has expired
-pub fn wakeDueSleepers(self: *@This(), now_ns: u64) !void {
+pub inline fn wakeDueSleepers(self: *@This(), now_ns: u64) !void {
     while (self.sleepers.items.len > 0) {
         if (self.sleepers.items[0].wake_at_ns > now_ns) break;
         const sleeper = self.popSleeper() orelse break;
@@ -440,7 +440,7 @@ pub fn wakeDueSleepers(self: *@This(), now_ns: u64) !void {
 }
 
 // ns until the next sleeper wakes (null if none)
-pub fn nextSleepDelayNs(self: *@This(), now_ns: u64) ?u64 {
+pub inline fn nextSleepDelayNs(self: *@This(), now_ns: u64) ?u64 {
     if (self.sleepers.items.len == 0) return null;
     const min_wake = self.sleepers.items[0].wake_at_ns;
     if (min_wake <= now_ns) return 0;
