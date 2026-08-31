@@ -768,7 +768,7 @@ pub fn hover(
 }
 
 /// extract a single source line by line index (1-based)
-fn sourceLine(text: []const u8, line: u32) []const u8 {
+pub fn sourceLine(text: []const u8, line: u32) []const u8 {
     var pos: usize = 0;
     var cur: u32 = 1;
     while (cur < line and pos < text.len) {
@@ -2385,6 +2385,123 @@ const ImportVisitor = struct {
         lang.ast.walkAST(ImportVisitor, self, node);
     }
 };
+
+//
+// ast span map for semantic highlighting
+//
+
+/// walk ast to build a map of byte offset -> semantic token type
+pub fn buildASTSpanMap(arena: std.mem.Allocator, source: []const u8) ?std.AutoHashMap(usize, u32) {
+    const parsed = lang.parseSourceReport(arena, source) catch return null;
+    const root = switch (parsed) {
+        .ok => |n| n,
+        .err => return null,
+    };
+    var map = std.AutoHashMap(usize, u32).init(arena);
+    walkRoles(root, &map) catch return null;
+    return map;
+}
+
+fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
+    switch (n.expr) {
+        .call => |c| {
+            try walkRoles(c.callee, m);
+            switch (c.callee.expr) {
+                .ident => try m.put(c.callee.span.start, @intFromEnum(lang.TokenClass.function)),
+                .field => |f| try m.put(c.callee.span.end - f.name.len, @intFromEnum(lang.TokenClass.function)),
+                else => {},
+            }
+            if (c.implicit_self and c.callee.expr == .field)
+                try m.put(c.callee.span.end - c.callee.expr.field.name.len - 1, @intFromEnum(lang.TokenClass.function));
+            for (c.args) |a| try walkRoles(a, m);
+        },
+        .binding => |b| {
+            if (b.target.expr == .ident)
+                try m.put(b.target.span.start, if (b.value.expr == .fn_expr) @intFromEnum(lang.TokenClass.function) else @intFromEnum(lang.TokenClass.variable));
+            try walkRoles(b.value, m);
+        },
+        .field => |f| {
+            try m.put(n.span.end - f.name.len, @intFromEnum(lang.TokenClass.variable));
+            try walkRoles(f.object, m);
+        },
+        .unary => |u| try walkRoles(u.expr, m),
+        .binary => |b| {
+            try walkRoles(b.left, m);
+            try walkRoles(b.right, m);
+        },
+        .and_expr => |v| {
+            try walkRoles(v.left, m);
+            try walkRoles(v.right, m);
+        },
+        .or_expr => |v| {
+            try walkRoles(v.left, m);
+            try walkRoles(v.right, m);
+        },
+        .orelse_expr => |v| {
+            try walkRoles(v.left, m);
+            try walkRoles(v.right, m);
+        },
+        .if_expr => |v| {
+            try walkRoles(v.condition, m);
+            try walkRoles(v.then_expr, m);
+            if (v.else_expr) |e| try walkRoles(e, m);
+        },
+        .index => |idx| {
+            try walkRoles(idx.object, m);
+            try walkRoles(idx.key, m);
+        },
+        .return_expr => |v| {
+            if (v) |e| try walkRoles(e, m);
+        },
+        .break_expr => |v| {
+            if (v.value) |e| try walkRoles(e, m);
+        },
+        .match_expr => |v| {
+            try walkRoles(v.subject, m);
+            for (v.arms) |arm| {
+                for (arm.matchers) |matcher| {
+                    if (matcher == .expr) try walkRoles(matcher.expr, m);
+                }
+                if (arm.guard) |g| try walkRoles(g, m);
+                try walkRoles(arm.then, m);
+            }
+        },
+        .for_loop => |v| {
+            try walkRoles(v.iter, m);
+            try walkRoles(v.body, m);
+        },
+        .while_loop => |v| {
+            try walkRoles(v.predicate, m);
+            try walkRoles(v.body, m);
+        },
+        .loop_expr => |v| try walkRoles(v.body, m),
+        .labeled_block => |v| try walkRoles(v.body, m),
+        .range_literal => |v| {
+            try walkRoles(v.start, m);
+            try walkRoles(v.end, m);
+        },
+        .table => |entries| {
+            for (entries) |e| {
+                if (e.key) |k| try walkRoles(k, m);
+                try walkRoles(e.value, m);
+            }
+        },
+        .comp_block => |v| try walkRoles(v.expr, m),
+        .block => |exprs| {
+            for (exprs) |e| try walkRoles(e, m);
+        },
+        .try_expr => |inner| try walkRoles(inner, m),
+        .tuple => |items| {
+            for (items) |item| try walkRoles(item, m);
+        },
+        .test_block => |v| try walkRoles(v.body, m),
+        .test_suite => |v| try walkRoles(v.body, m),
+        .assign_expr => |a| try walkRoles(a.value, m),
+        .decl => |d| try walkRoles(d.inner, m),
+        .fn_expr => |f| try walkRoles(f.body, m),
+        else => {},
+    }
+}
 
 //
 // tests

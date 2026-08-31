@@ -21,6 +21,8 @@ const libc = if (builtin.link_libc) @cImport({
 const IsoclineContext = struct {
     vm: *VM,
     gpa: Allocator,
+    workspace: *revo.lang.Workspace,
+    last_file: *?revo.lang.FileId,
 };
 
 var isocline_ctx: ?IsoclineContext = null;
@@ -98,6 +100,7 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
         ":quit",
         ":features",
         ":h",
+        ":outline",
     };
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, wslice)) {
@@ -128,6 +131,18 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
         }
     }
 
+    // workspace symbols from inspect cache
+    const ws = ctx.workspace;
+    var w_it = ws.inspect_cache.iterator();
+    while (w_it.next()) |entry| {
+        for (entry.value_ptr.symbols) |sym| {
+            if (std.mem.startsWith(u8, sym.name, wslice)) {
+                const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{sym.name}) catch continue;
+                _ = isocline_c.ic_add_completion(cenv, n_c);
+            }
+        }
+    }
+
     // ...then keywords
     for (revo.lang.Lexer.TokenType.of_string.keys()) |kw| {
         if (std.mem.startsWith(u8, kw, wslice)) {
@@ -155,6 +170,8 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
         },
     };
 
+    const ast_map = revo.lang.Workspace.buildASTSpanMap(alloc, input_slice);
+
     var fb = std.ArrayList(u8).initCapacity(alloc, input_len + 32) catch return;
 
     var last: usize = 0;
@@ -165,7 +182,15 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
 
         if (tstart > last) fb.appendSlice(alloc, input_slice[last..tstart]) catch {};
 
-        const style: ?[]const u8 = if (tok.type.classify()) |cls|
+        const ast_type: ?u32 = if (ast_map) |m| m.get(tstart) else null;
+
+        const style: ?[]const u8 = if (ast_type) |t|
+            switch (@as(revo.lang.TokenClass, @enumFromInt(t))) {
+                .variable => null,
+                .enum_member => "hash",
+                else => |e| @tagName(e),
+            }
+        else if (tok.type.classify()) |cls|
             switch (cls) {
                 .variable => null,
                 .enum_member => "hash",
@@ -286,7 +311,36 @@ pub const Session = struct {
         try out.writeAll(buf.written());
     }
 
-    /// :h <name> - same info as editor hover: session decls first, then stdlib
+    fn printOutline(self: *Session, out: *std.Io.Writer) !void {
+        const fid = self.last_file orelse {
+            try out.writeAll("no code yet\n");
+            return;
+        };
+        const syms = try self.workspace.documentSymbols(self.gpa, fid, .{});
+        defer {
+            for (syms) |*s| {
+                self.gpa.free(s.name);
+                if (s.type_name) |*ti| revo.lang.types.deinitType(ti, self.gpa);
+            }
+            self.gpa.free(syms);
+        }
+        if (syms.len == 0) {
+            try out.writeAll("no symbols\n");
+            return;
+        }
+        for (syms) |s| {
+            const kind: []const u8 = switch (s.kind) {
+                .binding => "let",
+                .function => "fn",
+                .struct_type => "type",
+                .type_alias => "alias",
+                .param => "param",
+            };
+            try out.print("{s} {s} : {d}\n", .{ kind, s.name, s.range.start.line });
+        }
+    }
+
+    /// :h <name> - session decls first, then stdlib
     fn helpTopic(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
         if (self.last_file) |fid| {
             if (try self.workspace.hoverByName(self.gpa, fid, name)) |text| {
@@ -333,6 +387,11 @@ pub const Session = struct {
             if (!try self.helpTopic(out, topic)) {
                 try out.print("no docs for {s}\n", .{topic});
             }
+            return true;
+        }
+
+        if (std.mem.eql(u8, line, ":outline")) {
+            try self.printOutline(out);
             return true;
         }
 
@@ -431,8 +490,16 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     const signal_was_set = build_options.isocline and OS != .wasi;
     if (signal_was_set) _ = signal_c.signal(signal_c.SIGINT, @ptrCast(&sigintHandler));
 
+    var session = try Session.init(vm, gpa, init.io);
+    defer session.deinit();
+
     if (build_options.isocline) {
-        isocline_ctx = IsoclineContext{ .vm = vm, .gpa = gpa };
+        isocline_ctx = IsoclineContext{
+            .vm = vm,
+            .gpa = gpa,
+            .workspace = &session.workspace,
+            .last_file = &session.last_file,
+        };
 
         var b: [512]u8 = undefined;
         const hist_path = if (std.c.getenv("HOME")) |p|
@@ -456,9 +523,6 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             _ = isocline_c.ic_style_def(s_c.ptr, def.ptr);
         }
     }
-
-    var session = try Session.init(vm, gpa, init.io);
-    defer session.deinit();
 
     while (true) {
         if (sigint_received.load(.seq_cst)) {
