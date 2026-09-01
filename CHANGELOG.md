@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     # was: tried to call bar(10, 11, 12) and assign that to foo
     # now: foo = bar; return (10, 11, 12)
     ```
+- unless keyword
+    ```ruby
+    unless :true
+        print("this won't run")
+    else
+        print("this will")
+    ```
 - zig extensions, examples for zig extensions (`examples/zig`)
 - access tuple fields via dot: `(:a, :b).0 == :a`
 - `HACKING.md`
