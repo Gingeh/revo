@@ -77,13 +77,13 @@ pick((:err, :Boom))
 # typed bindings: int literal inferred as int
 let x: int = 42
 # let bad_int: int = "hello"      # type mismatch: expected int, got string
-# let bad_float: float = "world"  # type mismatch: expected float, got string
+# let bad_float: number = "world"  # type mismatch: expected number, got string
 
-# typed bindings: float literal inferred as float
-let y: float = 3.14
+# typed bindings: float literal inferred as number
+let y: number = 3.14
 
-# int coerces to float (allowed)
-let z: float = 10
+# int coerces to number (allowed)
+let z: number = 10
 
 
 # functions & params
@@ -107,7 +107,7 @@ let doubled = double(5)
 # double("hello")  # argument 1 to `double` expects int, got string
 
 # typed function with mixed params
-const scale = fn(v: float, factor: int) v * factor
+const scale = fn(v: number, factor: number) v * factor
 let scaled = scale(2.5, 4)
 
 # nested function with typed params
@@ -189,33 +189,3 @@ let person: Person = Person { name = "alice", age = 30 }
 let pname = person.name
 # person.name = 42 # field `name` on `Person` expected string, got number
 # let bad_person: Person = Person { name = 1, age = 30 }
-
-
-# type inference & opcode specialization
-
-# these emit specialized opcodes
-let i1: int = 5
-let i2: int = 3
-let i_sum = i1 + i2  # emits add_int
-let i_diff = i1 - i2 # emits sub_int
-let i_neg = -i1      # emits negate_int (via let binding)
-let i_eq = i1 == i2  # emits eq_int
-
-let f1: float = 1.5
-let f2: float = 2.5
-let f_sum = f1 + f2  # emits add_float
-let f_diff = f1 - f2 # emits sub_float
-
-# mixed types fall back to generic opcodes
-let mixed = i1 + f1  # emits add (generic)
-
-
-# untyped / dynamic fallback
-
-# untyped code still works
-let a = 10
-let b = 20
-let c = a + b
-
-# tuple binding error showcase
-# const first, second = (1,)
