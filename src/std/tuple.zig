@@ -4,7 +4,6 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "unwrap_err", .f = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_) },
     .{ .name = "add", .f = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add) },
     .{ .name = "mul", .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },
-    .{ .name = "__index", .f = root.define(&[_]root.TypeSpec{ .tuple, .any }, index) },
 };
 
 fn len(args: []const Data, vm: *VM) !HostResult {
@@ -15,7 +14,7 @@ fn len(args: []const Data, vm: *VM) !HostResult {
 
 fn index(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
-    const n = args[1].asNum() orelse return .errType(1, "num", root.typeof(args[1], vm));
+    const n = args[1].asNum() orelse return .okData(revo.Data.new.core(.undef));
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
     if (idx >= t.items.len) return .okData(revo.Data.new.core(.missing));

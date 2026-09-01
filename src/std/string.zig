@@ -21,7 +21,6 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "ascii", .f = root.define(&.{.string}, ascii_f) },
     .{ .name = "contains?", .f = root.define(&.{ .string, .string }, contains) },
     .{ .name = "index_of", .f = root.define(&.{ .string, .string }, index_of) },
-    .{ .name = "__index", .f = root.define(&.{ .string, .any }, index_f) },
     .{ .name = "add", .f = root.define(&.{ .string, .string }, add_f) },
     .{ .name = "mul", .f = root.define(&.{ .string, .number }, mul_f) },
     .{ .name = "of_ascii", .f = root.define(&.{.number}, of_ascii) },
@@ -73,16 +72,6 @@ fn set(args: []const Data, vm: *VM) !HostResult {
 fn len_f(args: []const Data, vm: *VM) !HostResult {
     const str = vm.stringValue(args[0].asString().?);
     return .{ .ok = Data.new.num(str.len) };
-}
-
-/// > string[idx: num] -> string
-/// returns character at index as single-char string
-fn index_f(args: []const Data, vm: *VM) !HostResult {
-    const str = vm.stringValue(args[0].asString().?);
-    const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "num", root.typeof(args[1], vm));
-    if (idx >= str.len) return .okData(revo.Data.new.core(.missing));
-    const result = try vm.ownDataStringNoDedup(str[idx .. idx + 1]);
-    return .okData(result);
 }
 
 /// > string + other: string -> string

@@ -66,9 +66,6 @@ pub declare string.contains? = fn(self: string, substr: string) -> bool
 #* ret 0-based index of substring or nil *#
 pub declare string.index_of = fn(self: string, substr: string) -> num|:nil
 
-#* returns character at index as single-char string *#
-pub declare string:__index = fn(self: string, idx: any) -> string
-
 #* concatenates two strings *#
 pub declare string.add = fn(self: string, other: string) -> string
 

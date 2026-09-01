@@ -102,6 +102,39 @@ pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("op
             }
             return null;
         },
+        .string => {
+            const type_mt_id = self.metatables[@intFromEnum(mem.Type.string)] orelse return null;
+            const mt = try self.tables.get(type_mt_id);
+            if (mt.getRaw(key, self)) |value| {
+                return .{ .value = value, .from_meta = true };
+            }
+            // numeric character access: "str"[n]
+            if (key.asNum()) |n| {
+                const str = self.stringValue(object.asString().?);
+                const idx = revo.asIndex(n) catch return null;
+                if (idx < str.len) {
+                    return .{ .value = try self.ownDataStringNoDedup(str[idx .. idx + 1]), .from_meta = false };
+                }
+                return null;
+            }
+            return null;
+        },
+        .number => {
+            const type_mt_id = self.metatables[@intFromEnum(mem.Type.number)] orelse return null;
+            const mt = try self.tables.get(type_mt_id);
+            if (mt.getRaw(key, self)) |value| {
+                return .{ .value = value, .from_meta = true };
+            }
+            return null;
+        },
+        .atom => {
+            const type_mt_id = self.metatables[@intFromEnum(mem.Type.atom)] orelse return null;
+            const mt = try self.tables.get(type_mt_id);
+            if (mt.getRaw(key, self)) |value| {
+                return .{ .value = value, .from_meta = true };
+            }
+            return null;
+        },
         else => {
             const mt_id = try self.getMetatableId(object) orelse return null;
             return resolveViaMetatable(self, object, key, mt_id, result_reg);
@@ -115,7 +148,12 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: mem.TableID, r
         return .{ .value = value, .from_meta = true };
     }
     if (mt.getRawAtom(revo.core_atoms.atomId(.__index), self)) |indexer| {
-        return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP, result_reg);
+        const result = try resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP, result_reg);
+        if (result) |r| {
+            if (r.value.bits == revo.Data.new.core(.undef).bits and key.asNum() == null)
+                return null;
+        }
+        return result;
     }
     return null;
 }

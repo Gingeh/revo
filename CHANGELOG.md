@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - access tuple fields via dot: `(:a, :b).0 == :a`
 - `HACKING.md`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later
+- repl now connected to the same architecture as the lsp, giving you richer highlighting
 
 ### Changed
 

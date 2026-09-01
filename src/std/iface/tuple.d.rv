@@ -14,6 +14,3 @@ pub declare tuple.add = fn(self: tuple, other: tuple) -> tuple
 
 #* repeats tuple n times *#
 pub declare tuple.mul = fn(self: tuple, n: num) -> tuple
-
-#* returns element at index *#
-pub declare tuple:__index = fn(self: tuple, idx: any) -> any
