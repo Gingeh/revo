@@ -124,9 +124,7 @@ pub fn build(b: *Build) !void {
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, zig_backend") orelse
         // isocline needs libc and not wasm; wasi gets lsp but not isocline
-        if (is_freestanding) ""
-        else if (is_wasm) "lsp,regex,mimalloc"
-        else "isocline,lsp,regex,mimalloc";
+        if (is_freestanding) "" else if (is_wasm) "lsp,regex,mimalloc" else "isocline,lsp,regex,mimalloc";
 
     const test_filters = b.option(
         []const []const u8,

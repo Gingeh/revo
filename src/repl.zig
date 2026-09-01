@@ -596,7 +596,7 @@ test "repl closing a socket wakes a parked recv with SocketClosed" {
         \\   const r = client:recv({ mode = :read_some, max_bytes = 1024 })
         \\   send(results, r)
         \\ end
-        \\ sleep(50)
+        \\ sleep(5)
         \\ client:close()
         \\ recv(results)
     ));

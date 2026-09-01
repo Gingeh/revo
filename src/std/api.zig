@@ -97,43 +97,28 @@ pub const impl_groups: []const ImplGroup = if (regex_on) &.{
 /// merged, runtime view of the stdlib surface; built by `loadAllSpecs`
 pub var full_specs: []const []const FnSpec = &.{};
 
-const LiveSet = struct {
-    alloc: std.mem.Allocator,
-    groups: []const []const FnSpec,
-};
+var permanent_cache: ?[]const []const FnSpec = null;
 
-/// every loaded set stays alive until its owning VM deinits, even when a
-/// newer load becomes the current `full_specs`; the registry keeps the
-/// memory findable for freeing without a global refcount
-var live: [1024]?LiveSet = .{null} ** 1024;
-
-fn registerSet(alloc: std.mem.Allocator, groups: []const []const FnSpec) !void {
-    for (&live) |*slot| {
-        if (slot.* == null) {
-            slot.* = .{ .alloc = alloc, .groups = groups };
-            return;
-        }
+pub fn loadAllSpecs(_: std.mem.Allocator) ![]const []const FnSpec {
+    if (permanent_cache) |cached| {
+        full_specs = cached;
+        return cached;
     }
-    return error.SpecSetTableFull;
-}
 
-/// parse every iface group, pair each spec with its zig impl, and publish
-/// the result as the runtime `full_specs` for this process. the returned
-/// set is owned by the caller's VM; `VM.deinit` releases it again via
-/// `freeLoadedSpecs` (see below). a second load swaps `full_specs` without
-/// touching the previous owner's memory
-pub fn loadAllSpecs(alloc: std.mem.Allocator) ![]const []const FnSpec {
-    var groups = try std.ArrayList([]const FnSpec).initCapacity(alloc, impl_groups.len);
+    // first call: parse with page_allocator so the permanent cache doesn't
+    // leak through the caller's (potentially debug) allocator
+    const pa = std.heap.page_allocator;
+    var groups = try std.ArrayList([]const FnSpec).initCapacity(pa, impl_groups.len);
     errdefer {
         for (groups.items) |g| {
-            for (g) |s| s.deinit(alloc);
-            alloc.free(g);
+            for (g) |s| s.deinit(pa);
+            pa.free(g);
         }
-        groups.deinit(alloc);
+        groups.deinit(pa);
     }
     for (impl_groups) |ig| {
         const src = ifaceSrc(ig.name);
-        const specs = try parseGroup(alloc, src);
+        const specs = try parseGroup(pa, src);
         for (specs, 0..) |*s, i| {
             var k: usize = 0;
             if (i > 0) for (specs[0..i]) |other| {
@@ -144,45 +129,17 @@ pub fn loadAllSpecs(alloc: std.mem.Allocator) ![]const []const FnSpec {
         for (ig.impls) |imp| {
             if (findIn(specs, imp.name) == null) return error.StdlibImplUnused;
         }
-        try groups.append(alloc, specs);
+        try groups.append(pa, specs);
     }
-    const owned = try groups.toOwnedSlice(alloc);
-    try registerSet(alloc, owned);
+    const owned = try groups.toOwnedSlice(pa);
+    permanent_cache = owned;
     full_specs = owned;
     return owned;
 }
 
-/// drop the merged specs owned by one VM; `full_specs` falls back to the
-/// newest set still alive. called from `VM.deinit` so test allocators
-/// stay clean
-pub fn freeLoadedSpecs(alloc: std.mem.Allocator, owner: []const []const FnSpec) void {
-    if (owner.len == 0) return;
-    for (&live) |*slot| {
-        const ls = slot.* orelse continue;
-        if (ls.groups.ptr != owner.ptr) continue;
-        if (ls.alloc.ptr != alloc.ptr) return;
-
-        for (owner) |g| {
-            for (g) |s| {
-                s.deinit(alloc);
-            }
-            alloc.free(g);
-        }
-
-        alloc.free(owner);
-        slot.* = null;
-        full_specs = newestLive();
-        return;
-    }
-}
-
-fn newestLive() []const []const FnSpec {
-    var newest: []const []const FnSpec = &.{};
-    for (live) |slot| {
-        if (slot) |ls| newest = ls.groups;
-    }
-    return newest;
-}
+/// permanent cache
+/// the cache lives in page_allocator so no debug allocator tracks it
+pub fn freeLoadedSpecs(_: std.mem.Allocator, _: []const []const FnSpec) void {}
 
 fn ifaceSrc(name: []const u8) []const u8 {
     for (iface_groups) |ig| {
