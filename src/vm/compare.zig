@@ -46,6 +46,28 @@ pub fn compare(vm: *VM, lh: Data, rh: Data) std.math.Order {
         return if (la < ra) .lt else .gt;
     };
 
+    // deep value comparison for tables
+    if (lh.asTable()) |lid| if (rh.asTable()) |rid| {
+        if (lid == rid) return .eq;
+        const l_table = vm.tables.get(lid) catch return .gt;
+        const r_table = vm.tables.get(rid) catch return .gt;
+        if (l_table.count() != r_table.count()) return .gt;
+
+        // compare array part
+        if (l_table.array.items.len != r_table.array.items.len) return .gt;
+        for (l_table.array.items, 0..) |l_val, i| {
+            if (compare(vm, l_val, r_table.array.items[i]) != .eq) return .gt;
+        }
+
+        // compare hash part
+        var it = l_table.hash.orderedIterator();
+        while (it.next()) |entry| {
+            const r_val = r_table.getRaw(entry.key, vm) orelse return .gt;
+            if (compare(vm, entry.val, r_val) != .eq) return .gt;
+        }
+        return .eq;
+    };
+
     return .gt;
 }
 
@@ -112,7 +134,7 @@ pub inline fn evalCachedFast(
         // strings and tuples are value types, fall through to compare()
         if ((lhs.bits & BOX_MASK) == BOX_TAG) {
             const tag = lhs.tag();
-            if (tag != .string and tag != .tuple and tag != .number) {
+            if (tag != .string and tag != .tuple and tag != .number and tag != .table) {
                 const is_eq = lhs.bits == rhs.bits;
                 VM.regWrite(slots, base, instr.a, Data.new.boolean(if (op == .eq) is_eq else !is_eq));
                 return;
@@ -159,7 +181,29 @@ pub inline fn evalCachedFast(
                 const is_eq = switch (l_tag) {
                     .atom => lhs.asAtom().? == rhs.asAtom().?,
                     .function => lhs.asFunction().? == rhs.asFunction().?,
-                    .table => lhs.asTable().? == rhs.asTable().?,
+                    .table => blk: {
+                        const lid = lhs.asTable().?;
+                        const rid = rhs.asTable().?;
+                        if (lid == rid) break :blk true;
+
+                        const l_table = vm.tables.get(lid) catch break :blk false;
+                        const r_table = vm.tables.get(rid) catch break :blk false;
+                        if (l_table.count() != r_table.count()) break :blk false;
+
+                        // compare array part
+                        if (l_table.array.items.len != r_table.array.items.len) break :blk false;
+                        for (l_table.array.items, 0..) |l_val, i| {
+                            if (compare(vm, l_val, r_table.array.items[i]) != .eq) break :blk false;
+                        }
+
+                        // compare hash part
+                        var it = l_table.hash.orderedIterator();
+                        while (it.next()) |entry| {
+                            const r_val = r_table.getRaw(entry.key, vm) orelse break :blk false;
+                            if (compare(vm, entry.val, r_val) != .eq) break :blk false;
+                        }
+                        break :blk true;
+                    },
                     .struct_val => lhs.asStructVal().? == rhs.asStructVal().?,
                     .struct_type => lhs.asStructType().? == rhs.asStructType().?,
                     .foreign => lhs.asForeign().? == rhs.asForeign().?,
