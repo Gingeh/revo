@@ -1,20 +1,27 @@
 # `rng.rand` returns a random integer in the range [0, upper_bound]
 print("rng.rand(10) = #{rng.rand(10)}")
 
+# `rng.rand_float` returns a random float between 0 and 1
+print("rng.rand_float() = #{rng.rand_float()}")
+
 # `rng.range` returns a random integer in the range [lower_bound, upper_bound]
 print("rng.range(4, 12) = #{rng.range(4, 12)}")
 
-# `rng.choice` returns a random element from the given table
-print("rng.choice(#{rng.choice({1, 2, 3, hi, :false})}) = #{rng.choice({1, 2, 3, 'hi', :false})}")
+# `rng.choice` returns a random element from the given table. 
+# Excluding named fields, so something like `rng.choice({"hi" = 1, "bye" = 2})` will always return `:nil`.
+print("rng.choice({1, 2, 3, 'hi', :false}) = #{rng.choice({1, 2, 3, 'hi', :false})}")
 
-print("\n --- Post `set_seed(2226)` -----")
-rng.set_seed(2226) # allows for statically assigning the seed to be used for random number generation
+print("\n --- set_seed(2226) -----")
+# `rng.set_seed` statically sets the seed of the number generator
+rng.set_seed(2226) 
 
-for _ in 0..3 
-    print(rng.rand(10)) # this will always come out to `10`
+# This will produce the same sequence of numbers every time
+for _ in 0..7
+    print(rng.rand(10))
 
-rng.revert_seed() # Reverts the current seed back to being automatically set to the current time per generation
+rng.revert_seed() # Reverts the current seed back to being set to the current time
 
-print("\n --- Post `revert_seed()` -----")
-for _ in 0..3 
-    print(rng.rand(10)) # the results should differ now
+print("\n --- revert_seed -----")
+# The sequence is now dependent on the current time again
+for _ in 0..7
+    print(rng.rand(10)) 

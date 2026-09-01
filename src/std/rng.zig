@@ -65,11 +65,8 @@ pub fn randFloat(args: []const Data, vm: *VM) !HostResult {
 pub fn choice(args: []const Data, vm: *VM) !HostResult {
     const tid = args[0].asTable().?;
 
-    // gusic: I have no idea if this is the right error to use, please don't kill me if it isn't
-    const table = vm.tables.get(tid) catch return error.RuntimeError;
+    const table = try vm.tables.get(tid);
 
-    // gusic: We need to account for when a table has no array elements otherwise bad things happen.
-    //        Perhaps this function should return (:some, T) or :none instead?
     if (table.array.items.len > 0) {
         const idx = randomNumber(usize, vm, 0, table.array.items.len - 1);
 
@@ -103,14 +100,32 @@ test "getting random element from table" {
     , 3);
 }
 
+test "nil from a table with only named members" {
+    try testing.topTrue(
+        \\ let t = {"hi" = 1, "bye" = 2}
+        \\ let result = :true
+        \\
+        \\ for _ in 0..100 
+        \\   result = result and rng.choice(t) == :nil
+        \\
+        \\ result
+    );
+}
+
 test "seed setting and resetting" {
     try testing.topTrue(
         \\ rng.set_seed(2226)
-        \\ const x = rng.rand(10)
+        \\ let x_total = 0 
+        \\
+        \\ for x in 0..10 
+        \\   x_total += rng.rand(x)
         \\
         \\ rng.set_seed(7)
-        \\ const y = rng.rand(10)
+        \\ let y_total = 0
         \\
-        \\ x != y
+        \\ for y in 0..10
+        \\   y_total += rng.rand(y)
+        \\
+        \\ x_total == 16 and y_total == 24
     );
 }
