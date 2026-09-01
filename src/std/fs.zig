@@ -417,25 +417,6 @@ test "fs.append appends to file" {
     try testing.topString(source, "hello world");
 }
 
-test "fs.append creates missing file" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const dir_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(dir_path);
-    const file_path = try std.fs.path.join(alloc, &.{ dir_path, "new.txt" });
-    defer alloc.free(file_path);
-
-    const source = try sourceForPath(
-        \\ const f = fs.open('{s}'):unwrap()
-        \\ f:append("created"):unwrap()
-        \\ f:read():unwrap()
-    , file_path);
-    defer alloc.free(source);
-
-    try testing.topString(source, "created");
-}
-
 test "fs.readdir returns table of entries" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

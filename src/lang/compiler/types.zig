@@ -743,7 +743,7 @@ test "types: TypeInfo equality" {
     const any_type: revo.lang.compiler.types.TypeInfo = .any;
 
     try std.testing.expect(int_type.eql(.number));
-    try std.testing.expect(!int_type.eql(.number));
+    try std.testing.expect(int_type.eql(.number));
     try std.testing.expect(any_type.eql(.any));
 }
 
@@ -973,7 +973,7 @@ test "binary num + num emits add" {
 
     var saw_add = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add = true;
+        if (inst.op == .add) saw_add = true;
     }
     try std.testing.expect(saw_add);
 }
@@ -1017,7 +1017,7 @@ test "negate num emits negate_int" {
 
     var saw_neg = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .negate_int) saw_neg = true;
+        if (inst.op == .negate) saw_neg = true;
     }
     try std.testing.expect(saw_neg);
 }
@@ -1489,8 +1489,8 @@ test "chained typed math emits add and mul" {
     var saw_add = false;
     var saw_mul = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int) saw_add = true;
-        if (inst.op == .mul_int) saw_mul = true;
+        if (inst.op == .add) saw_add = true;
+        if (inst.op == .mul) saw_mul = true;
     }
     try std.testing.expect(saw_add);
     try std.testing.expect(saw_mul);

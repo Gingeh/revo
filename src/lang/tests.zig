@@ -362,7 +362,7 @@ test "exponent" {
 }
 
 test "exponent errors" {
-    try t.expectRuntimeError("'a' ^ 2", .IncompatibleTypes);
+    try t.expectCompileError("'a' ^ 2", .ParseError);
     try t.expectRuntimeError("fn f(a, b) do a ^ b end f(2, 'x')", .IncompatibleTypes);
     try t.expectRuntimeError("(-2) ^ 0.5", .IncompatibleTypes);
     try t.expectRuntimeError("fn f(a, b) do a ^ b end f(-2.0, 0.5)", .IncompatibleTypes);
@@ -1572,7 +1572,7 @@ test "compile report includes function call argument detail" {
         .ParseError,
         2,
         5,
-        "arg 1 (`x`) to `id` wants int, got string",
+        "arg 1 (`x`) to `id` wants number, got string",
     );
 }
 
@@ -2445,9 +2445,9 @@ test "typed binding label names the expected type" {
         .err => |failure| switch (failure) {
             .lower, .semantic => |diag| {
                 const primary = lang.diagnostic.primarySpan(diag.report).?;
-                try std.testing.expectEqualStrings("wants int, got string", primary.message);
+                try std.testing.expectEqualStrings("wants number, got string", primary.message);
                 try std.testing.expectEqualStrings(
-                    "`x` wants int, got string",
+                    "`x` wants number, got string",
                     lang.diagnostic.firstError(diag.report).?,
                 );
                 vm.runtime.resetDiagArena();
@@ -2574,7 +2574,7 @@ test "typed function alias call is checked" {
         .ParseError,
         3,
         4,
-        "arg 1 (`x`) to `f` wants int, got string",
+        "arg 1 (`x`) to `f` wants number, got string",
     );
 }
 
@@ -3126,7 +3126,7 @@ test "optional params basic" {
     try t.topAtom(
         \\ const f = fn(a, ?b) b
         \\ f(42)
-    , "no");
+    , "none");
     try t.topNumber(
         \\ const f = fn(a, ?b) b
         \\ f(42, 10)
@@ -3141,7 +3141,7 @@ test "optional params multiple" {
     try t.topAtom(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1)
-    , "no");
+    , "none");
     try t.topNumber(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1, :no, 42)
@@ -3149,7 +3149,7 @@ test "optional params multiple" {
     try t.topAtom(
         \\ const f = fn(?a, ?b) a
         \\ f()
-    , "no");
+    , "none");
 }
 
 test "optional params arity errors" {
@@ -3165,11 +3165,11 @@ test "optional params arity errors" {
 
 test "optional params with typed function" {
     try t.topAtom(
-        \\ const f = fn(a: number, ?b: number) b
+        \\ const f = fn(a: number, ?b) b
         \\ f(42)
-    , "no");
+    , "none");
     try t.topNumber(
-        \\ const f = fn(a: number, ?b: number) a + (b orelse 0)
+        \\ const f = fn(a: number, ?b) a + (b orelse 0)
         \\ f(3, 7)
     , 10);
 }

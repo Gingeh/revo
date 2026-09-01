@@ -2667,7 +2667,7 @@ test "workspace query surface" {
     var hov = try ws.hover(alloc, id, .{ .line = 2, .character = 1 }, query_opts);
     try std.testing.expect(hov != null);
     defer if (hov) |*h| h.deinit(alloc);
-    try std.testing.expect(std.mem.find(u8, hov.?.text, "int") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "number") != null);
     try std.testing.expect(std.mem.find(u8, hov.?.text, "```revo") != null);
 }
 

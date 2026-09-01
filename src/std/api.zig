@@ -795,7 +795,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     try testing.expectEqualStrings("iter.range(bound: num, rest: num...) -> function", range.sig);
     try testing.expectEqual(@as(usize, 2), range.params.len);
     try testing.expectEqualStrings("bound", range.params[0][0]);
-    try testing.expectEqualStrings("number", range.params[0][1]);
+    try testing.expectEqualStrings("num", range.params[0][1]);
     try testing.expectEqualStrings("rest", range.params[1][0]);
     try testing.expectEqualStrings("num...", range.params[1][1]);
     try testing.expect(range.variadic);

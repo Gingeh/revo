@@ -752,7 +752,7 @@ fn renderBoxSpanBlock(
     const total_w = displayWidth(first_line.text, 0) -| first_trim_w;
     const top_vs = @max(@as(usize, 1), total_w -| top_dashes);
     const last_span_len = @min(last_line.span_end -| last_line.span_start, last_line.text.len);
-    const bottom_dashes = (displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w) -| 1;
+    const bottom_dashes = @max(@as(usize, 1), (displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w) -| 1);
     // top edge: box header and caret stem
     try writeBoxPrefix(writer, line_width, 3);
     for (0..marker_offset) |_| try writer.writeByte(' ');
@@ -842,7 +842,7 @@ test "multi-line span with bracket" {
         \\after
     ,
         .{ .start = 14, .end = 36, .line = 2, .column = 18 },
-        "x wants string, got int",
+        "x wants string, got number",
         &.{},
         &.{},
     );
@@ -853,7 +853,7 @@ test "multi-line span with bracket" {
     try std.testing.expect(std.mem.find(u8, output, "|   2 +") != null);
     try std.testing.expect(std.mem.find(u8, output, "|   3") != null);
     try std.testing.expect(std.mem.find(u8, output, "+-^") != null);
-    try std.testing.expect(std.mem.find(u8, output, "x wants string, got int") != null);
+    try std.testing.expect(std.mem.find(u8, output, "x wants string, got number") != null);
     try std.testing.expect(std.mem.find(u8, output, "after") != null);
 }
 
