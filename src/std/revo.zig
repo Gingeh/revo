@@ -29,7 +29,7 @@ pub fn eval(args: []const Data, vm: *VM) !HostResult {
     };
 
     const source_name = "<eval>";
-    const res = revo.module.runModule(vm, source_name, source, false) catch {
+    const res = revo.module.runModule(vm, source_name, source, true) catch {
         return .other("eval failed");
     };
 

@@ -125,6 +125,87 @@ fn wrapModule(alloc: std.mem.Allocator, root: *Node) !*Node {
     return result;
 }
 
+/// botch, pls FIXME
+/// walk AST recursively: any fn_expr whose body contains pub decls
+/// gets its body wrapped so calling the closure returns @exports
+fn wrapPubFunctions(alloc: std.mem.Allocator, node: *Node) !void {
+    switch (node.expr) {
+        .fn_expr => |*f| {
+            try wrapPubFunctions(alloc, f.body);
+            if (bodyHasPub(f.body)) {
+                f.body = try wrapModule(alloc, f.body);
+            }
+        },
+        .block => |items| {
+            for (items) |item| try wrapPubFunctions(alloc, item);
+        },
+        .decl => |*d| try wrapPubFunctions(alloc, d.inner),
+        .binding => |*b| {
+            try wrapPubFunctions(alloc, b.target);
+            try wrapPubFunctions(alloc, b.value);
+        },
+        .if_expr => |*v| {
+            try wrapPubFunctions(alloc, v.condition);
+            try wrapPubFunctions(alloc, v.then_expr);
+            if (v.else_expr) |e| try wrapPubFunctions(alloc, e);
+        },
+        .match_expr => |*m| {
+            try wrapPubFunctions(alloc, m.subject);
+            for (m.arms) |*arm| try wrapPubFunctions(alloc, arm.then);
+        },
+        .loop_expr => |*l| try wrapPubFunctions(alloc, l.body),
+        .for_loop => |*f| try wrapPubFunctions(alloc, f.body),
+        .while_loop => |*w| try wrapPubFunctions(alloc, w.body),
+        .labeled_block => |*lb| try wrapPubFunctions(alloc, lb.body),
+        .return_expr => |v| if (v) |inner| try wrapPubFunctions(alloc, inner),
+        .assign_expr => |*a| {
+            try wrapPubFunctions(alloc, a.target);
+            try wrapPubFunctions(alloc, a.value);
+        },
+        .call => |*c| {
+            try wrapPubFunctions(alloc, c.callee);
+            for (c.args) |arg| try wrapPubFunctions(alloc, arg);
+        },
+        .unary => |*u| try wrapPubFunctions(alloc, u.expr),
+        .binary => |*b| {
+            try wrapPubFunctions(alloc, b.left);
+            try wrapPubFunctions(alloc, b.right);
+        },
+        .and_expr => |ae| {
+            try wrapPubFunctions(alloc, ae.left);
+            try wrapPubFunctions(alloc, ae.right);
+        },
+        .or_expr => |ae| {
+            try wrapPubFunctions(alloc, ae.left);
+            try wrapPubFunctions(alloc, ae.right);
+        },
+        .field => |*f| try wrapPubFunctions(alloc, f.object),
+        .index => |*i| {
+            try wrapPubFunctions(alloc, i.object);
+            try wrapPubFunctions(alloc, i.key);
+        },
+        .table => |entries| {
+            for (entries) |*e| {
+                if (e.key) |k| try wrapPubFunctions(alloc, k);
+                try wrapPubFunctions(alloc, e.value);
+            }
+        },
+        .tuple => |items| {
+            for (items) |item| try wrapPubFunctions(alloc, item);
+        },
+        else => {},
+    }
+}
+
+fn bodyHasPub(node: *Node) bool {
+    return switch (node.expr) {
+        .block => |items| for (items) |item| {
+            if (pubName(item) != null) break true;
+        } else false,
+        else => pubName(node) != null,
+    };
+}
+
 fn allocNode(alloc: std.mem.Allocator, span: ast.Span, expr: ast.Expr) !*Node {
     const n = try alloc.create(ast.Node);
     n.* = .{ .span = span, .expr = expr };
@@ -402,6 +483,9 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     // module scope? wrap ast to build exports table from pub decls
     if (opts.module_scope)
         parsed.root = try wrapModule(arena.allocator(), parsed.root);
+
+    // closures with pub decls should return their @exports table
+    try wrapPubFunctions(arena.allocator(), parsed.root);
 
     if (!opts.skip_preload and comptime !revo.is_freestanding)
         preloadImports(vm, parsed.root, arena.allocator()) catch |err| switch (err) {
