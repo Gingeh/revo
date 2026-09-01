@@ -659,6 +659,75 @@ pub fn compileIf(
     self.patchJump(end_jump);
 }
 
+pub fn compileUnless(
+    self: *Compiler,
+    condition: *const Node,
+    then_expr: *const Node,
+    else_expr: ?*Node,
+) !void {
+    if (state.currentFunctionState(self) == null)
+        return self.fail(.UnsupportedSyntax, condition, "unless requires function scope");
+
+    const saved = saveRegState(self);
+    errdefer restoreRegState(self, saved);
+
+    try self.compile(condition, true);
+    const else_jump = try self.jump(.jump_if_true);
+    const branch_base_registers = self.active_registers;
+    const join_depth = self.value_stack.items.len;
+
+    try state.pushScope(self);
+    errdefer state.popScope(self);
+    if (conditionTypeHint(condition)) |hint| {
+        try state.setLocalTypeHint(self, hint.name, hint.type_info);
+    }
+    try self.compile(then_expr, true);
+    state.popScope(self);
+    const then_registers = self.active_registers;
+
+    // both paths must leave the if expr's value in the shared branch
+    // register; single-expression branches go there by themselves, but
+    // do/stmt blocks push their value in a fresh register, so copy
+    // it into place before jumping to the join
+    if (self.value_stack.items.len > join_depth) {
+        const then_val = self.value_stack.items[self.value_stack.items.len - 1];
+        if (then_val.result_reg != branch_base_registers) {
+            try self.spans.append(self.alloc, self.active_span);
+            _ = try self.record(.move, &.{.{ .inst = then_val }}, true, @intCast(branch_base_registers), 0);
+        }
+    }
+
+    const end_jump = try self.jump(.jump);
+    self.patchJump(else_jump);
+    self.active_registers = branch_base_registers; // reset before else so both branches start at same depth
+
+    try state.pushScope(self);
+    errdefer state.popScope(self);
+    if (else_expr) |branch| {
+        try self.compile(branch, true);
+        _ = type_check.inferExprType(self, branch);
+    } else try self.pushNil();
+    state.popScope(self);
+
+    // same normalization for the else path, emitted at the join so the
+    // then path (which jumped past it) is unaffected
+    if (self.value_stack.items.len > join_depth) {
+        const else_val = self.value_stack.items[self.value_stack.items.len - 1];
+        if (else_val.result_reg != branch_base_registers) {
+            try self.spans.append(self.alloc, self.active_span);
+            _ = try self.record(.move, &.{.{ .inst = else_val }}, true, @intCast(branch_base_registers), 0);
+        }
+    }
+
+    if (then_registers != self.active_registers) {
+        // equalize, push nils if else was shorter, then clamp
+        while (self.active_registers < then_registers)
+            try self.pushNil();
+        self.active_registers = then_registers;
+    }
+    self.patchJump(end_jump);
+}
+
 fn conditionTypeHint(condition: *const Node) ?TypeHint {
     return switch (condition.expr) {
         .call => |call| blk: {
@@ -868,3 +937,4 @@ pub fn compileLabeledBlock(self: *Compiler, label: []const u8, body: *const Node
 
     self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
+

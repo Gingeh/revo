@@ -288,6 +288,7 @@ pub const Expr = union(enum) {
     field: struct { object: *Node, name: []const u8 },
     index: struct { object: *Node, key: *Node },
     if_expr: struct { condition: *Node, then_expr: *Node, else_expr: ?*Node },
+    unless_expr: struct { condition: *Node, then_expr: *Node, else_expr: ?*Node },
     match_expr: struct { subject: *Node, arms: []MatchArm },
     fn_expr: struct {
         params: []FnParam,
@@ -487,6 +488,18 @@ pub const Node = struct {
             },
             .if_expr => |v| {
                 try writer.writeAll("(if");
+                try sep(writer, depth, 1);
+                try v.condition.printAt(writer, child(depth));
+                try sep(writer, depth, 1);
+                try v.then_expr.printAt(writer, child(depth));
+                if (v.else_expr) |e| {
+                    try sep(writer, depth, 1);
+                    try e.printAt(writer, child(depth));
+                }
+                try close(writer, depth);
+            },
+            .unless_expr => |v| {
+                try writer.writeAll("(unless");
                 try sep(writer, depth, 1);
                 try v.condition.printAt(writer, child(depth));
                 try sep(writer, depth, 1);
@@ -1226,6 +1239,11 @@ pub fn walkExpr(
             .then_expr = try ctx.walk(allocator, v.then_expr, ctx),
             .else_expr = if (v.else_expr) |e| try ctx.walk(allocator, e, ctx) else null,
         } }),
+        .unless_expr => |v| allocNode(allocator, expr.span, .{ .unless_expr = .{
+            .condition = try ctx.walk(allocator, v.condition, ctx),
+            .then_expr = try ctx.walk(allocator, v.then_expr, ctx),
+            .else_expr = if (v.else_expr) |e| try ctx.walk(allocator, e, ctx) else null,
+        } }),
         .fn_expr => |v| allocNode(allocator, expr.span, .{ .fn_expr = .{
             .params = v.params,
             .return_type = v.return_type,
@@ -1383,3 +1401,4 @@ pub fn walkExpr(
         else => expr,
     };
 }
+

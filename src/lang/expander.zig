@@ -250,6 +250,13 @@ pub const AstSubstituter = struct {
                     .else_expr = if (v.else_expr) |e| try self.substitute(e) else null,
                 },
             }),
+            .unless_expr => |v| try self.alloc(node.span, .{
+                .unless_expr = .{
+                    .condition = try self.substitute(v.condition),
+                    .then_expr = try self.substitute(v.then_expr),
+                    .else_expr = if (v.else_expr) |e| try self.substitute(e) else null,
+                },
+            }),
             .fn_expr => |f| try self.alloc(node.span, .{
                 .fn_expr = .{ .params = f.params, .return_type = f.return_type, .body = try self.substitute(f.body), .type_params = f.type_params },
             }),
@@ -919,3 +926,4 @@ pub const testing = struct {
         try doesMatch(expanded, "(block nil nil foo 42)");
     }
 };
+

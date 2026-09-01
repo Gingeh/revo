@@ -149,6 +149,11 @@ fn wrapPubFunctions(alloc: std.mem.Allocator, node: *Node) !void {
             try wrapPubFunctions(alloc, v.then_expr);
             if (v.else_expr) |e| try wrapPubFunctions(alloc, e);
         },
+        .unless_expr => |*v| {
+            try wrapPubFunctions(alloc, v.condition);
+            try wrapPubFunctions(alloc, v.then_expr);
+            if (v.else_expr) |e| try wrapPubFunctions(alloc, e);
+        },
         .match_expr => |*m| {
             try wrapPubFunctions(alloc, m.subject);
             for (m.arms) |*arm| try wrapPubFunctions(alloc, arm.then);
@@ -856,3 +861,4 @@ const diagnostic = lang.diagnostic;
 pub const Artifact = compiler.Artifact;
 pub const ParseFailure = parser.ParseFailure;
 pub const LowerFailure = compiler.LowerFailure;
+

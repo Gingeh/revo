@@ -538,6 +538,10 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
             inferExprType(ctx, v.then_expr),
             if (v.else_expr) |e| inferExprType(ctx, e) else null,
         ),
+        .unless_expr => |v| inferIfType(
+            inferExprType(ctx, v.then_expr),
+            if (v.else_expr) |e| inferExprType(ctx, e) else null,
+        ),
 
         .tuple => |items| inferTupleType(ctx, items),
         .table => |entries| inferTableType(ctx, entries),
@@ -2307,3 +2311,23 @@ test "manifest .d.rv types .so imports, sig fallback without one" {
         }
     }
 }
+
+//
+// unless/else branch type unification
+//
+test "unless/else typed branches unify to num" {
+    try t.topNumber(
+        \\ let x: num = 5
+        \\ let y = unless x > 0 10 else 20
+        \\ y
+    , 20);
+}
+
+test "unless/else typed branches unify to string" {
+    try t.topString(
+        \\ let x: num = 0
+        \\ let y = unless x > 0 "pos" else "non-pos"
+        \\ y
+    , "pos");
+}
+
