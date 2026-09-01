@@ -2446,6 +2446,11 @@ fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
             try walkRoles(v.then_expr, m);
             if (v.else_expr) |e| try walkRoles(e, m);
         },
+        .unless_expr => |v| {
+            try walkRoles(v.condition, m);
+            try walkRoles(v.then_expr, m);
+            if (v.else_expr) |e| try walkRoles(e, m);
+        },
         .index => |idx| {
             try walkRoles(idx.object, m);
             try walkRoles(idx.key, m);
@@ -2925,3 +2930,4 @@ test "workspace sig map survives typed fn invalidation" {
     try std.testing.expect(p.table.key == null);
     try std.testing.expect(p.table.value.* == .any);
 }
+

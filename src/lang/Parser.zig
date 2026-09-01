@@ -500,6 +500,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_not => self.parseUnary(.not, 35, token),
         .lparen => self.parseParenExpr(token),
         .kw_if => self.parseIf(token),
+        .kw_unless => self.parseUnless(token),
         .kw_match => self.parseMatch(token, null),
         .kw_do => self.parseBlock(token),
         .kw_loop => self.parseLoop(token),
@@ -736,6 +737,17 @@ fn parseIf(self: *Parser, start: Token) anyerror!*Node {
     const end_span = if (else_expr) |branch| branch.span else then_expr.span;
     return self.allocExpr(Span.merge(start.span(), end_span), .{
         .if_expr = .{ .condition = condition, .then_expr = then_expr, .else_expr = else_expr },
+    });
+}
+
+/// unless <expr> then <expr> else <expr>
+fn parseUnless(self: *Parser, start: Token) anyerror!*Node {
+    const condition = try self.parseScoped(.kw_else, self.allow_bare_calls, 0);
+    const then_expr = try self.parseExpression(0);
+    const else_expr = if (self.match(.kw_else)) try self.parseExpression(0) else null;
+    const end_span = if (else_expr) |branch| branch.span else then_expr.span;
+    return self.allocExpr(Span.merge(start.span(), end_span), .{
+        .unless_expr = .{ .condition = condition, .then_expr = then_expr, .else_expr = else_expr },
     });
 }
 
@@ -2148,7 +2160,7 @@ const call_stmt_boundary_tokens = makeTokenSet(&.{
 const expr_start_tokens = makeTokenSet(&.{
     .number,    .string,       .multiline_string, .hash,      .ident,
     .kw_const,  .kw_let,       .kw_macro,         .kw_struct, .minus,
-    .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,
+    .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,       .kw_unless,
     .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_continue,
     .kw_return, .kw_import,    .kw_spawn,         .kw_join,   .kw_yield,
     .lsquiggly, .kw_type,      .kw_pub,           .eof,
@@ -2536,3 +2548,4 @@ test "declare defaults to pub" {
     const root = try parseTokens(alloc, tokens);
     try std.testing.expect(root.expr.decl.pub_);
 }
+

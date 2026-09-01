@@ -766,6 +766,7 @@ pub const Compiler = struct {
                 }
             },
             .if_expr => |v| try flow.compileIf(self, v.condition, v.then_expr, v.else_expr),
+            .unless_expr => |v| try flow.compileUnless(self, v.condition, v.then_expr, v.else_expr),
             .decl => |d| {
                 switch (d.inner.expr) {
                     .binding => |*b| {
@@ -1860,3 +1861,4 @@ fn immOpFor(op: ast.BinOp) ?Opcode {
         else => null,
     };
 }
+

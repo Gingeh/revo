@@ -1,3 +1,4 @@
+
 // zlint-disable line-length -- yeah
 const std = @import("std");
 const ast = @import("ast.zig");
@@ -42,6 +43,7 @@ pub const TokenType = enum {
     kw_type,
     kw_fn,
     kw_if,
+    kw_unless,
     kw_else,
     kw_match,
     kw_when,
@@ -122,7 +124,7 @@ pub const TokenType = enum {
             .number => .number,
             .string, .multiline_string, .backtick_string => .string,
             .hash => .enum_member,
-            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub, .kw_declare => .keyword,
+            .kw_const, .kw_let, .kw_macro, .kw_test, .kw_suite, .kw_skip, .kw_struct, .kw_type, .kw_fn, .kw_if, .kw_unless, .kw_else, .kw_match, .kw_when, .kw_do, .kw_end, .kw_loop, .kw_for, .kw_while, .kw_global, .kw_in, .kw_break, .kw_continue, .kw_return, .kw_import, .kw_spawn, .kw_join, .kw_yield, .kw_and, .kw_or, .kw_not, .kw_band, .kw_bor, .kw_bxor, .kw_shl, .kw_shr, .kw_comp, .kw_proc, .kw_orelse, .kw_pub, .kw_declare => .keyword,
             .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .semicolon, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
             .doc_comment => .comment,
@@ -147,6 +149,7 @@ pub const TokenType = enum {
         .{ "type", .kw_type },
         .{ "fn", .kw_fn },
         .{ "if", .kw_if },
+        .{ "unless", .kw_unless },
         .{ "else", .kw_else },
         .{ "match", .kw_match },
         .{ "when", .kw_when },
@@ -1640,3 +1643,4 @@ test "lexes declare keyword" {
         },
     );
 }
+

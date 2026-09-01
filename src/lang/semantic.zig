@@ -615,6 +615,7 @@ const SemanticChecker = struct {
                 break :blk t;
             },
             .if_expr => |v| try self.analyzeIf(v, node.span),
+            .unless_expr => |v| try self.analyzeUnless(v, node.span),
             .ident => |name| try self.analyzeIdent(name, node.span),
             .unary => |u| blk: {
                 _ = try self.analyzeNode(u.expr);
@@ -1496,6 +1497,18 @@ const SemanticChecker = struct {
         return .any;
     }
 
+    fn analyzeUnless(self: *SemanticChecker, v: anytype, span: ast.Span) !types_mod.TypeInfo {
+        _ = span;
+        _ = try self.analyzeNode(v.condition);
+        const then_type = try self.analyzeNode(v.then_expr);
+        if (v.else_expr) |else_expr| {
+            const else_type = try self.analyzeNode(else_expr);
+
+            return if (then_type == .any) else_type else then_type;
+        }
+        return .any;
+    }
+
     fn appendTypeMismatch(
         self: *SemanticChecker,
         span: ast.Span,
@@ -1558,3 +1571,4 @@ const SemanticChecker = struct {
         } });
     }
 };
+
