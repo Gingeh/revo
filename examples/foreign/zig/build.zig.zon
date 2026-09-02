@@ -5,7 +5,7 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         // give yours a proper git path instead
-        .revo = .{ .path = "../.." },
+        .revo = .{ .path = "../../.." },
     },
     .paths = .{
         "functions.zig",

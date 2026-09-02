@@ -1,6 +1,6 @@
 CC ?= cc
-CFLAGS ?= -std=c99 -Wall -Wextra -I../../zig-out/include/revo -lm
-LIB = ../../zig-out/lib/liberevo.a
+CFLAGS ?= -std=c99 -Wall -Wextra -I../../../zig-out/include/revo -lm
+LIB = ../../../zig-out/lib/liberevo.a
 UNAME := $(shell uname -s)
 
 # for my specific configuration, this is the only way to make it work on osx15.5

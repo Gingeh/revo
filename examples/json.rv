@@ -1,13 +1,13 @@
 #!/usr/bin/env revo
   
-```json
-[
-  "reads json from stdin, pretty-prints a revo table into stdout",
-  "does not use the builtin json.decode functionality",
-  "use `revo --test json.rv` to run the tests",
-]
-{ "@author": "vividsector" }
-```
+  ```json
+  [
+    "reads json from stdin, pretty-prints a revo table into stdout",
+    "does not use the builtin json.decode functionality",
+    "use `revo --test json.rv` to run the tests",
+  ]
+  { "@author": "vividsector" }
+  ```
 
 !#
 

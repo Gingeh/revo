@@ -1,4 +1,3 @@
-
 # built-in for tables, tuples, strings
 for v in {10, 20, 30} do print(v) end
 # 10 20 30

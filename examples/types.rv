@@ -1,5 +1,6 @@
 #!
   revo's type system!
+  (not intended to be ran)
  
   | annotations are optional:
       when present, the compiler enforces them at compile time

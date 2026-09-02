@@ -757,7 +757,11 @@ const SemanticChecker = struct {
                 try self.declare(stmt.name, .any, null);
                 break :blk .any;
             },
-            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .macro_expr, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
+            .macro_expr => |m| blk: {
+                try self.declare(m.name, .any, null);
+                break :blk .any;
+            },
+            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
         };
     }
 
@@ -1170,10 +1174,9 @@ const SemanticChecker = struct {
         // bare ident callees get the same unknown-name check as plain idents -
         // inferExprType would silently fall back to .any
         if (call.callee.expr == .ident) {
-            // macro call sites: the arguments are raw syntax for the macro,
-            // FIXME: figure out whether skipping analysis of them entirely (like is done here) is fine
+            // macro call sites: the arguments and callee name are raw syntax
+            // for the macro, not real revo expressions,, just skip analysis entirely
             if (std.mem.endsWith(u8, call.callee.expr.ident, "!")) {
-                _ = try self.analyzeIdent(call.callee.expr.ident, call.callee.span);
                 return .any;
             }
             _ = try self.analyzeIdent(call.callee.expr.ident, call.callee.span);
