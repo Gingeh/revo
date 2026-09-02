@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- any function is a module
+    ```ruby
+    fn f() do
+      pub const x = "valx"
+      pub const a = 123
+    end
+
+    f() |> assert_eq({
+      x = "valx",
+      a = 123
+    })
+    ```
 - docgen documents structs, type aliases, and modules, with documented struct fields rendered under the struct entry
 
   `revo docs` now outputs markdown by default, `revo docs --html` outputs real html
@@ -31,15 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ```
     ```ruby
     #!/usr/bin/env/revo
-    a shebang can just go right there
+    a shebang can also just go right there
     !#
     ...
     ```
 - stdlib:
   - `exit(number)`
-  - `revo.dofile(path)`
+  - `revo.dofile(path)` -- do file & return; resole path like `import`
 
-    like `revo.eval` but reads the source from a file, relative paths resolve against the current module's directory like `import`, then cwd
 - default arguments
     ```ruby
         # vvvvv here
@@ -67,11 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zig extensions, examples for zig extensions (`examples/zig`)
 - access tuple fields via dot: `(:a, :b).0 == :a`
 - `HACKING.md`
+- `flake.nix`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later
 - repl now connected to the same architecture as the lsp, giving you richer highlighting
 
 ### Changed
 
+- `table.remove(t, key)` -- now works with both indices (array part) and keys (hash part)
 - **Breaking:** doc-comments are `#* ... *#` now, comments attach to any declaration and are stored in types, hover follows aliases, repl `:h` renders exactly what hover renders
 - **Breaking:** cli is now subcommand-based: `compile`, `repl`, `dis`, `bench`, `docs`, `lsp`. options must come before the script name, everything after goes to runtime argv. the old flags like `-b` and `--dis` are gone in favor of their subcommands
 - **Breaking:** c api values use nanbox: `RevoData` is a single u64 now, boxed payloads are intern ids instead of pointers
