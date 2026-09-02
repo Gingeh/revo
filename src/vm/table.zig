@@ -311,8 +311,8 @@ pub const Table = struct {
             self.last = new_last;
         }
 
-        fn remove(self: *HashPart, key: Data, vm: *revo.VM) bool {
-            const idx = self.lookup(key, vm) orelse return false;
+        fn remove(self: *HashPart, key: Data, vm: *revo.VM) ?u32 {
+            const idx = self.lookup(key, vm) orelse return null;
             const mask: u32 = @intCast(self.buckets.len - 1);
 
             // unlink from insertion-order list
@@ -344,7 +344,12 @@ pub const Table = struct {
                 hole = probe;
             }
 
-            return true;
+            return idx;
+        }
+
+        pub fn removeAndReturn(self: *HashPart, key: Data, vm: *revo.VM) ?Data {
+            const idx = self.remove(key, vm) orelse return null;
+            return self.buckets[idx].val;
         }
 
         fn clone(self: *const HashPart, alloc: std.mem.Allocator) !HashPart {
@@ -498,7 +503,7 @@ pub const Table = struct {
             self.array.items[idx] = Data.new.nil();
             return true;
         }
-        return self.hash.remove(key, vm);
+        return self.hash.remove(key, vm) != null;
     }
 
     const MAX_TAG_LOOP = 200;

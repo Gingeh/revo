@@ -21,8 +21,8 @@ pub declare table.insert = fn(self: table, pos: num, value: any) -> atom
 #* inserts elements as last *#
 pub declare table.push = fn(self: table, values: any...) -> table
 
-#* removes element at position, returns removed value *#
-pub declare table.remove = fn(self: table, pos: num) -> any
+#* removes element at a position or by a specified key, returns removed value *#
+pub declare table.remove = fn(self: table, key: any) -> any
 
 #* joins array elements with delimiter *#
 pub declare table.join = fn(self: table, delim: string) -> string
