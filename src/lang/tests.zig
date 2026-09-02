@@ -2816,6 +2816,32 @@ test "macro inner binding invisible outside" {
     , .ParseError);
 }
 
+test "proc macro call arguments are not semantically analyzed" {
+    // arguments to proc macros are raw syntax, not real revo expressions.
+    // the semantic checker must not report false "unknown name" errors for
+    // identifiers used as syntax inside proc macro calls (e.g. method names
+    // passed to a doto!-style macro)
+    try t.topNumber(
+        \\ proc echo!(iter) do
+        \\   let node = iter:next()
+        \\   node
+        \\ end
+        \\ echo!(42)
+    , 42);
+}
+
+test "proc macro call with multiple args does not analyze arguments" {
+    // proc macro arguments are raw syntax; the semantic checker must not
+    // produce false "unknown name" errors inside them
+    try t.topNumber(
+        \\ proc pick!(iter) do
+        \\   let _first = iter:next()
+        \\   iter:next()
+        \\ end
+        \\ pick!(ignored, 45)
+    , 45);
+}
+
 test "numeric and string keys are distinct" {
     try t.topNumber(
         \\ const t = {}
