@@ -5,7 +5,8 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "unwrap", .f = root.define(&.{.table}, @"try") },
     .{ .name = "insert", .f = root.define(&.{ .table, .number, .any }, insert) },
     .{ .name = "push", .f = root.defineVariadic(&.{.table}, push) },
-    .{ .name = "remove", .f = root.define(&.{ .table, .any }, remove) },
+    .{ .name = "remove", .f = root.define(&.{ .table, .number }, remove) },
+    .{ .name = "remove_at_key", .f = root.define(&.{ .table, .any }, remove_at_key) },
     .{ .name = "join", .f = root.define(&.{ .table, .string }, join) },
     .{ .name = "keys", .f = root.define(&.{.table}, keys) },
     .{ .name = "values", .f = root.define(&.{.table}, values) },
@@ -66,23 +67,28 @@ fn insert(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = revo.Data.new.core(.ok) };
 }
 
-/// > table:remove(key: any) -> any
-/// removes element at a position or by a specified key, returns removed value
+/// > table:remove(pos: num) -> any
+/// removes element at position, returns removed value
 fn remove(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
+    const pos_num = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
+    const pos: i64 = root.numToInt(i64, pos_num) orelse return .errType(1, "integer num", typeof(args[1], vm));
+
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
+    if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", typeof(args[1], vm));
+
+    const pos_usize: usize = @intCast(pos);
+    const removed = table.array.orderedRemove(pos_usize);
+    return .okData(removed);
+}
+
+/// > table:remove_at_key(key: any) -> any
+/// removes element by a specified key, returns removed value
+fn remove_at_key(args: []const Data, vm: *VM) !HostResult {
+    const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
     const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
     const key = args[1];
-    // remove by index if the given key is an integer
-    if (key.asNum()) |pos_num| {
-        if (root.numToInt(i64, pos_num)) |pos| {
-            if (pos < 0 or pos >= table.array.items.len) return .errType(1, "valid index", typeof(args[1], vm));
-            const pos_usize: usize = @intCast(pos);
-            const removed = table.array.orderedRemove(pos_usize);
-            return .okData(removed);
-        }
-    }
-    // if not an integer, remove by key
     const removed = table.hash.removeAndReturn(key, vm) orelse return .other("key not found");
     return .okData(removed);
 }
