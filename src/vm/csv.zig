@@ -251,12 +251,12 @@ pub const Reader = struct {
 
     /// Gets as much buffered data as possible, issuing only a single read if none is available.
     /// Returns `""` on EOF.
-    fn peek(self: *Reader) error{ReadFailed}![]const u8 {
+    fn peek(self: *Reader) error{ ReadFailed, EndOfStream }![]const u8 {
         return getFilledBuffer(self.r);
     }
 
     /// Gets the next buffered byte. Returns `null` on EOF.
-    fn peekByte(self: *Reader) error{ReadFailed}!?u8 {
+    fn peekByte(self: *Reader) error{ ReadFailed, EndOfStream }!?u8 {
         return self.r.peekByte() catch |err| switch (err) {
             error.EndOfStream => return null,
             inline else => |e| return e,
@@ -269,7 +269,7 @@ pub const Reader = struct {
     /// - `.{ "", null }` on EOF,
     /// - `.{ data, delimiter }` if any delimiter was found (note that data may be empty),
     /// - `.{ data, null }` otherwise.
-    fn peekUntil(self: *Reader, delimiters: []const u8) error{ReadFailed}!struct { []const u8, ?u8 } {
+    fn peekUntil(self: *Reader, delimiters: []const u8) error{ ReadFailed, EndOfStream }!struct { []const u8, ?u8 } {
         const b = try self.peek();
         if (std.mem.indexOfAny(u8, b, delimiters)) |delim_idx| {
             return .{ b[0..delim_idx], b[delim_idx] };
@@ -278,7 +278,7 @@ pub const Reader = struct {
     }
 };
 
-fn getFilledBuffer(r: *std.Io.Reader) error{ReadFailed}![]const u8 {
+fn getFilledBuffer(r: *std.Io.Reader) error{ ReadFailed, EndOfStream }![]const u8 {
     if (r.bufferedLen() > 0) {
         @branchHint(.likely);
         return r.buffered();
@@ -286,7 +286,7 @@ fn getFilledBuffer(r: *std.Io.Reader) error{ReadFailed}![]const u8 {
     return getFilledBufferSlow(r);
 }
 
-fn getFilledBufferSlow(r: *std.Io.Reader) error{ReadFailed}![]const u8 {
+fn getFilledBufferSlow(r: *std.Io.Reader) error{ ReadFailed, EndOfStream }![]const u8 {
     // Rebase to nothing buffered
     r.seek = 0;
     r.end = 0;
@@ -454,10 +454,10 @@ pub const Record = struct {
     line_no: u32 = 0,
 
     /// Continuous buffer for all the fields concatenated together, separated by a null byte.
-    buffer: std.ArrayList(u8) = .{},
+    buffer: std.ArrayList(u8) = .empty,
 
     /// Indices of the null bytes terminating the nth field.
-    ends: std.ArrayList(usize) = .{},
+    ends: std.ArrayList(usize) = .empty,
 
     pub inline fn init(allocator: std.mem.Allocator) Record {
         return .{ .allocator = allocator };
