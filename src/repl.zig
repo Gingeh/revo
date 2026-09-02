@@ -117,6 +117,7 @@ fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u
     const file_id = ctx.last_file.* orelse return;
     const completions = ctx.workspace.completions(alloc, file_id, input_slice, cursor_pos) catch return;
     for (completions) |item| {
+        if (plen > item.label.len) continue;
         var label_buf: [256]u8 = undefined;
         const label_c = std.fmt.bufPrintZ(&label_buf, "{s}", .{item.label[plen..]}) catch continue;
 
