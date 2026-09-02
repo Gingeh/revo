@@ -2509,6 +2509,270 @@ fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
 }
 
 //
+// completions
+//
+
+pub const CompletionKind = enum {
+    keyword,
+    function,
+    module,
+    struct_type,
+    variable,
+    field,
+    class,
+};
+
+pub const Completion = struct {
+    label: []const u8,
+    kind: CompletionKind = .variable,
+    detail: ?[]const u8 = null,
+    insert_text: ?[]const u8 = null,
+    documentation: ?[]const u8 = null,
+};
+
+const CallSig = struct {
+    detail: []const u8,
+    insert_text: []const u8,
+};
+
+/// `detail` = name(p1: t1, ...) -> ret, `insert_text` = name(${1:p1}, ...)
+fn callSignature(
+    arena: std.mem.Allocator,
+    name: []const u8,
+    param_names: []const []const u8,
+    param_types: []const []const u8,
+    ret: ?[]const u8,
+) !CallSig {
+    var buf = std.Io.Writer.Allocating.init(arena);
+    try buf.writer.print("{s}(", .{name});
+    for (param_names, 0..) |n, i| {
+        if (i > 0) try buf.writer.print(", ", .{});
+        try buf.writer.print("{s}: {s}", .{ n, param_types[i] });
+    }
+    try buf.writer.print(")", .{});
+    if (ret) |r| try buf.writer.print(" -> {s}", .{r});
+    const detail = buf.written();
+
+    if (param_names.len == 0) return .{
+        .detail = detail,
+        .insert_text = try std.fmt.allocPrint(arena, "{s}()", .{name}),
+    };
+
+    var sbuf = std.Io.Writer.Allocating.init(arena);
+    try sbuf.writer.print("{s}(", .{name});
+    for (param_names, 1..) |n, i| {
+        if (i > 1) try sbuf.writer.print(", ", .{});
+        try sbuf.writer.writeByte('$');
+        try sbuf.writer.writeByte('{');
+        try sbuf.writer.print("{d}", .{i});
+        try sbuf.writer.writeByte(':');
+        try sbuf.writer.print("{s}", .{n});
+        try sbuf.writer.writeByte('}');
+    }
+    try sbuf.writer.print(")", .{});
+    return .{ .detail = detail, .insert_text = sbuf.written() };
+}
+
+/// complete identifiers at cursor position in `text`
+pub fn completions(
+    self: *Workspace,
+    arena: std.mem.Allocator,
+    file_id: FileId,
+    text: []const u8,
+    cursor_off: usize,
+) ![]Completion {
+    const vm = self.vm orelse return &.{};
+
+    // scan backward from cursor to find prefix start
+    var start = cursor_off;
+    while (start > 0 and lang.Lexer.isIdentContinue(text[start - 1])) start -= 1;
+    const prefix = text[start..cursor_off];
+
+    // check for '.' before the prefix (field completion)
+    const dot_target = if (start > 0 and text[start - 1] == '.') blk: {
+        var dot_start = start - 1;
+        while (dot_start > 0 and lang.Lexer.isIdentContinue(text[dot_start - 1])) dot_start -= 1;
+        break :blk text[dot_start .. start - 1];
+    } else null;
+
+    var items = try std.ArrayList(Completion).initCapacity(arena, 128);
+
+    if (dot_target) |target| {
+        try addFieldCompletions(self, vm, arena, &items, target, prefix, file_id);
+    } else {
+        try addGeneralCompletions(self, vm, arena, &items, prefix, file_id);
+    }
+
+    return items.items;
+}
+
+/// completions for fields of a table or struct (after a dot)
+fn addFieldCompletions(
+    self: *Workspace,
+    vm: *VM,
+    arena: std.mem.Allocator,
+    items: *std.ArrayList(Completion),
+    target: []const u8,
+    prefix: []const u8,
+    file_id: FileId,
+) !void {
+    const target_atom = vm.internAtom(target) catch return;
+    // stdlib modules registered as globals (string, table, math, etc.)
+    if (vm.globals.get(target_atom)) |val| {
+        if (val.tag() == .table) {
+            const table = try vm.tables.get(val.asTable().?);
+            var hash_it = table.hash.orderedIterator();
+            while (hash_it.next()) |entry| {
+                if (entry.key.tag() == .atom) {
+                    const name = vm.stringValue(entry.key.asAtom().?);
+                    if (std.mem.startsWith(u8, name, prefix)) {
+                        items.append(arena, .{
+                            .label = name,
+                            .kind = .field,
+                        }) catch return;
+                    }
+                }
+            }
+            return;
+        }
+    }
+    // user-imported modules (e.g. `import "one.rv"` creates a local binding)
+    const imported_syms = self.importedModuleSymbols(arena, file_id, target) catch return;
+    for (imported_syms) |sym| {
+        if (std.mem.startsWith(u8, sym.name, prefix)) {
+            items.append(arena, .{
+                .label = sym.name,
+                .kind = .field,
+            }) catch return;
+        }
+    }
+}
+
+/// completions from keywords, globals, and document symbols
+fn addGeneralCompletions(
+    self: *Workspace,
+    vm: *VM,
+    arena: std.mem.Allocator,
+    items: *std.ArrayList(Completion),
+    prefix: []const u8,
+    file_id: FileId,
+) !void {
+    // keywords
+    for (lang.Lexer.TokenType.of_string.keys()) |kw| {
+        if (std.mem.startsWith(u8, kw, prefix)) {
+            items.append(arena, .{ .label = kw, .kind = .keyword }) catch return;
+        }
+    }
+
+    // globals from vm (stdlib + user)
+    {
+        var git = vm.globals.iterator();
+        while (git.next()) |entry| {
+            const name = vm.stringValue(entry.key_ptr.*);
+            if (!std.mem.startsWith(u8, name, prefix)) continue;
+            const kind: CompletionKind = if (entry.value_ptr.tag() == .function)
+                .function
+            else if (entry.value_ptr.tag() == .table)
+                .module
+            else if (entry.value_ptr.tag() == .struct_type)
+                .struct_type
+            else
+                .variable;
+
+            var insert_text: ?[]const u8 = null;
+            var detail: ?[]const u8 = null;
+            var doc_copy: ?[]const u8 = null;
+
+            if (entry.value_ptr.tag() == .function) {
+                if (revo.std_lib.api.find(name)) |spec| {
+                    doc_copy = if (spec.doc.len > 0) (arena.dupe(u8, spec.doc) catch null) else null;
+                    const names = try arena.alloc([]const u8, spec.params.len);
+                    const param_types = try arena.alloc([]const u8, spec.params.len);
+                    for (spec.params, 0..) |p, i| {
+                        names[i] = p[0];
+                        param_types[i] = p[1];
+                    }
+                    const sig = try callSignature(
+                        arena,
+                        name,
+                        names,
+                        param_types,
+                        if (spec.ret.len > 0) spec.ret else null,
+                    );
+                    detail = sig.detail;
+                    insert_text = sig.insert_text;
+                }
+            }
+
+            items.append(arena, .{
+                .label = name,
+                .kind = kind,
+                .detail = detail,
+                .insert_text = insert_text,
+                .documentation = doc_copy,
+            }) catch return;
+        }
+    }
+
+    // document-local symbols (from inspect cache)
+    {
+        var analysis = self.inspectDetailed(arena, file_id, .{}) catch return;
+        defer analysis.deinit(arena);
+        for (analysis.symbols) |sym| {
+            if (!std.mem.startsWith(u8, sym.name, prefix)) continue;
+            const kind: CompletionKind = switch (sym.kind) {
+                .function => .function,
+                .struct_type => .struct_type,
+                .type_alias => .class,
+                .binding, .param => .variable,
+            };
+            // avoid exact dupes with globals (prefer local)
+            var duped = false;
+            var git = vm.globals.iterator();
+            while (git.next()) |entry| {
+                if (std.mem.eql(u8, sym.name, vm.stringValue(entry.key_ptr.*))) {
+                    duped = true;
+                    break;
+                }
+            }
+            if (!duped) {
+                const label = try arena.dupe(u8, sym.name);
+
+                var insert_text: ?[]const u8 = null;
+                var detail: ?[]const u8 = null;
+
+                if (kind == .function) {
+                    if (try self.fnSig(arena, file_id, sym.name)) |sig| {
+                        const names = try arena.alloc([]const u8, sig.params.len);
+                        const param_types = try arena.alloc([]const u8, sig.params.len);
+                        for (sig.params, 0..) |p, i| {
+                            names[i] = p.name;
+                            param_types[i] = if (p.type_name) |ti| try ti.formatType(arena) else "";
+                        }
+                        const cs = try callSignature(
+                            arena,
+                            sym.name,
+                            names,
+                            param_types,
+                            if (sig.return_type) |rt| try rt.formatType(arena) else null,
+                        );
+                        detail = cs.detail;
+                        insert_text = cs.insert_text;
+                    }
+                }
+
+                items.append(arena, .{
+                    .label = label,
+                    .kind = kind,
+                    .detail = detail,
+                    .insert_text = insert_text,
+                }) catch return;
+            }
+        }
+    }
+}
+
+//
 // tests
 //
 

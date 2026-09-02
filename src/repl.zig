@@ -23,6 +23,8 @@ const IsoclineContext = struct {
     gpa: Allocator,
     workspace: *revo.lang.Workspace,
     last_file: *?revo.lang.FileId,
+    current_input: std.ArrayList(u8),
+    cursor_pos: usize,
 };
 
 var isocline_ctx: ?IsoclineContext = null;
@@ -85,15 +87,14 @@ fn splashSeed(vm: *VM, banner_buffer: *[128]u8, out: *std.Io.Writer) usize {
 
 fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     if (cenv == null) return;
-    _ = isocline_c.ic_complete_word(cenv, prefix, @ptrCast(&isoclineWordCompleter), null);
-}
+    const ctx = isocline_ctx orelse return;
 
-fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const u8) callconv(.c) void {
-    if (isocline_ctx == null or cenv == null) return;
-    const wlen = libc.strlen(word);
-    const wslice = word[0..wlen];
+    const plen = libc.strlen(prefix);
+    const pslice = prefix[0..plen];
 
-    var buf: [256]u8 = undefined;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
 
     const commands = &[_][]const u8{
         ":q",
@@ -103,52 +104,34 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
         ":outline",
     };
     for (commands) |cmd| {
-        if (std.mem.startsWith(u8, cmd, wslice)) {
-            const cmd_c = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch continue;
-            _ = isocline_c.ic_add_completion(cenv, cmd_c);
+        if (std.mem.startsWith(u8, cmd, pslice)) {
+            var buf: [64]u8 = undefined;
+            const cmd_c = std.fmt.bufPrintZ(&buf, "{s}", .{cmd[plen..]}) catch continue;
+            _ = isocline_c.ic_add_completion_ex(cenv, cmd_c, cmd_c, null);
         }
     }
 
-    // add stdlib globals first, only then module globals so they get priority
-    const ctx = isocline_ctx.?;
-    const vm = ctx.vm;
+    // use workspace completions with stashed input line
+    const input_slice = ctx.current_input.items;
+    const cursor_pos = ctx.cursor_pos;
+    const file_id = ctx.last_file.* orelse return;
+    const completions = ctx.workspace.completions(alloc, file_id, input_slice, cursor_pos) catch return;
+    for (completions) |item| {
+        var label_buf: [256]u8 = undefined;
+        const label_c = std.fmt.bufPrintZ(&label_buf, "{s}", .{item.label[plen..]}) catch continue;
 
-    var s_it = vm.stdlib_globals.iterator();
-    while (s_it.next()) |entry| {
-        const name = vm.stringValue(entry.key_ptr.*);
-        if (std.mem.startsWith(u8, name, wslice)) {
-            const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
-            _ = isocline_c.ic_add_completion(cenv, n_c);
-        }
-    }
+        var detail_buf: [256]u8 = undefined;
+        const detail_c: [*c]const u8 = if (item.detail) |d|
+            std.fmt.bufPrintZ(&detail_buf, "{s}", .{d}) catch null
+        else
+            null;
+        var doc_buf: [512]u8 = undefined;
+        const doc_c: [*c]const u8 = if (item.documentation) |d|
+            std.fmt.bufPrintZ(&doc_buf, "{s}", .{d}) catch null
+        else
+            null;
 
-    var g_it = vm.globals.iterator();
-    while (g_it.next()) |entry| {
-        const name = vm.stringValue(entry.key_ptr.*);
-        if (std.mem.startsWith(u8, name, wslice)) {
-            const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{name}) catch continue;
-            _ = isocline_c.ic_add_completion(cenv, n_c);
-        }
-    }
-
-    // workspace symbols from inspect cache
-    const ws = ctx.workspace;
-    var w_it = ws.inspect_cache.iterator();
-    while (w_it.next()) |entry| {
-        for (entry.value_ptr.symbols) |sym| {
-            if (std.mem.startsWith(u8, sym.name, wslice)) {
-                const n_c = std.fmt.bufPrintZ(&buf, "{s}", .{sym.name}) catch continue;
-                _ = isocline_c.ic_add_completion(cenv, n_c);
-            }
-        }
-    }
-
-    // ...then keywords
-    for (revo.lang.Lexer.TokenType.of_string.keys()) |kw| {
-        if (std.mem.startsWith(u8, kw, wslice)) {
-            const kw_c = std.fmt.bufPrintZ(&buf, "{s}", .{kw}) catch continue;
-            _ = isocline_c.ic_add_completion(cenv, kw_c);
-        }
+        _ = isocline_c.ic_add_completion_ex(cenv, label_c, detail_c orelse label_c, doc_c);
     }
 }
 
@@ -157,6 +140,13 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
     const input_len = libc.strlen(input);
     if (input_len == 0) return;
     const input_slice = input[0..input_len];
+
+    // stash input for the completer (cursor at end of current input)
+    if (isocline_ctx) |*ctx| {
+        ctx.current_input.clearRetainingCapacity();
+        ctx.current_input.appendSlice(ctx.gpa, input_slice) catch {};
+        ctx.cursor_pos = input_len;
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -499,6 +489,8 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             .gpa = gpa,
             .workspace = &session.workspace,
             .last_file = &session.last_file,
+            .current_input = try std.ArrayList(u8).initCapacity(gpa, 256),
+            .cursor_pos = 0,
         };
 
         var b: [512]u8 = undefined;
