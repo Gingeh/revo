@@ -1,5 +1,5 @@
 pub const impls: []const api.Impl = &.{
-    .{ .name = "open", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, open_fn) },
+    .{ .name = "open", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, open) },
     .{ .name = "readdir", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, readdir_fn) },
     .{ .name = "readdir", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, readdir_meth_fn) },
     .{ .name = "exists?", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.string}) else root.define(&.{.string}, exists_fn) },
@@ -113,7 +113,7 @@ pub fn mapIOError(err: anyerror) []const u8 {
 /// > fs.open(path: string) -> !table
 /// wraps a path in a file handle table
 /// use `file.close()` when you're done with the handle
-fn open_fn(args: []const Data, vm: *VM) !HostResult {
+fn open(args: []const Data, vm: *VM) !HostResult {
     const path = vm.stringValue(args[0].asString().?);
     const file = if (std.fs.path.isAbsolute(path))
         Dir.openFileAbsolute(vm.runtime.io, path, .{

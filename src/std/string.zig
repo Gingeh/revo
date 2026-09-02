@@ -175,15 +175,20 @@ fn split_f(args: []const Data, vm: *VM) !HostResult {
     var parts = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, 10);
     defer parts.deinit(vm.runtime.alloc);
 
+    const collapse = delim.len == 1 and delim[0] == ' ';
     var pos: usize = 0;
     while (std.mem.find(u8, str[pos..], delim)) |idx| {
         const abs_idx = pos + idx;
-        const part = try vm.ownDataStringNoDedup(str[pos..abs_idx]);
-        try parts.append(vm.runtime.alloc, part);
+        const part = str[pos..abs_idx];
+        if (!collapse or part.len > 0) {
+            try parts.append(vm.runtime.alloc, try vm.ownDataStringNoDedup(part));
+        }
         pos = abs_idx + delim.len;
     }
-    const final_part = try vm.ownDataStringNoDedup(str[pos..]);
-    try parts.append(vm.runtime.alloc, final_part);
+    const final_part = str[pos..];
+    if (!collapse or final_part.len > 0) {
+        try parts.append(vm.runtime.alloc, try vm.ownDataStringNoDedup(final_part));
+    }
 
     const table_id = try vm.tables.create();
     const table = try vm.tables.get(table_id);
