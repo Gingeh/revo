@@ -685,6 +685,12 @@ pub fn system_(tbl: []const Data, vm: *VM) !HostResult {
     return .Ok(vm, Data.new.tuple(try vm.tuples.create(&[2]Data{ so, se })));
 }
 
+// for some reason leftover buffer persists between input() calls so multiline os reads
+// just don't silently drop data after the first delimiter
+// no idea if they should be threadlocal
+var input_buf: [4096]u8 = undefined;
+var input_buf_len: usize = 0;
+
 pub fn input(args: []const Data, vm: *VM) !HostResult {
     var read_eof = false;
     var delim: u8 = '\n';
@@ -718,9 +724,22 @@ pub fn input(args: []const Data, vm: *VM) !HostResult {
     var result = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 128);
     defer result.deinit(vm.runtime.alloc);
 
-    var buf: [4096]u8 = undefined;
+    // drain leftover from previous call first
+    if (input_buf_len > 0 and !read_eof) {
+        if (std.mem.indexOfScalar(u8, input_buf[0..input_buf_len], delim)) |di| {
+            try result.appendSlice(vm.runtime.alloc, input_buf[0..di]);
+            const rest = input_buf[di + 1 .. input_buf_len];
+            std.mem.copyForwards(u8, input_buf[0..rest.len], rest);
+            input_buf_len = rest.len;
+            return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
+        }
+
+        try result.appendSlice(vm.runtime.alloc, input_buf[0..input_buf_len]);
+        input_buf_len = 0;
+    }
+
     while (true) {
-        const n = file.readStreaming(vm.runtime.io, &.{buf[0..]}) catch |err| switch (err) {
+        const n = file.readStreaming(vm.runtime.io, &.{input_buf[input_buf_len..]}) catch |err| switch (err) {
             error.EndOfStream => {
                 if (result.items.len > 0)
                     return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
@@ -728,13 +747,18 @@ pub fn input(args: []const Data, vm: *VM) !HostResult {
             },
             else => |e| return e,
         };
+        const total = input_buf_len + n;
         if (!read_eof) {
-            if (std.mem.indexOfScalar(u8, buf[0..n], delim)) |di| {
-                try result.appendSlice(vm.runtime.alloc, buf[0..di]);
+            if (std.mem.indexOfScalar(u8, input_buf[0..total], delim)) |di| {
+                try result.appendSlice(vm.runtime.alloc, input_buf[0..di]);
+                const rest = input_buf[di + 1 .. total];
+                std.mem.copyForwards(u8, input_buf[0..rest.len], rest);
+                input_buf_len = rest.len;
                 return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
             }
         }
-        try result.appendSlice(vm.runtime.alloc, buf[0..n]);
+        try result.appendSlice(vm.runtime.alloc, input_buf[0..total]);
+        input_buf_len = 0;
     }
 }
 

@@ -1645,6 +1645,11 @@ pub fn callRegister(
         else => {
             const got = switch (callee.tag()) {
                 .number => "number",
+                .atom => if (callee.bits == revo.Data.new.core(.missing).bits //
+                or callee.bits == revo.Data.new.core(.missing).bits)
+                    "<non-existing function>"
+                else
+                    "atom",
                 else => @tagName(callee.tag()),
             };
             try self.setRuntimeMessageFmt(

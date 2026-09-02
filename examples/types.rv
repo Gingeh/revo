@@ -1,13 +1,15 @@
-# revo's type system!
-#
-# annotations are optional:
-#   when present, the compiler enforces them at compile time
-#   they also help the compiler optimize your program
-#
-# untyped code defaults to dynamic (any) and works just fine
-#
-# error gallery:
-#   uncomment the snippets below one at a time to see the helpful messages
+#!
+  revo's type system!
+ 
+  | annotations are optional:
+      when present, the compiler enforces them at compile time
+      they also help the compiler optimize your program
+ 
+  | untyped code defaults to dynamic (any) and works just fine
+ 
+  | error gallery:
+    uncomment the snippets below one at a time to see the helpful messages
+!#
 
 # scalar binds & coercion
 

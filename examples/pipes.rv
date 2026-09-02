@@ -1,10 +1,12 @@
-##
-# revo's pipes
-# 
-# put the left-hand value in as the first argument to the function on the right
-#
-# this makes them similar to monads
-##
+#!/usr/bin/env revo
+|
+|> revo's pipes
+| 
+|> put the left-hand value in as the first argument to the function on the right
+| 
+|> this is how you make monadic patterns work!
+|
+!#
 
 fn bind(trolley, track) match trolley
   | (:ok, ok) => track(ok)

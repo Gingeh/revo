@@ -1,4 +1,8 @@
-# errors in revo
+#!/usr/bin/env revo
+ ✖ 
+ ✖  error gallery for revo
+ ✖
+!#
 
 let (good, bad) = ((:ok, "asdf"), (:err, :Boom))
 

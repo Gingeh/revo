@@ -1,8 +1,0 @@
-let f = fs.open("./examples/fs.rv")?
-let content = f:read()?
-f:close()
-print(content[1])
-
-let stat = fs.open("./examples/fs.rv")?:stat()?
-print(stat.size)
-print(stat.kind) # "file"

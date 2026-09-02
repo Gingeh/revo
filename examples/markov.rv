@@ -1,3 +1,14 @@
+#!/usr/bin/env revo
+ \  
+ \  markov chains!
+ \  
+ \  a markov chain is the simplest ai you can make
+ \  
+ \  you need to get any large piece of text off the internet
+ \    and put a path to it in this variable
+ \    vvvvvvvvvvv
+!#
+const CORPUS_PATH = "_ign-data-smaller.txt"
 struct Rng {
   state = 1,
 
@@ -159,7 +170,7 @@ struct Chain {
 
 # TODO: state is defaulted and it shouldn't be a compiler error here
 const c = Chain{state = {}, starts = {}, sent_starts = {}}
-c:train("./_ign-data-smaller.txt")?
+c:train(CORPUS_PATH)?
 
 print(c:take({count = 500}))
 # TODO: you should be able to do this:

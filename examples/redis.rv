@@ -1,0 +1,55 @@
+#!/usr/bin/env revo
+   
+ $ small, async, redis-like network database
+   
+ $ network is still not implemented on windows because none of us have windows
+   
+!#
+let srv = net.listen(1337)?
+
+let data = {}
+
+fn handle(client) do
+  loop do
+    client:send(">> ")
+    let msg = client:recv({mode = :read_line})?:trim():split(" ")
+
+    msg = match msg[0]
+    | "ping" => "pong"
+    | "set" => do/a
+        if len(msg) != 3
+          break/a "nea #{len(msg)}/3"
+          
+        data[msg[1]] = msg[2]
+        "#{msg[1]:?} => #{msg[2]:?}"
+    end 
+    | "get" => do/a
+        if len(msg) != 2
+          break/a "nea #{len(msg)}/2"
+        print("#{data:?}, #{msg[1]:?}")
+        data[msg[1]]
+    end 
+    # sl for store-list
+    | "sl" => do/a
+        if len(msg) <= 3
+          break/a "nea #{len(msg)}/3.."
+        let t = {}
+        for k in 2..len(msg)
+          t:push(msg[k])
+
+        data[msg[1]] = t
+        "#{msg[1]} [=>] #{data[msg[1]]}"
+    end 
+    | "list" => do
+        let out = ""
+        for key in data:keys()
+          out ~= "#{key}\r\n"
+    end
+    | x => "unrecognized " ~ msg[1..]
+
+    client:send(msg ~ "\r\n")?
+  end
+  client:close()?
+end
+
+loop spawn handle(srv:accept()?)

@@ -1,3 +1,11 @@
+#!
+ λ 
+ λ  macro metaprogramming in revo
+ λ 
+ λ  macros can evaluate any runtime code, which makes this possible
+ λ
+ @author ryzh
+!#
 proc doto!(m) do
   let items = m.items
 

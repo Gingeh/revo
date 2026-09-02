@@ -1,11 +1,22 @@
-## > test blocks, in revo
+#!/usr/bin/env revo
 
-they let you keep small tests
-they only run when you pass `--test`
-a test run will still execute the whole module
-they fail only when you return an error
+  ιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιι
+  ι                                              ι
+  ι  "test blocks, in revo" do                   ι
+  ι                                              ι
+  ι    "let you keep small tests"                ι
+  ι                                              ι
+  ι    and "only run when you pass `--test`"     ι
+  ι                                              ι
+  ι    and "still execute the whole module"      ι
+  ι                                              ι
+  ι    and "fail only when you return an error"  ι
+  ι                                              ι
+  ι  end                                         ι
+  ι                                              ι
+  ιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιιι
 
-##
+!#
 fn add(a, b) a + b
 fn multiply(a, b) a * b
 

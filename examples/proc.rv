@@ -1,26 +1,30 @@
-## > proc macros, in revo
+#!/usr/bin/env revo
+  
+  # proc macros, in revo
+  
+  they execute any program at compile-time
+    they get an iterator of ast nodes inside parens
+    ...then return the resulting ast as a tuple of nodes
+  
+  macro documentation does not have to document the exact logic,
+    only what the reasonably expected behavior is
+  
+  an overly-verbose example is:
+  
+  ```revo
+  # > $format: str-literal, $any... -> print(fmt($format, $...))
+  printf!("hello, %s!", world)
+  # => hello, world!
 
-they execute any program at compile-time
-they get an iterator of ast nodes inside parens
-...then return the resulting ast as a tuple of nodes
+  # > $any... -> print($...)
+  printf!("foo", "bar")
+  # => foo bar
 
-macro documentation does not have to document the exact logic, only what the reasonably expected
-	behavior is
-
-an overly-verbose example is:
-
-	# >	$format: str-literal, $any... -> print(fmt($format, $...))
-	# >> printf!("hello, %s!", world)
-	#		 hello, world!
-	#
-	# >	$any... -> print($...)
-	# >> printf!("foo", "bar")
-	#		 foo bar
-	#
-	#	prints parameters with a newline, either by a format string literal or 
-	proc printf!() do ... end
-
-##
+  #* prints parameters with a newline, either by a format string literal or *#
+  proc printf!() do ... end
+  ```
+  
+!#
 
 proc print!(iter) do
 	let fmt = iter:next_of(:string)

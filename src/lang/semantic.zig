@@ -832,6 +832,10 @@ const SemanticChecker = struct {
         var fields = try std.ArrayList(struct_layout.FieldDef).initCapacity(self.alloc, def.items.len);
         var optional = std.StringHashMap(void).init(self.alloc);
 
+        // declare the struct name into scope first so method bodies can see it
+        try self.pushScope();
+        try self.declare(def.name, .{ .struct_type = def.name }, null);
+
         for (def.items) |item| switch (item) {
             .field => |field| {
                 if (seen.contains(field.name)) {
@@ -863,10 +867,12 @@ const SemanticChecker = struct {
                 _ = try self.analyzeBinding(b, null, b.target.span);
             },
         };
+        self.popScope();
 
         const slice = try fields.toOwnedSlice(self.alloc);
         try self.struct_layouts.put(def.name, slice);
         try self.struct_optional_fields.put(def.name, optional);
+        // also declare into the outer scope so the name is usable after the struct def
         try self.declare(def.name, .{ .struct_type = def.name }, null);
         return .{ .struct_type = def.name };
     }

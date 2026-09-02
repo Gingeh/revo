@@ -1,7 +1,14 @@
-# revo's demo.rv
-#
-# everything is an expression! errors are values and concurrency is built in
+#!/usr/bin/env revo
+ α
+ β  revo's demo
+ γ  try running it
+ δ
+!#
 
+#*
+this is a doc-comment, markdown goes here
+you can run `revo docs demo.rv` to get them in a readable markdown format
+*#
 fn the_basics() do
   print("the basics")
 
@@ -111,7 +118,7 @@ fn control_flow() do
   print(result)
 
   # reduce iterates over a collection, accumulating a result
-  const sum = reduce((0,1,2,3,4), fn(a,b) a + b, 0)
+  const sum = iter.reduce((0,1,2,3,4), fn(a,b) a + b, 0)
   print(sum)
 
   # loop creates an infinite loop - break returns a value
@@ -170,7 +177,7 @@ fn pipes() do
   print(obj.val)
 
   # chain multiple pipe operations
-  const chain = (1,2,3,4,5) |> map(fn(x) x * 2) |> reduce(fn(a,b) a + b, 0)
+  const chain = (1,2,3,4,5) |> iter.map(fn(x) x * 2) |> iter.reduce(fn(a,b) a + b, 0)
   print(chain)
 end
 
@@ -194,13 +201,7 @@ fn error_handling() do
   const bad_val = safe_div(10, 0)
   const fallback = bad_val orelse 0
 
-  # ok?! and err?! check the tag without pattern matching
-  const ok_result = safe_div(5, 1)
-  const err_result = safe_div(5, 0)
-  const is_ok = ok?!(ok_result)
-  const is_err = err?!(err_result)
-
-  print(result, fallback, is_ok, is_err)
+  print(result, fallback)
 end
 
 # structs: named types with fields and methods
@@ -244,13 +245,13 @@ fn methods() do
   # call methods with : syntax - obj:method(args) passes obj as first arg
   # same as obj.method(obj, args)
 
-  struct Counter {
+  struct MethodsCounter {
     count: number = 0,
     fn inc(self) do self.count += 1 end,
     fn get(self) self.count,
   }
 
-  const c = Counter{count = 5}
+  const c = MethodsCounter{count = 5}
   print(c:get())
   c:inc()
   print(c:get())
@@ -268,7 +269,7 @@ fn fibers() do
   print("\nfibers")
 
   # spawn runs a function in a new fiber: runs concurrently
-  const f1 = spawn fn() reduce((1,2,3), fn(a,b) a + b, 0)
+  const f1 = spawn fn() do let s = 0; for i in 0..3 do s = s + i + 1 end; s end
   const f2 = spawn fn() "async result"
 
   # join blocks until the fiber completes and returns its result
@@ -398,14 +399,14 @@ fn stdlib() do
     |> iter.fold(fn(a, b) a + b)
   print(chained)
 
-  const summed = reduce((1,2,3,4), fn(a,b) a + b, 0)
+  const summed = iter.reduce((1,2,3,4), fn(a,b) a + b, 0)
   print(summed)
 
-  const found = find((1,2,3), fn(x) x == 2)
+  const found = iter.find((1,2,3), fn(x) x == 2)
   print(found)
 
-  const all_ok = all?((1,2,3), fn(x) x > 0)
-  const any_big = any?((1,2,3), fn(x) x > 2)
+  const all_ok = iter.all?((1,2,3), fn(x) x > 0)
+  const any_big = iter.any?((1,2,3), fn(x) x > 2)
   print(all_ok, any_big)
 
   # string functions

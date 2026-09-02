@@ -1,9 +1,11 @@
-# non-blocking TCP server
-#
-# accepts infinite connections and gives them a shell with two commands:
-#   x for exit
-#   ping for "pong {number of pings}"
-#   anything else is repeated back at the user
+#!/usr/bin/env revo
+ ~  non-blocking TCP server
+ ~ 
+ ~  accepts infinite connections and gives them a shell with two commands:
+ ~    x for exit
+ ~    ping for "pong {number of pings}"
+ ~    anything else is repeated back at the user
+!#  
 
 fn serve(peer, counter) do
   print("new peer #{peer}")
