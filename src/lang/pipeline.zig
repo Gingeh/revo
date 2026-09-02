@@ -861,4 +861,3 @@ const diagnostic = lang.diagnostic;
 pub const Artifact = compiler.Artifact;
 pub const ParseFailure = parser.ParseFailure;
 pub const LowerFailure = compiler.LowerFailure;
-

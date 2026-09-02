@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - any function is a module
+
     ```ruby
     fn f() do
       pub const x = "valx"
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       a = 123
     })
     ```
+
 - docgen documents structs, type aliases, and modules, with documented struct fields rendered under the struct entry
 
   `revo docs` now outputs markdown by default, `revo docs --html` outputs real html
@@ -36,22 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     #* 2 digits of precision *#
     const pi = 3.14
     ```
+
 - multiline module docs via `#! !#`
+
     ```ruby
     #! module does this and that !#
     ...
     ```
+
     ```ruby
     #!/usr/bin/env/revo
     a shebang can also just go right there
     !#
     ...
     ```
+
 - stdlib:
   - `exit(number)`
   - `revo.dofile(path)` -- do file & return; resole path like `import`
-
 - default arguments
+
     ```ruby
         # vvvvv here
     fn f(a = 2, ?b) do
@@ -59,7 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     end; hi()
     # => (2, :none)
     ```
+
 - semicolons act as boundaries
+
     ```ruby
     fn g() do
       foo = bar
@@ -68,15 +76,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     # was: tried to call bar(10, 11, 12) and assign that to foo
     # now: foo = bar; return (10, 11, 12)
     ```
+
 - unless keyword
+
     ```ruby
     unless :true
         print("this won't run")
     else
         print("this will")
     ```
+
 - zig extensions, examples for zig extensions (`examples/zig`)
 - access tuple fields via dot: `(:a, :b).0 == :a`
+- wider character range for atoms
+
+    ```text
+    :kebab-case
+    :ok?
+    :x>y?
+    :name.method
+    :a!=b
+    :$jquery
+    :-+*/=<>.@$~^?!
+    ```
+
 - `HACKING.md`
 - `flake.nix`
 - attribute syntax in the parser: `@[name]` lexes as an attribute and attaches to any declaration. will be used for applying procedural macros later

@@ -3194,4 +3194,3 @@ test "workspace sig map survives typed fn invalidation" {
     try std.testing.expect(p.table.key == null);
     try std.testing.expect(p.table.value.* == .any);
 }
-

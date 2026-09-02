@@ -937,4 +937,3 @@ pub fn compileLabeledBlock(self: *Compiler, label: []const u8, body: *const Node
 
     self.active_registers = self.loop_stack.items[self.loop_stack.items.len - 1].result_reg + 1;
 }
-

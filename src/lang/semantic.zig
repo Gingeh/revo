@@ -1588,4 +1588,3 @@ const SemanticChecker = struct {
         } });
     }
 };
-

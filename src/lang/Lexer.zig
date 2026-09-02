@@ -1,4 +1,3 @@
-
 // zlint-disable line-length -- yeah
 const std = @import("std");
 const ast = @import("ast.zig");
@@ -406,7 +405,7 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.caret_assign, start, self.pos, line, column)
         else
             self.makeToken(.caret, start, self.pos, line, column),
-        ':' => if (isIdentStart(self.peek()))
+        ':' => if (isIdentStart(self.peek()) or isSymbolAtomStart(self.peek()))
             self.lexHash(start, line, column)
         else
             self.makeToken(.colon, start, self.pos, line, column),
@@ -594,7 +593,7 @@ fn lexComment(self: *Lexer) !Token {
 }
 
 fn lexHash(self: *Lexer, start: usize, line: u32, column: u32) !Token {
-    while (isIdentContinue(self.peek())) _ = self.advance();
+    while (isAtomContinue(self.peek())) _ = self.advance();
     return self.makeToken(.hash, start, self.pos, line, column);
 }
 
@@ -1035,6 +1034,17 @@ pub fn isIdentStart(c: u8) bool {
 
 pub fn isIdentContinue(c: u8) bool {
     return isIdentStart(c) or std.ascii.isDigit(c) or c == '!' or c == '?';
+}
+
+pub fn isSymbolAtomStart(c: u8) bool {
+    return switch (c) {
+        '-', '+', '*', '/', '=', '<', '>', '.', '@', '$', '~', '^', '?', '!' => true,
+        else => false,
+    };
+}
+
+pub fn isAtomContinue(c: u8) bool {
+    return isIdentContinue(c) or isSymbolAtomStart(c);
 }
 
 test "lexes calls with sigils and hash literals" {
@@ -1643,4 +1653,3 @@ test "lexes declare keyword" {
         },
     );
 }
-

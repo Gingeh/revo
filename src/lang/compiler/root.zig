@@ -1861,4 +1861,3 @@ fn immOpFor(op: ast.BinOp) ?Opcode {
         else => null,
     };
 }
-
