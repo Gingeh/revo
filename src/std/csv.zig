@@ -82,7 +82,9 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             if (!nested) try writer.terminateRecord();
         },
         .atom => {
-            try writeString(data, vm, writer);
+            const id = data.asAtom().?;
+            const atom = vm.stringValue(id);
+            try writer.writeField(atom);
             if (!nested) try writer.terminateRecord();
         },
         .table => {
@@ -91,7 +93,7 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             for (table.array.items) |item| {
                 try writeCsvValue(item, vm, writer, true);
             }
-            try writer.terminateRecord();
+            if (nested) try writer.terminateRecord();
         },
         .struct_val => {
             const struct_val_id = data.asStructVal().?;
@@ -99,7 +101,7 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             for (struct_val.fields) |field| {
                 try writeCsvValue(field, vm, writer, true);
             }
-            try writer.terminateRecord();
+            if (nested) try writer.terminateRecord();
         },
         .tuple => {
             const tuple_id = data.asTuple().?;
@@ -107,7 +109,7 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             for (tuple.items) |item| {
                 try writeCsvValue(item, vm, writer, true);
             }
-            try writer.terminateRecord();
+            if (nested) try writer.terminateRecord();
         },
         .struct_type => return error.UnsupportedCsvValue,
         .function => return error.UnsupportedCsvValue,
@@ -124,4 +126,12 @@ fn writeNum(data: Data, vm: *VM, writer: *Writer) anyerror!void {
     const str = try std.fmt.allocPrint(vm.runtime.alloc, "{d}", .{num});
     defer vm.runtime.alloc.free(str);
     try writer.writeField(str);
+}
+
+test "csv encode" {
+    const testing = revo.lang.testing;
+
+    try testing.topString(
+        \\ csv.encode(({"a", :b, 3}, {1.2, 0.3, "1.2"}, (1,2,3))):unwrap()
+    , "a,b,3\r\n1.2,0.3,1.2\r\n1,2,3\r\n");
 }
