@@ -1,9 +1,20 @@
-# interface manifest for zrevo.so
-#
-# import 'zrevo.so' picks this file up (same stem) and types all calls
-# against it - sigs in the .so itself are ignored while this exists
-#
+#!
+  interface manifest for zrevo.so
+  
+  import 'zrevo.so' picks this file up (same stem) and types all calls
+  against it
+
+  sigs in the .so itself are ignored while this exists
+!#
+
+#* add a + b *#
 pub declare zadd = fn(a: number, b: number) -> number
+
+#* echo s *#
 pub declare zecho = fn(s: string) -> string
+
+#* set global called name to value *#
 pub declare zsetglobal = fn(name: string, value) -> number
+
+#* get a string of parts separated by separator *#
 pub declare zconcat = fn(parts: tuple, sep: string) -> string

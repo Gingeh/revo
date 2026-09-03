@@ -824,8 +824,23 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         return .okData(Data.new.table(t_id));
     }
     if (std.mem.endsWith(u8, resolved_path, ".so") or std.mem.endsWith(u8, resolved_path, ".dylib")) {
-        // a sibling `lib.d.rv` manifest owns the interface: every binding
-        // lands in this module's table so manifest-typed calls resolve
+        // try native (host function) path first; extensions that export
+        // `revo_native_bindings` get full arity/type checking
+        if (revo.ffi.loadNative(vm, resolved_path)) |native_mods| {
+            defer vm.runtime.alloc.free(native_mods);
+            const t_id = try vm.tables.create();
+            const tbl = try vm.tables.get(t_id);
+            for (native_mods) |host_fn| {
+                const fn_id = try vm.functions.create(.{ .host = host_fn });
+                try tbl.putRaw(
+                    Data.new.atom(try vm.internAtom(host_fn.name)),
+                    Data.new.function(fn_id),
+                    vm,
+                );
+            }
+            return .okData(Data.new.table(t_id));
+        } else |_| {}
+        // fall back to c path for legacy extensions
         const mods = try revo.ffi.loadC(vm, resolved_path);
         defer vm.runtime.alloc.free(mods);
         const t_id = try vm.tables.create();

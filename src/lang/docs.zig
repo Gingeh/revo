@@ -273,7 +273,7 @@ fn renderTextGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpe
     if (planned.items.len == 0) return;
 
     try style(w, bold);
-    try w.writeAll("globals");
+    try w.writeAll("top-level");
     try style(w, reset);
     try w.writeAll("\n");
     for (planned.items) |p| {
