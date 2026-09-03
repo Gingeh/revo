@@ -30,7 +30,13 @@ pub const NULL_ID = std.math.maxInt(u32);
 
 pub const TablePool = struct {
     alloc: std.mem.Allocator,
-    tables: std.ArrayList(?Table),
+    // tables are boxed: the slot array holds stable *Table pointers, so a
+    // pointer from get() stays valid across later create() calls. the slot
+    // ArrayList's backing store may still move, but the boxed Table it points
+    // to does not. boxes are allocated from box_pool (arena-backed for
+    // locality) and recycled through the dead list, same as the ids.
+    box_pool: std.heap.MemoryPool(Table),
+    tables: std.ArrayList(?*Table),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(memory.TableID),
     first: usize = pool.end,
@@ -40,6 +46,7 @@ pub const TablePool = struct {
     pub fn init(alloc: std.mem.Allocator) !TablePool {
         return TablePool{
             .alloc = alloc,
+            .box_pool = .empty,
             .tables = try .initCapacity(alloc, 4),
             .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
@@ -48,9 +55,10 @@ pub const TablePool = struct {
     }
 
     pub fn deinit(self: *TablePool) void {
-        for (self.tables.items) |*maybe_t| {
-            if (maybe_t.*) |*t| t.deinit();
+        for (self.tables.items) |maybe_t| {
+            if (maybe_t) |t| t.deinit();
         }
+        self.box_pool.deinit(self.alloc);
         self.tables.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
@@ -59,7 +67,7 @@ pub const TablePool = struct {
 
     pub fn create(self: *TablePool) !memory.TableID {
         if (self.dead.pop()) |id| {
-            const t = &self.tables.items[id].?;
+            const t = self.tables.items[id].?;
             t.array.clearRetainingCapacity();
             t.hash.deinit(self.alloc);
             t.metatable = null;
@@ -74,7 +82,10 @@ pub const TablePool = struct {
         if (id >= self.marks.capacity()) {
             try self.marks.resize(id + 1, false);
         }
-        try self.tables.append(self.alloc, Table.init(self.alloc));
+        const box = try self.box_pool.create(self.alloc);
+        errdefer self.box_pool.destroy(box);
+        box.* = Table.init(self.alloc);
+        try self.tables.append(self.alloc, box);
         errdefer _ = self.tables.pop();
         try pool.link(&self.first, &self.last, &self.next, self.alloc, id);
         return id;
@@ -82,7 +93,7 @@ pub const TablePool = struct {
 
     pub fn get(self: *TablePool, id: memory.TableID) !*Table {
         if (id >= self.tables.items.len) @panic("invalid table :<");
-        if (self.tables.items[id]) |*t| return t;
+        if (self.tables.items[id]) |t| return t;
         @panic("invalid table :<");
     }
 
@@ -99,18 +110,27 @@ pub const TablePool = struct {
     }
 
     pub fn sweep(self: *TablePool) void {
-        pool.sweep(
-            self.alloc,
-            Table,
-            memory.TableID,
-            &self.tables,
-            &self.marks,
-            &self.dead,
-            &self.first,
-            &self.last,
-            &self.next,
-            freeTable,
-        );
+        const alloc = self.alloc;
+        // boxes are retained and recycled through the dead list, so sweep frees
+        // each dead table's contents in place and leaves survivors' slots put.
+        // this mirrors pool.sweep but keeps the boxed *Table stable.
+        _ = self.dead.ensureTotalCapacity(alloc, self.dead.items.len + self.tables.items.len) catch return;
+        var prev: usize = pool.end;
+        var id = self.first;
+        while (id != pool.end) {
+            const nxt = self.next.items[id];
+            const t = self.tables.items[id].?;
+            if (!self.marks.isSet(id)) {
+                freeTable(t, alloc);
+                if (prev == pool.end) self.first = nxt else self.next.items[prev] = nxt;
+                self.dead.appendAssumeCapacity(@intCast(id));
+            } else {
+                self.marks.unset(id);
+                prev = id;
+            }
+            id = nxt;
+        }
+        self.last = prev;
     }
 
     pub fn bytes(self: *const TablePool) usize {
@@ -141,7 +161,7 @@ pub const TablePool = struct {
 // todo ab bench towers storage nogc
 const MAX_RETAINED_ARRAY = 16;
 
-fn freeTable(t: *Table, alloc: std.mem.Allocator) ?Table {
+fn freeTable(t: *Table, alloc: std.mem.Allocator) void {
     if (t.array.capacity > MAX_RETAINED_ARRAY) {
         t.array.deinit(t.alloc);
         t.array = .empty;
@@ -152,7 +172,6 @@ fn freeTable(t: *Table, alloc: std.mem.Allocator) ?Table {
     t.metatable = null;
     t.ic_version = 0;
     t.alloc = alloc;
-    return t.*;
 }
 
 pub const Table = struct {
@@ -622,6 +641,27 @@ test "table push appends positional values" {
     try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0), &vm).?);
     try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1), &vm).?);
     try std.testing.expectEqual(Data.new.num(30), table.getRaw(Data.new.num(2), &vm).?);
+}
+
+test "boxed table pointers survive pool growth from create()" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
+
+    const id = try vm.tables.create();
+    const t = try vm.tables.get(id); // pointer we intend to keep using
+    try t.push(Data.new.num(1));
+
+    // grow the slot array far past its initial capacity. with inline (?Table)
+    // storage this reallocation moved the slots and left `t` dangling; boxing
+    // keeps the Table itself put, so `t` stays valid. (raw create() notes no gc
+    // pressure, so nothing is swept mid-loop and the assertions are stable.)
+    var i: usize = 0;
+    while (i < 512) : (i += 1) _ = try vm.tables.create();
+
+    try std.testing.expectEqual(@as(usize, 1), t.array.items.len);
+    try t.push(Data.new.num(2));
+    try std.testing.expectEqual(@as(usize, 2), t.array.items.len);
+    try std.testing.expectEqual(t, try vm.tables.get(id)); // same stable address
 }
 
 //

@@ -115,7 +115,7 @@ pub fn processMarkStack(self: *VM) void {
                 if (id >= self.functions.functions.items.len) continue;
 
                 const func = self.functions.functions.items[id] orelse continue;
-                switch (func) {
+                switch (func.*) {
                     .closure => |closure| {
                         for (closure.upvalues) |upvalue_id|
                             self.functions.markUpvalue(upvalue_id, self);

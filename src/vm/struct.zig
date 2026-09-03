@@ -105,7 +105,9 @@ pub const StructInstance = struct {
 
 pub const StructInstancePool = struct {
     alloc: std.mem.Allocator,
-    instances: std.ArrayList(?StructInstance),
+    // boxed: slots hold stable *StructInstance pointers, so get() survives create().
+    box_pool: std.heap.MemoryPool(StructInstance),
+    instances: std.ArrayList(?*StructInstance),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(StructInstanceID),
     first: usize = pool.end,
@@ -115,6 +117,7 @@ pub const StructInstancePool = struct {
     pub fn init(alloc: std.mem.Allocator) !StructInstancePool {
         return StructInstancePool{
             .alloc = alloc,
+            .box_pool = .empty,
             .instances = try .initCapacity(alloc, 4),
             .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
@@ -123,9 +126,10 @@ pub const StructInstancePool = struct {
     }
 
     pub fn deinit(self: *StructInstancePool) void {
-        for (self.instances.items) |*maybe_s| {
-            if (maybe_s.*) |*s| s.deinit(self.alloc);
+        for (self.instances.items) |maybe_s| {
+            if (maybe_s) |s| s.deinit(self.alloc);
         }
+        self.box_pool.deinit(self.alloc);
         self.instances.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
@@ -140,6 +144,7 @@ pub const StructInstancePool = struct {
             self.alloc,
             StructInstance,
             StructInstanceID,
+            &self.box_pool,
             &self.instances,
             &self.marks,
             &self.dead,
@@ -152,7 +157,7 @@ pub const StructInstancePool = struct {
 
     pub fn get(self: *StructInstancePool, id: StructInstanceID) !*StructInstance {
         if (id >= self.instances.items.len) return error.InvalidStruct;
-        if (self.instances.items[id]) |*s| return s;
+        if (self.instances.items[id]) |s| return s;
         return error.InvalidStruct;
     }
 
@@ -173,6 +178,7 @@ pub const StructInstancePool = struct {
             self.alloc,
             StructInstance,
             StructInstanceID,
+            &self.box_pool,
             &self.instances,
             &self.marks,
             &self.dead,
@@ -204,7 +210,6 @@ pub const StructInstancePool = struct {
     }
 };
 
-fn freeStruct(s: *StructInstance, alloc: std.mem.Allocator) ?StructInstance {
+fn freeStruct(s: *StructInstance, alloc: std.mem.Allocator) void {
     s.deinit(alloc);
-    return null;
 }

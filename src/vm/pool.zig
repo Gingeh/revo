@@ -27,12 +27,17 @@ pub inline fn relink(first: *usize, last: *usize, next: *std.ArrayList(usize), i
     last.* = id;
 }
 
-/// append a brand new value to a pool, reusing a dead slot if one exists
+/// append a brand new value to a pool, reusing a dead slot if one exists.
+///
+/// values are boxed: the slot array holds stable *T pointers so a pointer from
+/// a pool's get() stays valid across later create() calls. the boxes come from
+/// box_pool (arena-backed) and are handed back to it on sweep.
 pub fn create(
     alloc: std.mem.Allocator,
     comptime T: type,
     comptime ID: type,
-    items: *std.ArrayList(?T),
+    box_pool: *std.heap.MemoryPool(T),
+    items: *std.ArrayList(?*T),
     marks: *std.DynamicBitSet,
     dead: *std.ArrayList(ID),
     first: *usize,
@@ -41,7 +46,10 @@ pub fn create(
     value: T,
 ) !ID {
     if (dead.pop()) |id| {
-        items.items[id] = value;
+        errdefer dead.appendAssumeCapacity(id); // restore the id on failure
+        const box = try box_pool.create(alloc);
+        box.* = value;
+        items.items[id] = box;
         relink(first, last, next, id);
         return id;
     }
@@ -49,7 +57,10 @@ pub fn create(
     if (id >= marks.capacity()) {
         try marks.resize(id + 1, false);
     }
-    try items.append(alloc, value);
+    const box = try box_pool.create(alloc);
+    errdefer box_pool.destroy(box);
+    box.* = value;
+    try items.append(alloc, box);
     errdefer _ = items.pop();
     try link(first, last, next, alloc, id);
     return id;
@@ -59,20 +70,21 @@ pub fn create(
 /// clearing the marks of survivors. the list always contains exactly the
 /// live slots, so this touches only what marking survived
 ///
-/// the free fn returns an optional replacement: null drops the slot (thats
-/// just how it used to be before, slot becomes null), non-null keeps it, used by
-/// Table to retain its dense-array buffer across collections
+/// `free` releases a dead value's owned resources; the box is then returned to
+/// box_pool and the slot nulled, so liveness stays exactly `slot != null` (the
+/// same contract get()/mark()/isValid() relied on before boxing)
 pub fn sweep(
     alloc: std.mem.Allocator,
     comptime T: type,
     comptime ID: type,
-    items: *std.ArrayList(?T),
+    box_pool: *std.heap.MemoryPool(T),
+    items: *std.ArrayList(?*T),
     marks: *std.DynamicBitSet,
     dead: *std.ArrayList(ID),
     first: *usize,
     last: *usize,
     next: *std.ArrayList(usize),
-    comptime free: fn (*T, std.mem.Allocator) ?T,
+    comptime free: fn (*T, std.mem.Allocator) void,
 ) void {
     const max_new_dead = items.items.len;
     const existing_dead = dead.items.len;
@@ -82,13 +94,11 @@ pub fn sweep(
     var id = first.*;
     while (id != end) {
         const nxt = next.items[id];
-        const slot = &items.items[id];
         if (!marks.isSet(id)) {
-            if (free(&slot.*.?, alloc)) |rep| {
-                slot.* = rep;
-            } else {
-                slot.* = null;
-            }
+            const box = items.items[id].?;
+            free(box, alloc);
+            box_pool.destroy(box);
+            items.items[id] = null;
             if (prev == end)
                 first.* = nxt
             else
