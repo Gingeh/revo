@@ -6,10 +6,22 @@ const MathOps = struct {
     pub fn sqrt(x: f64) f64 { return @sqrt(x); }
     pub fn pow(base: f64, exponent: f64) f64 { return std.math.pow(f64, base, exponent); }
     pub fn sin(x: f64) f64 { return @sin(x); }
+    pub fn asin(x: f64) f64 { return std.math.asin(x); }
+    pub fn sinh(x: f64) f64 { return std.math.sinh(x); }
+    pub fn asinh(x: f64) f64 { return std.math.asinh(x); }
     pub fn cos(x: f64) f64 { return @cos(x); }
+    pub fn acos(x: f64) f64 { return std.math.acos(x); }
+    pub fn cosh(x: f64) f64 { return std.math.cosh(x); }
+    pub fn acosh(x: f64) f64 { return std.math.acosh(x); }
     pub fn tan(x: f64) f64 { return @tan(x); }
+    pub fn atan(x: f64) f64 { return std.math.atan(x); }
+    pub fn tanh(x: f64) f64 { return std.math.tanh(x); }
+    pub fn atanh(x: f64) f64 { return std.math.atanh(x); }
+    pub fn atan2(y: f64, x: f64) f64 { return std.math.atan2(y, x); }
+    pub fn hypot(x: f64, y: f64) f64 { return std.math.hypot(x, y); }
     pub fn log(x: f64) f64 { return @log(x); }
     pub fn exp(x: f64) f64 { return @exp(x); }
+    pub fn sign(value: f64) f64 { return std.math.sign(value); }
 };
 
 const Pred = struct {
@@ -77,10 +89,22 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "min", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.less)) },
     .{ .name = "max", .f = root.defineVariadic(&.{.number}, makeVariadic(Pred.greater)) },
     .{ .name = "sin", .f = root.define(&.{.number}, makeUnary(MathOps.sin)) },
+    .{ .name = "asin", .f = root.define(&.{.number}, makeUnary(MathOps.asin)) },
+    .{ .name = "sinh", .f = root.define(&.{.number}, makeUnary(MathOps.sinh)) },
+    .{ .name = "asinh", .f = root.define(&.{.number}, makeUnary(MathOps.asinh)) },
     .{ .name = "cos", .f = root.define(&.{.number}, makeUnary(MathOps.cos)) },
+    .{ .name = "cosh", .f = root.define(&.{.number}, makeUnary(MathOps.cosh)) },
+    .{ .name = "acos", .f = root.define(&.{.number}, makeUnary(MathOps.acos)) },
+    .{ .name = "acosh", .f = root.define(&.{.number}, makeUnary(MathOps.acosh)) },
     .{ .name = "tan", .f = root.define(&.{.number}, makeUnary(MathOps.tan)) },
+    .{ .name = "atan", .f = root.define(&.{.number}, makeUnary(MathOps.atan)) },
+    .{ .name = "tanh", .f = root.define(&.{.number}, makeUnary(MathOps.tanh)) },
+    .{ .name = "atanh", .f = root.define(&.{.number}, makeUnary(MathOps.atanh)) },
+    .{ .name = "atan2", .f = root.define(&.{ .number, .number }, makeBinary(MathOps.atan2)) },
+    .{ .name = "hypot", .f = root.define(&.{ .number, .number }, makeBinary(MathOps.hypot)) },
     .{ .name = "log", .f = root.define(&.{.number}, makeUnaryChecked(MathOps.log, Pred.positive, "positive num")) },
     .{ .name = "exp", .f = root.define(&.{.number}, makeUnary(MathOps.exp)) },
+    .{ .name = "sign", .f = root.define(&.{.number}, makeUnary(MathOps.sign)) },
 };
 
 test "math library" {
@@ -92,6 +116,8 @@ test "math library" {
     try testing.topNumber("math.pow(2, 3)", 8);
     try testing.topNumber("math.min(1, 2, 3)", 1);
     try testing.topNumber("math.max(1, 2, 3)", 3);
+    try testing.topNumber("math.hypot(3, 4)", 5.0);
+    try testing.topNumber("math.sign(-0.15)", -1);
 }
 
 // .number is guaranteed by type sig

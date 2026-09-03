@@ -24,15 +24,51 @@ pub declare math.max = fn(first: num, args: num...) -> num
 #* sine of x (x in radians) *#
 pub declare math.sin = fn(x: num) -> num
 
+#* arc-sine of x (x in radians) *#
+pub declare math.asin = fn(x: num) -> num
+
+#* hyperbolic sine of x (x in radians) *#
+pub declare math.sinh = fn(x: num) -> num
+
+#* hyperbolic arc-sine of x (x in radians) *#
+pub declare math.asinh = fn(x: num) -> num
+
 #* cosine of x (x in radians) *#
 pub declare math.cos = fn(x: num) -> num
 
+#* arc-cosine of x (x in radians) *#
+pub declare math.acos = fn(x: num) -> num
+
+#* hyperbolic cosine of x (x in radians) *#
+pub declare math.cosh = fn(x: num) -> num
+
+#* hyperbolic arc-cosine of x (x in radians) *#
+pub declare math.acosh = fn(x: num) -> num
+
 #* tangent of x (x in radians) *#
 pub declare math.tan = fn(x: num) -> num
+
+#* arc-tangent of x (x in radians) *#
+pub declare math.atan = fn(x: num) -> num
+
+#* hyperbolic tangent of x (x in radians) *#
+pub declare math.tanh = fn(x: num) -> num
+
+#* hyperbolic arc-tangent of x (x in radians) *#
+pub declare math.atanh = fn(x: num) -> num
+
+#* arc-tangent of y and x (y and x in radians) *#
+pub declare math.atan2 = fn(y: num, x: num) -> num
+
+#* hypotenuse of sides x and y *#
+pub declare math.hypot = fn(x: num, y: num) -> num
 
 #* natural logarithm, panics if x <= 0 *#
 pub declare math.log = fn(x: num) -> num
 
 #* e raised to x *#
 pub declare math.exp = fn(x: num) -> num
+
+#* sign of value (-1, 0, 1) *#
+pub declare math.sign = fn(value: num) -> num
 
