@@ -1,4 +1,6 @@
-#! table manipulation: keys and values, insertion and removal, sorting, joining, shallow copies !#
+#!
+global table helpers, calllable as `{1, 2}:rawget(0)` and `table.rawget({1, 2}, 0)`
+!#
 
 #*
 gets value without metamethods

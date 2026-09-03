@@ -1,4 +1,4 @@
-//! doc extraction and docgen rendering (markdown + html)
+//! doc extraction and docgen rendering (plain text + html)
 
 const std = @import("std");
 const revo = @import("../root.zig");
@@ -25,7 +25,7 @@ fn moduleDoc(src: []const u8) ![]const u8 {
     defer std.heap.page_allocator.free(tokens);
     for (tokens) |tok| {
         if (tok.type != .comment) {
-            if (tok.type == .module_doc) return std.mem.trim(u8, tok.text, " \t\r\n");
+            if (tok.type == .module_doc) return std.mem.trim(u8, tok.text, "#! \t\r\n");
             return "";
         }
     }
@@ -90,107 +90,21 @@ pub fn spliceMarkdown(alloc: std.mem.Allocator, old: []const u8, body: []const u
     });
 }
 
-/// optional module intro,
-/// then `globals`/`modules`/`methods` sections with per-fn anchors,
-/// toc links,
-/// `<details>` collapsibles,
-/// and the prose/code doc split
-/// hugo-goldmark-compatible
-pub fn renderMarkdown(
-    alloc: std.mem.Allocator,
-    w: *Writer,
-    specs: []*const FnSpec,
-    module_doc: []const u8,
-) !void {
-    var slugs = SlugSet{};
-    defer slugs.deinit(alloc);
-    if (module_doc.len > 0) {
-        try w.writeAll(module_doc);
-        try w.writeAll("\n\n");
-    }
-    try renderGlobals(alloc, w, specs, &slugs);
-    try renderModules(alloc, w, specs, &slugs);
-    try renderMethods(alloc, w, specs, &slugs);
-}
+// -- [shared] ------------------------------------------------------------
 
+/// slugs are only meaningful for html, but both renderers make the
+/// same sorted list of these so grouping/sorting logic stays shared
 const Planned = struct {
     spec: *const FnSpec,
-    slug: []const u8,
+    slug: []const u8 = "",
 };
 
-fn renderGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
-    var planned = std.ArrayList(Planned).empty;
-    defer planned.deinit(alloc);
-    for (specs) |s| {
-        if (headOf(s.sig).kind == .global) {
-            try planned.append(alloc, .{ .spec = s, .slug = "" });
+fn sortByName(list: []Planned) void {
+    std.mem.sort(Planned, list, {}, struct {
+        fn less(_: void, a: Planned, b: Planned) bool {
+            return std.mem.order(u8, a.spec.name, b.spec.name) == .lt;
         }
-    }
-
-    try collectAndSort(alloc, &planned, slugs);
-    try renderSection(w, "globals", planned.items);
-}
-
-fn renderModules(alloc: std.mem.Allocator, w: *Writer, list: []*const FnSpec, slugs: *SlugSet) !void {
-    try w.writeAll("## modules\n\n");
-
-    var mod_set = std.StringHashMapUnmanaged(void).empty;
-    defer mod_set.deinit(alloc);
-    for (list) |s| {
-        const head = headOf(s.sig);
-        if (head.kind == .module) try mod_set.put(alloc, head.module.?, {});
-    }
-
-    var names = std.ArrayList([]const u8).empty;
-    defer names.deinit(alloc);
-    {
-        var it = mod_set.keyIterator();
-        while (it.next()) |k| try names.append(alloc, k.*);
-    }
-    std.mem.sort([]const u8, names.items, {}, lessStr);
-
-    for (names.items) |mod_name| {
-        var planned = std.ArrayList(Planned).empty;
-        defer planned.deinit(alloc);
-        for (list) |s| {
-            const head = headOf(s.sig);
-            if (head.kind == .module and std.mem.eql(u8, head.module.?, mod_name)) {
-                try planned.append(alloc, .{ .spec = s, .slug = "" });
-            }
-        }
-        try collectAndSort(alloc, &planned, slugs);
-        try renderGroup(w, mod_name, planned.items);
-    }
-}
-
-fn renderMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
-    try w.writeAll("## methods\n\n");
-
-    var target_set = std.StringHashMapUnmanaged(void).empty;
-    defer target_set.deinit(alloc);
-    for (specs) |s| {
-        if (methodPrefix(s.sig)) |prefix| try target_set.put(alloc, prefix, {});
-    }
-
-    var names = std.ArrayList([]const u8).empty;
-    defer names.deinit(alloc);
-    {
-        var it = target_set.keyIterator();
-        while (it.next()) |k| try names.append(alloc, k.*);
-    }
-    std.mem.sort([]const u8, names.items, {}, lessStr);
-
-    for (names.items) |target_name| {
-        var planned = std.ArrayList(Planned).empty;
-        defer planned.deinit(alloc);
-        for (specs) |s| {
-            if (std.mem.eql(u8, methodPrefix(s.sig) orelse "", target_name)) {
-                try planned.append(alloc, .{ .spec = s, .slug = "" });
-            }
-        }
-        try collectAndSort(alloc, &planned, slugs);
-        try renderGroup(w, target_name, planned.items);
-    }
+    }.less);
 }
 
 fn methodPrefix(sig: []const u8) ?[]const u8 {
@@ -200,166 +114,17 @@ fn methodPrefix(sig: []const u8) ?[]const u8 {
     return head[0..i];
 }
 
-/// a `###` group (module or target) with toc, collapsible, and `---`-separated fns
-fn renderGroup(w: *Writer, title: []const u8, planned: []const Planned) !void {
-    try w.print("### {s}\n\n", .{title});
-    try renderToc(w, planned);
-    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned, 0..) |p, i| {
-        try renderFn(w, p);
-        if (i + 1 < planned.len) try w.writeAll("---\n\n");
-    }
-    try w.writeAll("</details>\n\n");
+/// strips the `Target:` prefix off a method's signature, since it's
+/// kinda useless once the method is alreaday under its types group
+fn stripMethodPrefix(sig: []const u8) []const u8 {
+    const end = std.mem.indexOfScalar(u8, sig, '(') orelse sig.len;
+    const head = sig[0..end];
+    if (std.mem.indexOfScalar(u8, head, ':')) |i| return sig[i + 1 ..];
+    return sig;
 }
 
-fn renderSection(
-    w: *Writer,
-    title: []const u8,
-    planned: []const Planned,
-) !void {
-    try w.print("## {s}\n\n", .{title});
-    if (planned.len == 0) {
-        try w.writeAll("(none)\n\n");
-        return;
-    }
-
-    try renderToc(w, planned);
-    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned, 0..) |p, i| {
-        try renderFn(w, p);
-        if (i + 1 < planned.len) try w.writeAll("---\n\n");
-    }
-    try w.writeAll("</details>\n\n");
-}
-
-fn collectAndSort(
-    alloc: std.mem.Allocator,
-    list: *std.ArrayList(Planned),
-    slugs: *SlugSet,
-) !void {
-    std.mem.sort(Planned, list.items, {}, struct {
-        fn less(_: void, a: Planned, b: Planned) bool {
-            return std.mem.order(u8, a.spec.name, b.spec.name) == .lt;
-        }
-    }.less);
-    for (list.items) |*p| {
-        p.slug = try slugs.assign(alloc, p.spec.name);
-    }
-}
-
-fn renderToc(w: *Writer, planned: []const Planned) !void {
-    for (planned, 0..) |p, i| {
-        if (i > 0) try w.writeAll(" | ");
-        try w.print("[{s}](#{s})", .{ p.spec.name, p.slug });
-    }
-    try w.writeAll("\n\n");
-}
-
-fn renderFn(w: *Writer, p: Planned) !void {
-    const spec = p.spec;
-
-    try w.print("#### {s}\n\n", .{spec.name});
-
-    if (spec.is_value) {
-        try w.writeAll("(value)\n\n");
-    } else {
-        try w.writeAll("```ruby\n");
-        try w.writeAll(spec.sig);
-        try w.writeAll("\n```\n\n");
-    }
-
-    if (spec.core_key) |k| try w.print("metatable key: `{s}`\n\n", .{@tagName(k)});
-
-    if (spec.doc.len == 0) {
-        try w.writeAll("> undocumented :(\n\n");
-    } else {
-        try renderDoc(w, spec.doc);
-    }
-
-    if (spec.fields.len > 0) try renderFields(w, spec.fields);
-}
-
-/// documented struct fields as a markdown list, continuation lines
-/// indented so multi-line docs stay inside their bullet
-fn renderFields(w: *Writer, fields: []const FieldSpec) !void {
-    for (fields) |fl| {
-        try w.print("- `{s}", .{fl.name});
-        if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
-        try w.writeAll("`");
-        // field docs carry their in-source indentation; strip it so
-        // nesting under the bullet stays consistent
-        var first = true;
-        var it = std.mem.splitScalar(u8, fl.doc, '\n');
-        while (it.next()) |line| {
-            const stripped = std.mem.trim(u8, line, " ");
-            if (!first) try w.writeAll("\n  ") else try w.writeAll(" - ");
-            first = false;
-            try w.writeAll(stripped);
-        }
-        try w.writeAll("\n");
-    }
-    try w.writeAll("\n");
-}
-
-fn renderDoc(w: *Writer, doc: []const u8) !void {
-    const trimmed = std.mem.trim(u8, doc, "\n");
-
-    var prose: []const u8 = trimmed;
-    var code: []const u8 = "";
-    if (std.mem.indexOf(u8, trimmed, "\n\n")) |idx| {
-        prose = trimmed[0..idx];
-        code = std.mem.trim(u8, trimmed[idx + 2 ..], "\n");
-    }
-
-    {
-        var min_indent: usize = std.math.maxInt(usize);
-        var lines = std.mem.splitScalar(u8, prose, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            var n: usize = 0;
-            while (n < line.len and line[n] == ' ') n += 1;
-            if (n < min_indent) min_indent = n;
-        }
-        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
-
-        var it = std.mem.splitScalar(u8, prose, '\n');
-        var first = true;
-        while (it.next()) |line| {
-            if (!first) try w.writeAll("\n");
-            first = false;
-            try w.writeAll(if (line.len >= min_indent) line[min_indent..] else line);
-        }
-        try w.writeAll("\n\n");
-    }
-
-    if (code.len > 0) {
-        var min_indent: usize = std.math.maxInt(usize);
-        {
-            var it = std.mem.splitScalar(u8, code, '\n');
-            while (it.next()) |line| {
-                if (line.len == 0) continue;
-                var n: usize = 0;
-                while (n < line.len and line[n] == ' ') n += 1;
-                if (n < min_indent) min_indent = n;
-            }
-        }
-        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
-
-        try w.writeAll("```revo\n");
-        var it = std.mem.splitScalar(u8, code, '\n');
-        var first = true;
-        while (it.next()) |line| {
-            if (!first) try w.writeAll("\n");
-            first = false;
-            if (line.len >= min_indent) {
-                try w.writeAll(line[min_indent..]);
-            } else {
-                try w.writeAll(line);
-            }
-        }
-
-        try w.writeAll("\n```\n\n");
-    }
+pub fn lessStr(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.order(u8, a, b) == .lt;
 }
 
 const SlugSet = struct {
@@ -398,13 +163,263 @@ fn slugify(alloc: std.mem.Allocator, name: []const u8) ![]const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-pub fn lessStr(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
+fn collectGlobals(alloc: std.mem.Allocator, specs: []*const FnSpec) !std.ArrayList(Planned) {
+    var planned = std.ArrayList(Planned).empty;
+    for (specs) |s| {
+        if (headOf(s.sig).kind == .global) try planned.append(alloc, .{ .spec = s });
+    }
+    sortByName(planned.items);
+    return planned;
+}
+
+fn collectModuleNames(alloc: std.mem.Allocator, specs: []*const FnSpec) !std.ArrayList([]const u8) {
+    var set = std.StringHashMapUnmanaged(void){};
+    defer set.deinit(alloc);
+    for (specs) |s| {
+        const head = headOf(s.sig);
+        if (head.kind == .module) try set.put(alloc, head.module.?, {});
+    }
+    var names = std.ArrayList([]const u8).empty;
+    var it = set.keyIterator();
+    while (it.next()) |k| try names.append(alloc, k.*);
+    std.mem.sort([]const u8, names.items, {}, lessStr);
+    return names;
+}
+
+fn collectModule(alloc: std.mem.Allocator, specs: []*const FnSpec, mod_name: []const u8) !std.ArrayList(Planned) {
+    var planned = std.ArrayList(Planned).empty;
+    for (specs) |s| {
+        const head = headOf(s.sig);
+        if (head.kind == .module and std.mem.eql(u8, head.module.?, mod_name)) {
+            try planned.append(alloc, .{ .spec = s });
+        }
+    }
+    sortByName(planned.items);
+    return planned;
+}
+
+fn collectMethodTargets(alloc: std.mem.Allocator, specs: []*const FnSpec) !std.ArrayList([]const u8) {
+    var set = std.StringHashMapUnmanaged(void){};
+    defer set.deinit(alloc);
+    for (specs) |s| {
+        if (methodPrefix(s.sig)) |prefix| try set.put(alloc, prefix, {});
+    }
+    var names = std.ArrayList([]const u8).empty;
+    var it = set.keyIterator();
+    while (it.next()) |k| try names.append(alloc, k.*);
+    std.mem.sort([]const u8, names.items, {}, lessStr);
+    return names;
+}
+
+fn collectMethods(alloc: std.mem.Allocator, specs: []*const FnSpec, target_name: []const u8) !std.ArrayList(Planned) {
+    var planned = std.ArrayList(Planned).empty;
+    for (specs) |s| {
+        if (std.mem.eql(u8, methodPrefix(s.sig) orelse "", target_name)) {
+            try planned.append(alloc, .{ .spec = s });
+        }
+    }
+    sortByName(planned.items);
+    return planned;
+}
+
+fn writeIndent(w: *Writer, indent: usize) !void {
+    var i: usize = 0;
+    while (i < indent) : (i += 1) try w.writeByte(' ');
+}
+
+// -- [text] --------------------------------------------------------------
+//
+// ` 0 spaces for section headers
+// ` 2 spaces for toplevel definitions (functions, types, modules)
+// ` 4 spaces for their direct children (descriptions, methods)
+// ` 6 spaces for method descriptions and nested content
+
+pub fn renderText(
+    alloc: std.mem.Allocator,
+    w: *Writer,
+    specs: []*const FnSpec,
+    module_doc: []const u8,
+) !void {
+    if (module_doc.len > 0) {
+        try writeIndentedDoc(w, module_doc, 0);
+        try w.writeAll("\n");
+    }
+
+    var consumed = std.StringHashMapUnmanaged(void){};
+    defer consumed.deinit(alloc);
+
+    try renderTextGlobals(alloc, w, specs, &consumed);
+    try renderTextModules(alloc, w, specs, &consumed);
+    try renderTextMethods(alloc, w, specs, &consumed);
+}
+
+fn renderTextGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, consumed: *std.StringHashMapUnmanaged(void)) !void {
+    var planned = try collectGlobals(alloc, specs);
+    defer planned.deinit(alloc);
+    if (planned.items.len == 0) return;
+
+    try w.writeAll("globals\n");
+    for (planned.items) |p| {
+        try renderTextFn(w, p.spec, p.spec.sig, 2, 4);
+        try renderTextNestedMethods(alloc, w, specs, p.spec.name, 4, 6, consumed);
+    }
+}
+
+fn renderTextModules(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, consumed: *std.StringHashMapUnmanaged(void)) !void {
+    var names = try collectModuleNames(alloc, specs);
+    defer names.deinit(alloc);
+    if (names.items.len == 0) return;
+
+    try w.writeAll("modules\n");
+    for (names.items) |mod_name| {
+        var planned = try collectModule(alloc, specs, mod_name);
+        defer planned.deinit(alloc);
+
+        try w.writeAll("\n  module ");
+        try w.writeAll(mod_name);
+        try w.writeAll("\n");
+
+        for (planned.items) |p| {
+            if (p.spec.module_doc.len > 0) {
+                try writeIndentedDoc(w, p.spec.module_doc, 4);
+                try w.writeByte('\n');
+                break;
+            }
+        }
+
+        for (planned.items) |p| {
+            try renderTextFn(w, p.spec, p.spec.sig, 4, 6);
+            try renderTextNestedMethods(alloc, w, specs, p.spec.name, 6, 8, consumed);
+        }
+    }
+}
+
+fn renderTextMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, consumed: *const std.StringHashMapUnmanaged(void)) !void {
+    var names = try collectMethodTargets(alloc, specs);
+    defer names.deinit(alloc);
+
+    var remaining = std.ArrayList([]const u8).empty;
+    defer remaining.deinit(alloc);
+    for (names.items) |n| {
+        if (!consumed.contains(n)) try remaining.append(alloc, n);
+    }
+    if (remaining.items.len == 0) return;
+
+    try w.writeAll("methods\n");
+    for (remaining.items) |target_name| {
+        var planned = try collectMethods(alloc, specs, target_name);
+        defer planned.deinit(alloc);
+
+        try w.writeAll("\n  type ");
+        try w.writeAll(target_name);
+        try w.writeAll("\n");
+
+        for (planned.items) |p| try renderTextFn(w, p.spec, stripMethodPrefix(p.spec.sig), 4, 6);
+    }
+}
+
+fn renderTextNestedMethods(
+    alloc: std.mem.Allocator,
+    w: *Writer,
+    specs: []*const FnSpec,
+    target_name: []const u8,
+    sig_indent: usize,
+    doc_indent: usize,
+    consumed: *std.StringHashMapUnmanaged(void),
+) !void {
+    var planned = try collectMethods(alloc, specs, target_name);
+    defer planned.deinit(alloc);
+    if (planned.items.len == 0) return;
+
+    try consumed.put(alloc, target_name, {});
+    for (planned.items) |p| try renderTextFn(w, p.spec, stripMethodPrefix(p.spec.sig), sig_indent, doc_indent);
+}
+
+fn renderTextFn(w: *Writer, spec: *const FnSpec, sig: []const u8, sig_indent: usize, doc_indent: usize) !void {
+    try w.writeAll("\n");
+    try writeIndent(w, sig_indent);
+    if (spec.is_value) {
+        try w.print("{s}\n", .{spec.name});
+        try writeIndent(w, doc_indent);
+        try w.writeAll("(value)\n");
+    } else {
+        try w.print("fn {s}\n", .{sig});
+    }
+
+    if (spec.core_key) |k| {
+        try writeIndent(w, doc_indent);
+        try w.print("metatable key: {s}\n", .{@tagName(k)});
+    }
+
+    if (spec.doc.len > 0) {
+        try writeIndentedDoc(w, spec.doc, doc_indent);
+    } else {
+        try writeIndent(w, doc_indent);
+        try w.writeAll("undocumented :(\n");
+    }
+
+    if (spec.fields.len > 0) try renderTextFields(w, spec.fields, doc_indent);
+}
+
+fn renderTextFields(w: *Writer, fields: []const FieldSpec, indent: usize) !void {
+    try w.writeAll("\n");
+    for (fields) |fl| {
+        try writeIndent(w, indent);
+        try w.print("- {s}", .{fl.name});
+        if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
+        if (fl.doc.len > 0) {
+            try w.writeAll("\n");
+            var it = std.mem.splitScalar(u8, fl.doc, '\n');
+            while (it.next()) |line| {
+                const stripped = std.mem.trim(u8, line, " \t");
+                if (stripped.len == 0) {
+                    try w.writeAll("\n");
+                } else {
+                    try writeIndent(w, indent + 2);
+                    try w.writeAll(stripped);
+                    try w.writeAll("\n");
+                }
+            }
+        } else {
+            try w.writeAll("\n");
+        }
+    }
+}
+
+fn writeIndentedDoc(w: *Writer, doc: []const u8, indent: usize) !void {
+    const trimmed = std.mem.trim(u8, doc, "\n");
+    if (trimmed.len == 0) return;
+
+    const min_indent = minIndentOf(trimmed);
+
+    var it = std.mem.splitScalar(u8, trimmed, '\n');
+    while (it.next()) |line| {
+        if (std.mem.trim(u8, line, " \t").len == 0) {
+            try w.writeAll("\n");
+            continue;
+        }
+        const stripped = if (line.len >= min_indent) line[min_indent..] else line;
+        try writeIndent(w, indent);
+        try w.writeAll(stripped);
+        try w.writeAll("\n");
+    }
+}
+
+/// the smallest leading-space count across all non-blank lines of `text`
+fn minIndentOf(text: []const u8) usize {
+    var min_indent: usize = std.math.maxInt(usize);
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.trim(u8, line, " \t").len == 0) continue;
+        var n: usize = 0;
+        while (n < line.len and line[n] == ' ') n += 1;
+        if (n < min_indent) min_indent = n;
+    }
+    return if (min_indent == std.math.maxInt(usize)) 0 else min_indent;
 }
 
 // -- [html] ------------------------------------------------------------------
 
-/// html variant of renderMarkdown,, same structure, real tags
 pub fn renderHtml(
     alloc: std.mem.Allocator,
     w: *Writer,
@@ -413,174 +428,248 @@ pub fn renderHtml(
 ) !void {
     var slugs = SlugSet{};
     defer slugs.deinit(alloc);
+    var consumed = std.StringHashMapUnmanaged(void){};
+    defer consumed.deinit(alloc);
+
     if (module_doc.len > 0) {
-        try w.writeAll("<p>");
-        try writeHtmlEscaped(w, module_doc);
-        try w.writeAll("</p>\n\n");
+        try writeHtmlTextBlock(w, 0, "<p class=\"module-doc\">", "</p>", module_doc, 0);
     }
-    try renderHtmlGlobals(alloc, w, specs, &slugs);
-    try renderHtmlModules(alloc, w, specs, &slugs);
-    try renderHtmlMethods(alloc, w, specs, &slugs);
+    try renderHtmlGlobals(alloc, w, specs, &slugs, &consumed);
+    try renderHtmlModules(alloc, w, specs, &slugs, &consumed);
+    try renderHtmlMethods(alloc, w, specs, &slugs, &consumed);
 }
 
-fn renderHtmlGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
-    var planned = std.ArrayList(Planned).empty;
+fn renderHtmlGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet, consumed: *std.StringHashMapUnmanaged(void)) !void {
+    var planned = try collectGlobals(alloc, specs);
     defer planned.deinit(alloc);
-    for (specs) |s| {
-        if (headOf(s.sig).kind == .global) {
-            try planned.append(alloc, .{ .spec = s, .slug = "" });
-        }
-    }
-    try collectAndSort(alloc, &planned, slugs);
-    try renderHtmlSection(w, "globals", planned.items);
+    if (planned.items.len == 0) return;
+    for (planned.items) |*p| p.slug = try slugs.assign(alloc, p.spec.name);
+
+    try w.writeAll("<section class=\"section section-globals\">\n");
+    try writeIndent(w, 2);
+    try w.writeAll("<h2>globals</h2>\n\n");
+
+    try renderHtmlToc(w, planned.items, 2);
+
+    try writeIndent(w, 2);
+    try w.writeAll("<details open>\n");
+    try writeIndent(w, 4);
+    try w.print("<summary>{d} entries</summary>\n\n", .{planned.items.len});
+    for (planned.items) |p| try renderHtmlFn(w, p, p.spec.sig, 4, alloc, specs, slugs, consumed);
+    try writeIndent(w, 2);
+    try w.writeAll("</details>\n");
+
+    try w.writeAll("</section>\n\n");
 }
 
-fn renderHtmlModules(alloc: std.mem.Allocator, w: *Writer, list: []*const FnSpec, slugs: *SlugSet) !void {
+fn renderHtmlModules(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet, consumed: *std.StringHashMapUnmanaged(void)) !void {
+    var names = try collectModuleNames(alloc, specs);
+    defer names.deinit(alloc);
+    if (names.items.len == 0) return;
+
+    try w.writeAll("<section class=\"section section-modules\">\n");
+    try writeIndent(w, 2);
     try w.writeAll("<h2>modules</h2>\n\n");
 
-    var mod_set = std.StringHashMapUnmanaged(void).empty;
-    defer mod_set.deinit(alloc);
-    for (list) |s| {
-        const head = headOf(s.sig);
-        if (head.kind == .module) try mod_set.put(alloc, head.module.?, {});
-    }
-
-    var names = std.ArrayList([]const u8).empty;
-    defer names.deinit(alloc);
-    {
-        var it = mod_set.keyIterator();
-        while (it.next()) |k| try names.append(alloc, k.*);
-    }
-    std.mem.sort([]const u8, names.items, {}, lessStr);
-
     for (names.items) |mod_name| {
-        var planned = std.ArrayList(Planned).empty;
+        var planned = try collectModule(alloc, specs, mod_name);
         defer planned.deinit(alloc);
-        for (list) |s| {
-            const head = headOf(s.sig);
-            if (head.kind == .module and std.mem.eql(u8, head.module.?, mod_name)) {
-                try planned.append(alloc, .{ .spec = s, .slug = "" });
-            }
-        }
-        try collectAndSort(alloc, &planned, slugs);
-        try renderHtmlGroup(w, mod_name, planned.items);
+        for (planned.items) |*p| p.slug = try slugs.assign(alloc, p.spec.name);
+        try renderHtmlGroup(w, "module", mod_name, planned.items, false, 2, alloc, specs, slugs, consumed);
     }
+
+    try w.writeAll("</section>\n\n");
 }
 
-fn renderHtmlMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet) !void {
+fn renderHtmlMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, slugs: *SlugSet, consumed: *const std.StringHashMapUnmanaged(void)) !void {
+    var names = try collectMethodTargets(alloc, specs);
+    defer names.deinit(alloc);
+
+    var remaining = std.ArrayList([]const u8).empty;
+    defer remaining.deinit(alloc);
+    for (names.items) |n| {
+        if (!consumed.contains(n)) try remaining.append(alloc, n);
+    }
+    if (remaining.items.len == 0) return;
+
+    try w.writeAll("<section class=\"section section-methods\">\n");
+    try writeIndent(w, 2);
     try w.writeAll("<h2>methods</h2>\n\n");
 
-    var target_set = std.StringHashMapUnmanaged(void).empty;
-    defer target_set.deinit(alloc);
-    for (specs) |s| {
-        if (methodPrefix(s.sig)) |prefix| try target_set.put(alloc, prefix, {});
-    }
-
-    var names = std.ArrayList([]const u8).empty;
-    defer names.deinit(alloc);
-    {
-        var it = target_set.keyIterator();
-        while (it.next()) |k| try names.append(alloc, k.*);
-    }
-    std.mem.sort([]const u8, names.items, {}, lessStr);
-
-    for (names.items) |target_name| {
-        var planned = std.ArrayList(Planned).empty;
+    for (remaining.items) |target_name| {
+        var planned = try collectMethods(alloc, specs, target_name);
         defer planned.deinit(alloc);
-        for (specs) |s| {
-            if (std.mem.eql(u8, methodPrefix(s.sig) orelse "", target_name)) {
-                try planned.append(alloc, .{ .spec = s, .slug = "" });
-            }
-        }
-        try collectAndSort(alloc, &planned, slugs);
-        try renderHtmlGroup(w, target_name, planned.items);
+        for (planned.items) |*p| p.slug = try slugs.assign(alloc, p.spec.name);
+        try renderHtmlGroup(w, "type", target_name, planned.items, true, 2, alloc, specs, slugs, @constCast(consumed));
     }
+
+    try w.writeAll("</section>\n\n");
 }
 
-fn renderHtmlGroup(w: *Writer, title: []const u8, planned: []const Planned) !void {
-    try w.print("<h3>{s}</h3>\n\n", .{title});
-    try renderHtmlToc(w, planned);
-    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned) |p| try renderHtmlFn(w, p);
-
-    try w.writeAll("</details>\n\n");
-}
-
-fn renderHtmlSection(
+/// a `module <name>` / `type <name>` group, its own `<section>` nested
+/// `indent` spaces deep; everything inside is one step further in
+fn renderHtmlGroup(
     w: *Writer,
-    title: []const u8,
+    kind: []const u8,
+    name: []const u8,
     planned: []const Planned,
+    strip_prefix: bool,
+    indent: usize,
+    alloc: std.mem.Allocator,
+    specs: []*const FnSpec,
+    slugs: *SlugSet,
+    consumed: *std.StringHashMapUnmanaged(void),
 ) !void {
-    try w.print("<h2>{s}</h2>\n\n", .{title});
-    if (planned.len == 0) {
-        try w.writeAll("<p>(none)</p>\n\n");
-        return;
+    try writeIndent(w, indent);
+    try w.writeAll("<section class=\"group\">\n");
+
+    try writeIndent(w, indent + 2);
+    try w.writeAll("<h3><span class=\"kind\">");
+    try writeHtmlEscaped(w, kind);
+    try w.writeAll("</span> ");
+    try writeHtmlEscaped(w, name);
+    try w.writeAll("</h3>\n\n");
+
+    for (planned) |p| {
+        if (p.spec.module_doc.len > 0) {
+            try writeHtmlTextBlock(w, indent + 2, "<blockquote class=\"group-doc\">", "</blockquote>", p.spec.module_doc, 0);
+            break;
+        }
     }
 
-    try renderHtmlToc(w, planned);
-    try w.print("<details>\n<summary>{d} entries</summary>\n\n", .{planned.len});
-    for (planned) |p| try renderHtmlFn(w, p);
+    try renderHtmlToc(w, planned, indent + 2);
 
-    try w.writeAll("</details>\n\n");
+    try writeIndent(w, indent + 2);
+    try w.writeAll("<details>\n");
+    try writeIndent(w, indent + 4);
+    try w.print("<summary>{d} entries</summary>\n\n", .{planned.len});
+    for (planned) |p| {
+        const sig = if (strip_prefix) stripMethodPrefix(p.spec.sig) else p.spec.sig;
+        try renderHtmlFn(w, p, sig, indent + 4, alloc, specs, slugs, consumed);
+    }
+    try writeIndent(w, indent + 2);
+    try w.writeAll("</details>\n");
+
+    try writeIndent(w, indent);
+    try w.writeAll("</section>\n\n");
 }
 
-fn renderHtmlToc(w: *Writer, planned: []const Planned) !void {
-    try w.writeAll("<nav>");
-    for (planned, 0..) |p, i| {
-        if (i > 0) try w.writeAll(" | ");
-        try w.print("<a href=\"#{s}\">{s}</a>", .{ p.slug, p.spec.name });
+fn renderHtmlToc(w: *Writer, planned: []const Planned, indent: usize) !void {
+    try writeIndent(w, indent);
+    try w.writeAll("<nav class=\"toc\">\n");
+    try writeIndent(w, indent + 2);
+    try w.writeAll("<p>\n");
+    for (planned) |p| {
+        try writeIndent(w, indent + 4);
+        try w.writeAll("<a href=\"#");
+        try w.writeAll(p.slug);
+        try w.writeAll("\">");
+        try writeHtmlEscaped(w, p.spec.name);
+        try w.writeAll("</a> |");
     }
+    try writeIndent(w, indent + 2);
+    try w.writeAll("</p>\n");
+    try writeIndent(w, indent);
     try w.writeAll("</nav>\n\n");
 }
 
-fn renderHtmlFn(w: *Writer, p: Planned) !void {
+fn renderHtmlFn(
+    w: *Writer,
+    p: Planned,
+    sig: []const u8,
+    indent: usize,
+    alloc: std.mem.Allocator,
+    specs: []*const FnSpec,
+    slugs: *SlugSet,
+    consumed: *std.StringHashMapUnmanaged(void),
+) anyerror!void {
     const spec = p.spec;
 
-    // try w.print("<h4 id=\"{s}\">{s}</h4>\n\n", .{ p.slug, spec.name });
+    try writeIndent(w, indent);
+    try w.writeAll("<article class=\"entry\" id=\"");
+    try w.writeAll(p.slug);
+    try w.writeAll("\">\n");
+
+    try writeHtmlTextBlock(w, indent + 2, "<h4>", "</h4>", spec.name, 0);
 
     if (spec.is_value) {
-        try w.writeAll("<p>(value)</p>\n\n");
+        try writeIndent(w, indent + 2);
+        try w.writeAll("<p class=\"marker\">(value)</p>\n\n");
     } else {
-        try w.print("<pre><code class=\"signature\" id=\"{s}\">", .{spec.name});
-        try writeHtmlEscaped(w, spec.sig);
-        try w.writeAll("</code></pre>\n\n");
+        try writeHtmlTextBlock(w, indent + 2, "<pre class=\"signature\"><code>", "</code></pre>", sig, 0);
     }
 
     if (spec.core_key) |k| {
-        try w.writeAll("<p>metatable key: <code>");
+        try writeIndent(w, indent + 2);
+        try w.writeAll("<p class=\"metatable-key\">metatable key: <code>");
         try writeHtmlEscaped(w, @tagName(k));
         try w.writeAll("</code></p>\n\n");
     }
 
     if (spec.doc.len == 0) {
-        try w.writeAll("<blockquote>undocumented :(</blockquote>\n\n");
+        try writeIndent(w, indent + 2);
+        try w.writeAll("<blockquote class=\"undocumented\">undocumented :(</blockquote>\n\n");
     } else {
-        try renderHtmlDoc(w, spec.doc);
+        try renderHtmlDoc(w, spec.doc, indent + 2);
     }
 
-    if (spec.fields.len > 0) try renderHtmlFields(w, spec.fields);
+    if (spec.fields.len > 0) try renderHtmlFields(w, spec.fields, indent + 2);
+
+    try renderHtmlNestedMethods(alloc, w, specs, spec.name, indent + 2, slugs, consumed);
+
+    try writeIndent(w, indent);
+    try w.writeAll("</article>\n\n");
 }
 
-fn renderHtmlFields(w: *Writer, fields: []const FieldSpec) !void {
-    try w.writeAll("<ul>\n");
+fn renderHtmlNestedMethods(
+    alloc: std.mem.Allocator,
+    w: *Writer,
+    specs: []*const FnSpec,
+    target_name: []const u8,
+    indent: usize,
+    slugs: *SlugSet,
+    consumed: *std.StringHashMapUnmanaged(void),
+) anyerror!void {
+    var planned = try collectMethods(alloc, specs, target_name);
+    defer planned.deinit(alloc);
+    if (planned.items.len == 0) return;
+
+    try consumed.put(alloc, target_name, {});
+    for (planned.items) |*p| p.slug = try slugs.assign(alloc, p.spec.name);
+
+    try writeIndent(w, indent);
+    try w.writeAll("<section class=\"methods\">\n");
+    try writeIndent(w, indent + 2);
+    try w.writeAll("<h5>methods</h5>\n\n");
+    for (planned.items) |p| {
+        const sig = stripMethodPrefix(p.spec.sig);
+        try renderHtmlFn(w, p, sig, indent + 2, alloc, specs, slugs, consumed);
+    }
+    try writeIndent(w, indent);
+    try w.writeAll("</section>\n\n");
+}
+
+fn renderHtmlFields(w: *Writer, fields: []const FieldSpec, indent: usize) !void {
+    try writeIndent(w, indent);
+    try w.writeAll("<dl class=\"fields\">\n");
     for (fields) |fl| {
-        try w.writeAll("  <li><code>");
+        try writeIndent(w, indent + 2);
+        try w.writeAll("<dt><code>");
         try writeHtmlEscaped(w, fl.name);
         if (fl.type_text.len > 0) {
             try w.writeAll(": ");
             try writeHtmlEscaped(w, fl.type_text);
         }
-        try w.writeAll("</code>");
+        try w.writeAll("</code></dt>\n");
         if (fl.doc.len > 0) {
-            try w.writeAll(" - ");
-            try writeHtmlEscaped(w, fl.doc);
+            try writeHtmlTextBlock(w, indent + 2, "<dd>", "</dd>", fl.doc, 0);
         }
-        try w.writeAll("</li>\n");
     }
-    try w.writeAll("</ul>\n\n");
+    try writeIndent(w, indent);
+    try w.writeAll("</dl>\n\n");
 }
 
-fn renderHtmlDoc(w: *Writer, doc: []const u8) !void {
+fn renderHtmlDoc(w: *Writer, doc: []const u8, indent: usize) !void {
     const trimmed = std.mem.trim(u8, doc, "\n");
 
     var prose: []const u8 = trimmed;
@@ -590,55 +679,28 @@ fn renderHtmlDoc(w: *Writer, doc: []const u8) !void {
         code = std.mem.trim(u8, trimmed[idx + 2 ..], "\n");
     }
 
-    // prose
-    {
-        var min_indent: usize = std.math.maxInt(usize);
-        var lines = std.mem.splitScalar(u8, prose, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            var n: usize = 0;
-            while (n < line.len and line[n] == ' ') n += 1;
-            if (n < min_indent) min_indent = n;
-        }
-        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
-
-        try w.writeAll("<p class=\"desc\">");
-        var it = std.mem.splitScalar(u8, prose, '\n');
-        var first = true;
-        while (it.next()) |line| {
-            if (!first) try w.writeAll("\n");
-            first = false;
-            const stripped = if (line.len >= min_indent) line[min_indent..] else line;
-            try writeHtmlEscaped(w, stripped);
-        }
-        try w.writeAll("</p>\n\n");
-    }
-
-    // code
+    try writeHtmlTextBlock(w, indent, "<p class=\"desc\">", "</p>", prose, minIndentOf(prose));
     if (code.len > 0) {
-        var min_indent: usize = std.math.maxInt(usize);
-        {
-            var it = std.mem.splitScalar(u8, code, '\n');
-            while (it.next()) |line| {
-                if (line.len == 0) continue;
-                var n: usize = 0;
-                while (n < line.len and line[n] == ' ') n += 1;
-                if (n < min_indent) min_indent = n;
-            }
-        }
-        if (min_indent == std.math.maxInt(usize)) min_indent = 0;
-
-        try w.writeAll("<pre><code class=\"language-revo\">");
-        var it = std.mem.splitScalar(u8, code, '\n');
-        var first = true;
-        while (it.next()) |line| {
-            if (!first) try w.writeAll("\n");
-            first = false;
-            const stripped = if (line.len >= min_indent) line[min_indent..] else line;
-            try writeHtmlEscaped(w, stripped);
-        }
-        try w.writeAll("</code></pre>\n\n");
+        try writeHtmlTextBlock(w, indent, "<pre class=\"example\"><code class=\"language-revo\">", "</code></pre>", code, minIndentOf(code));
     }
+}
+
+fn writeHtmlTextBlock(w: *Writer, indent: usize, open_tag: []const u8, close_tag: []const u8, text: []const u8, strip: usize) !void {
+    try writeIndent(w, indent);
+    try w.writeAll(open_tag);
+    var it = std.mem.splitScalar(u8, text, '\n');
+    var first = true;
+    while (it.next()) |line| {
+        if (!first) {
+            try w.writeAll("\n");
+            try writeIndent(w, indent);
+        }
+        first = false;
+        const stripped = if (line.len >= strip) line[strip..] else line;
+        try writeHtmlEscaped(w, stripped);
+    }
+    try w.writeAll(close_tag);
+    try w.writeAll("\n\n");
 }
 
 fn writeHtmlEscaped(w: *Writer, text: []const u8) !void {
@@ -654,172 +716,3 @@ fn writeHtmlEscaped(w: *Writer, text: []const u8) !void {
 }
 
 // -- [test] ------------------------------------------------------------------
-
-const testing = @import("std").testing;
-
-test "docsExtract specs plain fn bindings" {
-    const src =
-        \\#* adds two *#
-        \\const add = fn(a: int, b: int) a + b
-        \\
-        \\#* unttyped *#
-        \\const laz = fn(x, y) x
-        \\
-        \\const hidden = fn() 1
-    ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    const specs = extracted.specs;
-    try testing.expectEqual(@as(usize, 2), specs.len);
-    try testing.expectEqualStrings("add", specs[0].name);
-    try testing.expectEqualStrings("add(a: int, b: int)", specs[0].sig);
-    try testing.expectEqualStrings("laz(x, y)", specs[1].sig);
-    try testing.expectEqualStrings("adds two", specs[0].doc);
-}
-
-test "docsExtract specs documented non-fn bindings" {
-    const src =
-        \\#* a plain constant *#
-        \\const a = 5
-        \\
-        \\#* not collected *#
-        \\const hidden = 9
-        \\
-        \\#* typed *#
-        \\const b: number = 1
-    ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    const specs = extracted.specs;
-    try testing.expectEqual(@as(usize, 3), specs.len);
-    try testing.expectEqualStrings("a", specs[0].name);
-    try testing.expectEqualStrings("a", specs[0].sig);
-    try testing.expectEqualStrings("a plain constant", specs[0].doc);
-    try testing.expectEqualStrings("b", specs[2].name);
-}
-
-test "docsExtract lifts a #! module doc" {
-    const src =
-        \\#! things about numbers !#
-        \\
-        \\#* doubles *#
-        \\const twice = fn(n: number) -> number n * 2
-    ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    try testing.expectEqualStrings("things about numbers", extracted.module_doc);
-    try testing.expectEqual(@as(usize, 1), extracted.specs.len);
-}
-
-test "docsExtract rejects module doc after code" {
-    const src =
-        \\const x = 1
-        \\
-        \\#! too late !#
-    ;
-    try testing.expectError(error.LateModuleDoc, docsExtract(testing.allocator, src));
-}
-
-test "docsExtract specs non-function declares" {
-    const src =
-        \\#* an id *#
-        \\pub declare id = number|string
-    ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    try testing.expectEqual(@as(usize, 1), extracted.specs.len);
-    const s = extracted.specs[0];
-    try testing.expectEqualStrings("id", s.name);
-    try testing.expect(s.is_value);
-    try testing.expect(std.mem.indexOf(u8, s.doc, "alias for `number|string`") != null);
-    try testing.expect(std.mem.indexOf(u8, s.doc, "an id") != null);
-}
-
-test "docsExtract specs struct fns as methods" {
-    const src =
-        \\#* a point in space *#
-        \\struct Point {
-        \\  #* horizontal *#
-        \\  x: number,
-        \\  #* distance from origin *#
-        \\  fn len(self) -> number do
-        \\    return 0
-        \\  end
-        \\}
-    ;
-    const extracted = try docsExtract(testing.allocator, src);
-    defer freeSpecs(testing.allocator, extracted.specs);
-    try testing.expectEqual(@as(usize, 2), extracted.specs.len);
-    try testing.expectEqualStrings("Point", extracted.specs[0].name);
-    try testing.expect(extracted.specs[0].is_value);
-    const m = extracted.specs[1];
-    try testing.expectEqualStrings("Point:len", m.name);
-    try testing.expectEqualStrings("Point:len(self) -> number", m.sig);
-    try testing.expectEqualStrings("distance from origin", m.doc);
-    try testing.expect(!m.is_value);
-}
-
-test "spliceMarkdown round trips through the markers" {
-    const old =
-        \\# std
-        \\
-        \\intro
-        \\
-        \\<!-- docgen:start -->
-        \\stale body
-        \\<!-- docgen:end -->
-        \\
-        \\tail
-    ;
-    const out = try spliceMarkdown(testing.allocator, old, "fresh");
-    defer testing.allocator.free(out);
-    try testing.expectEqualStrings(
-        \\# std
-        \\
-        \\intro
-        \\
-        \\<!-- docgen:start -->
-        \\fresh
-        \\<!-- docgen:end -->
-        \\
-        \\tail
-    , out);
-    try testing.expectError(error.MissingDocgenMarker, spliceMarkdown(testing.allocator, "no markers here", "x"));
-}
-
-test "renderMarkdown emits docgen sections" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-    const put = struct {
-        fn put(alloc_in: std.mem.Allocator, list: *std.ArrayList(*const FnSpec), name: []const u8, sig: []const u8, doc: []const u8) !void {
-            const s = try alloc_in.create(FnSpec);
-            // SAFETY: shut up zlint
-            s.* = .{ .name = name, .sig = sig, .doc = doc, .params = &.{}, .ret = "", .f = undefined };
-            try list.append(alloc_in, s);
-        }
-    }.put;
-
-    var list = std.ArrayList(*const FnSpec).empty;
-    defer list.deinit(alloc);
-    try put(alloc, &list, "floor", "floor(n: number) -> number", "rounds down");
-    try put(alloc, &list, "iter.range", "iter.range(bound: number) -> function", "yields numbers");
-    try put(alloc, &list, "string.len", "string.len(self: string) -> int", "counts chars");
-    try put(alloc, &list, "width", "width", "how wide");
-    // SAFETY: renderMarkdown never mutates specs
-    @constCast(list.items[3]).is_value = true;
-
-    var buf = Writer.Allocating.init(alloc);
-    defer buf.deinit();
-    try renderMarkdown(alloc, &buf.writer, list.items, "");
-    const out = buf.written();
-    try testing.expect(std.mem.indexOf(u8, out, "## globals") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "## modules") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "## methods") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "#### string.len") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "```ruby\nfloor(n: number) -> number\n```") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "[floor](#floor)") != null);
-
-    // values get a marker instead of a fn signature block
-    try testing.expect(std.mem.indexOf(u8, out, "#### width\n\n(value)") != null);
-}

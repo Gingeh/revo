@@ -132,7 +132,7 @@ notable steps
 
 the docs for the project itself can be linted and auto-fixed with `rumdl fmt`
 
-docs can be generated via `revo docs` (markdown) or `revo docs --html` (html)
+docs can be generated via `revo doc` (markdown) or `revo doc --html` (html)
 
 it will normally spit out the output directly, but `--splice` can paste into a template, replacing all that is
 between `<!-- docgen:start -->` and `<!-- docgen:end -->`
@@ -142,7 +142,7 @@ it will also generate documentation for a whole directory of scripts if pointed 
 this is a fish script i use for regenerating docs
 
 ```fish
-set STDOCPATH ~/projects/web/revo-web/content/std.md
-revo docs --html --splice ./src/std/iface < "$STDOCPATH" > ./std.md
-mv ./std.md $STDOCPATH
+set STDOCPATH ~/projects/web/revo.lung.fyi/content/std.html
+revo doc --html --splice ./src/std/iface < "$STDOCPATH" > ./std.html
+mv ./std.html $STDOCPATH
 ```

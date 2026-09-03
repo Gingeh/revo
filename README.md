@@ -85,8 +85,8 @@ revo
   output docs in plaintext/html
 
   ```text
-  revo docs <file or directory>
-  revo docs --html <file or directory>
+  revo doc <file or directory>
+  revo doc --html <file or directory>
   ```
 
 ### editors

@@ -221,6 +221,7 @@ pub const FnSpec = struct {
     params: []const Param,
     ret: []const u8,
     doc: []const u8 = "",
+    module_doc: []const u8 = "",
     variadic: bool = false,
     /// a plain value binding (`const width = 80`), not callable
     is_value: bool = false,

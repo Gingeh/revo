@@ -1,4 +1,6 @@
-#! tuple helpers: element access, concatenation, repetition, unwrapping result tuples !#
+#!
+global tuple helpers, calllable as `(1, 2):len()` and `tuple.len(1, 2)`
+!#
 
 #* returns length of tuple *#
 pub declare tuple.len = fn(self: tuple) -> num

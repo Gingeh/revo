@@ -7,7 +7,7 @@
 
 #*
 this is a doc-comment, markdown goes here
-you can run `revo docs demo.rv` to get them in a readable markdown format
+you can run `revo doc demo.rv` to get them in a readable markdown format
 *#
 fn the_basics() do
   print("the basics")
@@ -237,6 +237,16 @@ fn structs() do
   c:inc()
   print(c:val())
 end
+
+#* this is a public, documented struct *#
+pub struct Hi {
+	#* this field is documented *#
+	field: number,
+	#* this is a member function *#
+	fn new() Hi{},
+	#* and this is a method *#
+	fn get_field(self: Hi) self.field
+}
 
 # methods: calling with :syntax like lua
 fn methods() do

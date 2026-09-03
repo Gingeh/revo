@@ -1,4 +1,6 @@
-#! number parsing and float helpers: is_nan, is_finite, rounding, absolute value !#
+#!
+global tuple helpers, calllable as `1337:is_nan?` and `number.is_nan?(1337)`
+!#
 
 #* converts value to number: number("12") => 12 *#
 pub declare number.__call = fn(value: any) -> number

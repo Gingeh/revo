@@ -25,10 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - docgen documents structs, type aliases, and modules, with documented struct fields rendered under the struct entry
 
-  `revo docs` now outputs markdown by default, `revo docs --html` outputs real html
+  `revo doc` now outputs plaintext by default, `revo doc --html` outputs real html
   `--splice` flag needed to splice into piped markdown templates (was implied by `--html`)
 
     ```ruby
+    #!/usr/bin/env revo
+    this is a module doc
+    a shebang can (but doesn't have to) go up there
+        , it also suggests this file is executable
+    !#
     #* this is a struct *#
     struct S {
       #* holds a number *#
@@ -39,18 +44,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     const pi = 3.14
     ```
 
-- multiline module docs via `#! !#`
+    ```bash
+    ~/projects/revo λ revo doc ./hi.rv
+    globals
 
-    ```ruby
-    #! module does this and that !#
-    ...
-    ```
+      S
+        (value)
+        this is a struct
 
-    ```ruby
-    #!/usr/bin/env/revo
-    a shebang can also just go right there
-    !#
-    ...
+        - x: num
+          holds a number
+
+      pi
+        (value)
+        2 digits of precision
+        ```
+
+    - multiline module docs via `#! !#`
+
+        ```ruby
+        #! module does this and that !#
+        ...
     ```
 
 - stdlib:

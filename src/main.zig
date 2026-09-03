@@ -51,9 +51,9 @@ else
     \\  revo -e "1 + 2" -i                run inline code and enter REPL
     \\  revo bench script.rv              run with performance counters
     \\  revo dis script.rv                show bytecode disassembly
-    \\  revo docs script.rv               print extracted docs as markdown
-    \\  revo docs --html src/std/iface    render the stdlib reference as html
-    \\  revo docs --html src/std/iface < std.md > std.new   splice into a doc page
+    \\  revo doc script.rv                print extracted docs as markdown
+    \\  revo doc --html src/std/iface     render the stdlib reference as html
+    \\  revo doc --html src/std/iface < std.md > std.new   splice into a doc page
     \\
 ++ (if (lsp_enabled)
     \\  revo lsp                          start the language server
@@ -379,7 +379,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.mode = .lsp;
         } else if (std.mem.eql(u8, cmd, "dis")) {
             config.mode = .disassemble;
-        } else if (std.mem.eql(u8, cmd, "docs")) {
+        } else if (std.mem.eql(u8, cmd, "doc")) {
             config.mode = .docs;
         } else if (std.mem.startsWith(u8, cmd, "bench")) {
             // bench / bench[n]; anything else falls through to script path
@@ -418,41 +418,6 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             if (config.mode == .docs) config.mode = .docs_html;
         } else if (std.mem.eql(u8, arg, "--splice")) {
             config.force_splice = true;
-        } else if (std.mem.eql(u8, arg, "--dis")) {
-            config.mode = .disassemble;
-        } else if (std.mem.eql(u8, arg, "--docs")) {
-            config.mode = .docs;
-        } else if (std.mem.eql(u8, arg, "--docs-html")) {
-            config.mode = .docs_html;
-        } else if (std.mem.eql(u8, arg, "--docs-splice")) {
-            config.force_splice = true;
-        } else if (std.mem.startsWith(u8, arg, "--bench")) {
-            // legacy flag form of the bench command
-            config.mode = .bench;
-            if (arg.len > 7) {
-                config.bench_iters = std.fmt.parseUnsigned(u32, arg[7..], 10) catch |err| {
-                    printError(init, "invalid bench iteration count '{s}' - {}", .{ arg[7..], err });
-                    return error.InvalidArgs;
-                };
-            }
-        } else if (std.mem.eql(u8, arg, "-b")) {
-            // legacy flag form of the compile command
-            config.mode = .compile;
-        } else if (std.mem.eql(u8, arg, "-o")) {
-            i += 1;
-            if (i >= args.len) {
-                printError(init, "-o requires an argument", .{});
-                return error.InsufficientArgs;
-            }
-            config.output_path = args[i];
-        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            std.debug.print("{s}\n", .{USAGE});
-            return error.HelpRequested;
-        } else if (std.mem.eql(u8, arg, "--version")) {
-            std.debug.print("revo " ++ @import("build_options").version ++ "\n", .{});
-            return error.VersionRequested;
-        } else if (if (lsp_enabled) std.mem.eql(u8, arg, "--lsp") else false) {
-            config.mode = .lsp;
         } else {
             printError(init, "unknown option '{s}'", .{arg});
             std.debug.print("{s}\n", .{USAGE});
@@ -539,17 +504,29 @@ fn collectAll(
             printError(init, "reading {s} - {}", .{ f, err });
             return error.FileError;
         };
-        _ = addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
+        const prev = owned.items.len;
+        const module_doc = addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
             error.IfaceParseFailed,
             error.IfaceParamNotTyped,
             error.IfaceBadBindingTarget,
             error.IfaceDeclNotAFunction,
             error.BadCoreKey,
             error.BadDoc,
-            => std.debug.print("skipping {s}: {s}\n", .{ f, @errorName(err) }),
-            error.LateModuleDoc => std.debug.print("skipping {s}: module doc must be at the start of the file\n", .{f}),
+            => blk: {
+                std.debug.print("skipping {s}: {s}\n", .{ f, @errorName(err) });
+                break :blk "";
+            },
+            error.LateModuleDoc => blk: {
+                std.debug.print("skipping {s}: module doc must be at the start of the file\n", .{f});
+                break :blk "";
+            },
             else => |e| return e,
         };
+        if (module_doc.len > 0) {
+            for (owned.items[prev..]) |file_specs| {
+                for (file_specs) |*spec| spec.module_doc = module_doc;
+            }
+        }
     }
 }
 
@@ -647,7 +624,7 @@ fn emitDocs(
     if (html) {
         try docs.renderHtml(gpa, &buf.writer, flat, module_doc);
     } else {
-        try docs.renderMarkdown(gpa, &buf.writer, flat, module_doc);
+        try docs.renderText(gpa, &buf.writer, flat, module_doc);
     }
 
     const body = std.mem.trim(u8, buf.written(), "\n");

@@ -1,4 +1,6 @@
-#! the revo runtime itself: version, evaluating source, building modules to bytecode !#
+#!
+the revo metaprogramming lib
+!#
 
 #*
 evaluates it as a module, gives you back its' return value

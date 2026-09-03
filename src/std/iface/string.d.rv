@@ -1,4 +1,6 @@
-#! string manipulation: length, case, substrings, search and replace, splitting and joining !#
+#!
+global string helpers, calllable as `"hello   world":split(" ")` and `string.split("hello  world", " ")`
+!#
 
 #* returns length of string *#
 pub declare string.len = fn(self: string) -> num
