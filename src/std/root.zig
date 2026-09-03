@@ -354,15 +354,18 @@ pub fn dosuite(args: []const Data, vm: *VM) !HostResult {
 pub fn debug_(args: []const Data, vm: *VM) !HostResult {
     _ = args;
 
-    const out_id = try vm.tables.create();
-    const out = try vm.tables.get(out_id);
-
+    // build the flags table first: every vm.tables.create() can reallocate the
+    // pool backing store, so the `out` pointer must be taken *after* the last
+    // table creation. otherwise the writes through `out` below hit freed memory.
     const flags_id = try vm.tables.create();
     const flags = try vm.tables.get(flags_id);
     try flags.putRawAtom(try vm.internAtom("dump"), Data.new.boolean(vm.debug.dump), vm);
     try flags.putRawAtom(try vm.internAtom("trace"), Data.new.boolean(vm.debug.trace), vm);
     try flags.putRawAtom(try vm.internAtom("instr"), Data.new.boolean(vm.debug.each_instr), vm);
     try flags.putRawAtom(try vm.internAtom("stack"), Data.new.boolean(vm.debug.each_stack), vm);
+
+    const out_id = try vm.tables.create();
+    const out = try vm.tables.get(out_id);
     try out.putRawAtom(try vm.internAtom("flags"), Data.new.table(flags_id), vm);
 
     const fiber = vm.currentFiber();
@@ -1017,6 +1020,16 @@ test "type predicates" {
     try testing.topFalse("struct Foo { x = 1 } struct_val?(42)");
     try testing.topTrue("struct Foo { x = 1 } struct_type?(Foo)");
     try testing.topFalse("struct Foo { x = 1 } struct_type?(42)");
+}
+
+test "debug() links its nested flags table without a stale pointer" {
+    // debug() creates the `out` table, then creates a second `flags` table.
+    // the second create can reallocate the table pool, so `out` must be
+    // fetched after it. these checks fail (or trip the allocator) if `out`
+    // is written through a dangling pointer.
+    try testing.topTrue("table?(debug().flags)");
+    try testing.topFalse("debug().flags.dump");
+    try testing.topTrue("num?(debug().stack_depth)");
 }
 
 test "array methods" {

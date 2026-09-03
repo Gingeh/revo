@@ -157,10 +157,17 @@ fn arrayToData(items: []const json.Value, vm: *VM) anyerror!Data {
 
 fn objectToData(object: json.ObjectMap, vm: *VM) anyerror!Data {
     const table_id = try vm.tables.create();
-    const table = try vm.tables.get(table_id);
     var it = object.iterator();
     while (it.next()) |entry| {
-        try table.putRawAtom(try vm.internAtom(entry.key_ptr.*), try fromJsonValue(entry.value_ptr.*, vm), vm);
+        const atom = try vm.internAtom(entry.key_ptr.*);
+        // fromJsonValue recurses on nested objects/arrays and can call
+        // vm.tables.create()/vm.tuples.create(), which may reallocate the pool
+        // backing store. re-fetch the table afterwards instead of holding a
+        // pointer across the recursion, or the putRawAtom below writes through
+        // a dangling pointer.
+        const value = try fromJsonValue(entry.value_ptr.*, vm);
+        const table = try vm.tables.get(table_id);
+        try table.putRawAtom(atom, value, vm);
     }
     return Data.new.table(table_id);
 }
@@ -175,4 +182,16 @@ test "json encode and decode round trip" {
     try testing.topNumber(
         \\ json.decode("{{ \"a\" : 1}}"):unwrap().a
     , 1);
+}
+
+test "json decode of nested objects does not use a stale table pointer" {
+    const testing = revo.lang.testing;
+
+    // decoding nested objects recurses through objectToData, which calls
+    // vm.tables.create() and can reallocate the table pool. the outer decode
+    // must re-fetch its table each step rather than write through a pointer
+    // taken before the recursion.
+    try testing.topNumber(
+        \\ json.decode("{{ \"a\" : {{ \"b\" : {{ \"c\" : 42 }} }} }}"):unwrap().a.b.c
+    , 42);
 }
