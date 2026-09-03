@@ -1,9 +1,11 @@
-//! doc extraction and docgen rendering (terminal text + html)
+//! doc extraction, docgen rendering for terminal text + html, collection for cli
 
 const std = @import("std");
 const revo = @import("../root.zig");
 const api = revo.std_lib.api;
 const Writer = std.Io.Writer;
+const pretty = revo.pretty;
+
 pub const FnSpec = api.FnSpec;
 pub const FieldSpec = api.FieldSpec;
 const headOf = api.headOf;
@@ -782,4 +784,208 @@ fn writeHtmlEscaped(w: *Writer, text: []const u8) !void {
     }
 }
 
-// -- [test] ------------------------------------------------------------------
+// -- [cli] -------------------------------------------------------------------
+
+pub const Cli = struct {
+    pub fn run(
+        init: std.process.Init,
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        path: ?[]const u8,
+        html: bool,
+        force_splice: bool,
+    ) !void {
+        const stdin_tty = try revo.stdin().isTty(init.io);
+        const splice = force_splice and !stdin_tty;
+
+        var owned = std.ArrayList([]FnSpec).empty;
+        defer owned.deinit(arena);
+        var flat = std.ArrayList(*const FnSpec).empty;
+        defer flat.deinit(arena);
+        var module_doc: []const u8 = "";
+
+        if (path) |p| {
+            if (isDir(init, p)) {
+                try collectAll(init, gpa, arena, p, &owned, &flat);
+            } else {
+                module_doc = try addDocsFromPath(init, gpa, arena, p, &owned, &flat);
+            }
+        } else if (splice or stdin_tty) {
+            var project = revo.lang.Project.detectFromCwd(init.io, gpa);
+            defer project.deinit(gpa);
+            const root_dir: []const u8 = if (project.root.len > 0) project.root else ".";
+            const t = try arena.dupe(u8, root_dir);
+            try collectAll(init, gpa, arena, t, &owned, &flat);
+        } else {
+            module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
+        }
+
+        try emitDocs(init, gpa, arena, flat.items, module_doc, html, splice);
+        for (owned.items) |s| freeSpecs(gpa, s);
+    }
+
+    fn collectAll(
+        init: std.process.Init,
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        dir: []const u8,
+        owned: *std.ArrayList([]FnSpec),
+        flat: *std.ArrayList(*const FnSpec),
+    ) !void {
+        var files = std.ArrayList([]const u8).empty;
+        defer files.deinit(arena);
+        try collectSourceFiles(init, arena, dir, &files);
+        std.mem.sort([]const u8, files.items, {}, lessStr);
+        for (files.items) |f| {
+            const source = std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                f,
+                arena,
+                std.Io.Limit.unlimited,
+            ) catch |err| {
+                printError(init, "reading {s} - {}", .{ f, err });
+                return error.FileError;
+            };
+            const prev = owned.items.len;
+            const mod_doc = addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
+                error.IfaceParseFailed,
+                error.IfaceParamNotTyped,
+                error.IfaceBadBindingTarget,
+                error.IfaceDeclNotAFunction,
+                error.BadCoreKey,
+                error.BadDoc,
+                => blk: {
+                    std.debug.print("skipping {s}: {s}\n", .{ f, @errorName(err) });
+                    break :blk "";
+                },
+                error.LateModuleDoc => blk: {
+                    std.debug.print("skipping {s}: module doc must be at the start of the file\n", .{f});
+                    break :blk "";
+                },
+                else => |e| return e,
+            };
+            if (mod_doc.len > 0) {
+                for (owned.items[prev..]) |file_specs| {
+                    for (file_specs) |*spec| spec.module_doc = mod_doc;
+                }
+            }
+        }
+    }
+
+    fn addDocsFromPath(
+        init: std.process.Init,
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        path: []const u8,
+        owned: *std.ArrayList([]FnSpec),
+        flat: *std.ArrayList(*const FnSpec),
+    ) ![]const u8 {
+        const source = std.Io.Dir.cwd().readFileAlloc(
+            init.io,
+            path,
+            arena,
+            std.Io.Limit.unlimited,
+        ) catch |err| {
+            printError(init, "reading {s} - {}", .{ path, err });
+            return error.FileError;
+        };
+        return addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
+            error.IfaceParseFailed => {
+                printError(init, "parse error while extracting docs", .{});
+                return error.CompilationError;
+            },
+            error.LateModuleDoc => {
+                printError(init, "module doc must be at the start of the file", .{});
+                return error.CompilationError;
+            },
+            else => |e| return e,
+        };
+    }
+
+    fn addDocsFromSource(
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        source: []const u8,
+        owned: *std.ArrayList([]FnSpec),
+        flat: *std.ArrayList(*const FnSpec),
+    ) ![]const u8 {
+        const extracted = try docsExtract(gpa, source);
+        try owned.append(arena, extracted.specs);
+        for (extracted.specs) |*s| try flat.append(arena, s);
+        return extracted.module_doc;
+    }
+
+    fn collectSourceFiles(init: std.process.Init, arena: std.mem.Allocator, dir: []const u8, out: *std.ArrayList([]const u8)) !void {
+        const open_dir = std.Io.Dir.cwd().openDir(init.io, dir, .{ .iterate = true }) catch |err| {
+            printError(init, "opening {s} - {}", .{ dir, err });
+            return error.FileError;
+        };
+        defer open_dir.close(init.io);
+        var it = open_dir.iterate();
+        while (try it.next(init.io)) |entry| {
+            switch (entry.kind) {
+                .directory => {
+                    if (entry.name.len > 0 and entry.name[0] == '.') continue;
+                    if (std.mem.eql(u8, entry.name, "zig-out")) continue;
+                    const sub = try std.fs.path.join(arena, &.{ dir, entry.name });
+                    try collectSourceFiles(init, arena, sub, out);
+                },
+                .file => {
+                    if (!std.mem.endsWith(u8, entry.name, ".rv")) continue;
+                    try out.append(arena, try std.fs.path.join(arena, &.{ dir, entry.name }));
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn isDir(init: std.process.Init, path: []const u8) bool {
+        var d = std.Io.Dir.cwd().openDir(init.io, path, .{}) catch return false;
+        d.close(init.io);
+        return true;
+    }
+
+    fn printError(init: std.process.Init, comptime fmt: []const u8, args: anytype) void {
+        var buf = std.Io.Writer.Allocating.init(init.gpa);
+        defer buf.deinit();
+        pretty.printError(&buf.writer, fmt, args) catch return;
+        std.debug.print("{s}", .{buf.written()});
+    }
+
+    fn emitDocs(
+        init: std.process.Init,
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        flat: []*const FnSpec,
+        module_doc: []const u8,
+        html: bool,
+        splice: bool,
+    ) !void {
+        var buf = std.Io.Writer.Allocating.init(gpa);
+        defer buf.deinit();
+        if (html) {
+            try renderHtml(gpa, &buf.writer, flat, module_doc);
+        } else {
+            try renderText(gpa, &buf.writer, flat, module_doc);
+        }
+
+        const body = std.mem.trim(u8, buf.written(), "\n");
+
+        var out_buf: [4096]u8 = undefined;
+        var out = revo.stdout().writer(init.io, &out_buf);
+        if (splice) {
+            const old = try std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                "/dev/stdin",
+                arena,
+                std.Io.Limit.unlimited,
+            );
+            const spliced = try spliceMarkdown(arena, old, body);
+            try out.interface.writeAll(spliced);
+        } else {
+            try out.interface.writeAll(body);
+            try out.interface.writeAll("\n");
+        }
+        try out.flush();
+    }
+};

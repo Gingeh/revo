@@ -154,7 +154,8 @@ pub fn build(b: *Build) !void {
     debug_options.addOption(bool, "mimalloc", mimalloc_enabled);
     debug_options.addOption(bool, "isocline", features.isocline);
     debug_options.addOption(bool, "regex", features.regex);
-    debug_options.addOption([]const u8, "version", dev_version);
+    debug_options.addOption([]const u8, "version", VERSION);
+    debug_options.addOption([]const u8, "git_commit", dev_version);
     debug_options.addOption(bool, "lsp_enabled", features.lsp);
     const debug_options_mod = debug_options.createModule();
 
@@ -167,6 +168,7 @@ pub fn build(b: *Build) !void {
     release_options.addOption(bool, "isocline", features.isocline);
     release_options.addOption(bool, "regex", features.regex);
     release_options.addOption([]const u8, "version", VERSION);
+    release_options.addOption([]const u8, "git_commit", dev_version);
     release_options.addOption(bool, "lsp_enabled", features.lsp);
     const release_options_mod = release_options.createModule();
 
@@ -421,6 +423,7 @@ pub fn build(b: *Build) !void {
                 release_target.result.os.tag != .freestanding and features.regex,
             );
             rel_options.addOption([]const u8, "version", VERSION);
+            rel_options.addOption([]const u8, "git_commit", dev_version);
             rel_options.addOption(bool, "lsp_enabled", release_lsp_enabled);
             const rel_options_mod = rel_options.createModule();
 

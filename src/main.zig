@@ -21,12 +21,12 @@ const USAGE =
     \\  -d,-D,-P         output the the program's result in {display, debug, pretty} mode
     \\  --test           run with test blocks
     \\  -h, --help       show this help message
-    \\  --version        show version
     \\
     \\commands:
     \\  compile          compile script to bytecode instead of running
     \\                   runs only the comp/proc blocks
     \\  repl             start repl (default with no args)
+    \\  version          show version and build info
     \\
 ++ (if (lsp_enabled)
     \\  lsp              start the lsp
@@ -35,7 +35,7 @@ else
     "") ++
     \\  dis              show bytecode disassembly instead of running
     \\  bench[n]         run with performance counters ([n] iterations, 1 if not specified)
-    \\  docs             extract doc comments from a file, dir, or the pwd workspace
+    \\  doc              extract doc comments from a file, dir, or the pwd workspace
     \\                   --html    render as html instead of markdown
     \\                   --splice  splice output into markdown piped on stdin
     \\
@@ -181,7 +181,14 @@ fn runMain(init: std.process.Init) !void {
     // of sources, the pwd workspace, or a piped source; `--html` outputs html,
     // without it outputs markdown; `--html` with piped stdin splices into the page
     if (config.mode == .docs or config.mode == .docs_html) {
-        try runDocs(init, init.gpa, arena, config);
+        try docs.Cli.run(
+            init,
+            init.gpa,
+            arena,
+            config.script_path,
+            config.mode == .docs_html,
+            config.force_splice,
+        );
         return;
     }
 
@@ -359,9 +366,7 @@ fn runCompiledArtifact(
     }
 }
 
-/// cli options only appear before the script name; the first bare word is
-/// either a command (`compile`, `dis`, `docs`, ...) or the script path -
-/// everything past it flows into the runtime's argv untouched
+/// revo --options-go-here [subcommand/script name] --rest-goes-to-script
 fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     var config: Config = .{};
     var i: usize = 1;
@@ -381,6 +386,9 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.mode = .disassemble;
         } else if (std.mem.eql(u8, cmd, "doc")) {
             config.mode = .docs;
+        } else if (std.mem.eql(u8, cmd, "version")) {
+            std.debug.print("revo {s} ({s})\n", .{ build_opts.version, build_opts.git_commit });
+            return error.VersionRequested;
         } else if (std.mem.startsWith(u8, cmd, "bench")) {
             // bench / bench[n]; anything else falls through to script path
             const n = cmd[5..];
@@ -418,6 +426,9 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             if (config.mode == .docs) config.mode = .docs_html;
         } else if (std.mem.eql(u8, arg, "--splice")) {
             config.force_splice = true;
+        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            std.debug.print("{s}\n", .{USAGE});
+            return error.HelpRequested;
         } else {
             printError(init, "unknown option '{s}'", .{arg});
             std.debug.print("{s}\n", .{USAGE});
@@ -442,209 +453,6 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
 
     config.argv = try argv.toOwnedSlice(init.arena.allocator());
     return config;
-}
-
-/// docs mode against a source file, a dir of sources, or the pwd workspace;
-/// `--html` renders as html; without it, renders as markdown.
-/// `--splice` with piped stdin splices into a markdown page when stdin isn't a tty.
-/// a parse failure in an explicit target is fatal, in a walked workspace
-/// it's a warning - keep going, one bad file shouldn't kill the page
-fn runDocs(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Config) !void {
-    const html = config.mode == .docs_html;
-    const stdin_tty = try revo.stdin().isTty(init.io);
-    const splice = config.force_splice and !stdin_tty;
-
-    var owned = std.ArrayList([]docs.FnSpec).empty;
-    defer owned.deinit(arena);
-    var flat = std.ArrayList(*const docs.FnSpec).empty;
-    defer flat.deinit(arena);
-    var module_doc: []const u8 = "";
-
-    if (config.script_path) |path| {
-        if (isDir(init, path)) {
-            try collectAll(init, gpa, arena, path, &owned, &flat);
-        } else {
-            module_doc = try addDocsFromPath(init, gpa, arena, path, &owned, &flat);
-        }
-    } else if (splice or stdin_tty) {
-        var project = revo.lang.Project.detectFromCwd(init.io, gpa);
-        defer project.deinit(gpa);
-        const root_dir: []const u8 = if (project.root.len > 0) project.root else ".";
-        const t = try arena.dupe(u8, root_dir);
-        try collectAll(init, gpa, arena, t, &owned, &flat);
-    } else {
-        // `--html`/`docs` piped a revo source on stdin
-        module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
-    }
-
-    try emitDocs(init, gpa, arena, flat.items, module_doc, html, splice);
-    for (owned.items) |s| docs.freeSpecs(gpa, s);
-}
-
-/// extract docs from every `*.rv` in a dir; parse errors warn and skip
-fn collectAll(
-    init: std.process.Init,
-    gpa: Allocator,
-    arena: Allocator,
-    dir: []const u8,
-    owned: *std.ArrayList([]docs.FnSpec),
-    flat: *std.ArrayList(*const docs.FnSpec),
-) !void {
-    var files = std.ArrayList([]const u8).empty;
-    defer files.deinit(arena);
-    try collectSourceFiles(init, arena, dir, &files);
-    std.mem.sort([]const u8, files.items, {}, docs.lessStr);
-    for (files.items) |f| {
-        const source = std.Io.Dir.cwd().readFileAlloc(
-            init.io,
-            f,
-            arena,
-            std.Io.Limit.unlimited,
-        ) catch |err| {
-            printError(init, "reading {s} - {}", .{ f, err });
-            return error.FileError;
-        };
-        const prev = owned.items.len;
-        const module_doc = addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
-            error.IfaceParseFailed,
-            error.IfaceParamNotTyped,
-            error.IfaceBadBindingTarget,
-            error.IfaceDeclNotAFunction,
-            error.BadCoreKey,
-            error.BadDoc,
-            => blk: {
-                std.debug.print("skipping {s}: {s}\n", .{ f, @errorName(err) });
-                break :blk "";
-            },
-            error.LateModuleDoc => blk: {
-                std.debug.print("skipping {s}: module doc must be at the start of the file\n", .{f});
-                break :blk "";
-            },
-            else => |e| return e,
-        };
-        if (module_doc.len > 0) {
-            for (owned.items[prev..]) |file_specs| {
-                for (file_specs) |*spec| spec.module_doc = module_doc;
-            }
-        }
-    }
-}
-
-/// read one source and extract its docs; a parse failure is fatal.
-/// returns the module's own doc, if the file carries one
-fn addDocsFromPath(
-    init: std.process.Init,
-    gpa: Allocator,
-    arena: Allocator,
-    path: []const u8,
-    owned: *std.ArrayList([]docs.FnSpec),
-    flat: *std.ArrayList(*const docs.FnSpec),
-) ![]const u8 {
-    const source = std.Io.Dir.cwd().readFileAlloc(
-        init.io,
-        path,
-        arena,
-        std.Io.Limit.unlimited,
-    ) catch |err| {
-        printError(init, "reading {s} - {}", .{ path, err });
-        return error.FileError;
-    };
-    return addDocsFromSource(gpa, arena, source, owned, flat) catch |err| switch (err) {
-        error.IfaceParseFailed => {
-            printError(init, "parse error while extracting docs", .{});
-            return error.CompilationError;
-        },
-        error.LateModuleDoc => {
-            printError(init, "module doc must be at the start of the file", .{});
-            return error.CompilationError;
-        },
-        else => |e| return e,
-    };
-}
-
-/// extract docs from one in-memory source; returns the module doc, which
-/// borrows from `source`
-fn addDocsFromSource(
-    gpa: Allocator,
-    arena: Allocator,
-    source: []const u8,
-    owned: *std.ArrayList([]docs.FnSpec),
-    flat: *std.ArrayList(*const docs.FnSpec),
-) ![]const u8 {
-    const extracted = try docs.docsExtract(gpa, source);
-    try owned.append(arena, extracted.specs);
-    for (extracted.specs) |*s| try flat.append(arena, s);
-    return extracted.module_doc;
-}
-
-/// recursive walk for `*.rv` sources, skipping hidden dirs and build dirs
-fn collectSourceFiles(init: std.process.Init, arena: Allocator, dir: []const u8, out: *std.ArrayList([]const u8)) !void {
-    const open_dir = std.Io.Dir.cwd().openDir(init.io, dir, .{ .iterate = true }) catch |err| {
-        printError(init, "opening {s} - {}", .{ dir, err });
-        return error.FileError;
-    };
-    defer open_dir.close(init.io);
-    var it = open_dir.iterate();
-    while (try it.next(init.io)) |entry| {
-        switch (entry.kind) {
-            .directory => {
-                if (entry.name.len > 0 and entry.name[0] == '.') continue;
-                if (std.mem.eql(u8, entry.name, "zig-out")) continue;
-                const sub = try std.fs.path.join(arena, &.{ dir, entry.name });
-                try collectSourceFiles(init, arena, sub, out);
-            },
-            .file => {
-                if (!std.mem.endsWith(u8, entry.name, ".rv")) continue;
-                try out.append(arena, try std.fs.path.join(arena, &.{ dir, entry.name }));
-            },
-            else => {},
-        }
-    }
-}
-
-fn isDir(init: std.process.Init, path: []const u8) bool {
-    var d = std.Io.Dir.cwd().openDir(init.io, path, .{}) catch return false;
-    d.close(init.io);
-    return true;
-}
-
-/// render the extracted specs,, markdown by default, html with `--html`,,
-/// and write to stdout, splicing into piped markdown when `splice`
-fn emitDocs(
-    init: std.process.Init,
-    gpa: Allocator,
-    arena: Allocator,
-    flat: []*const docs.FnSpec,
-    module_doc: []const u8,
-    html: bool,
-    splice: bool,
-) !void {
-    var buf = std.Io.Writer.Allocating.init(gpa);
-    defer buf.deinit();
-    if (html) {
-        try docs.renderHtml(gpa, &buf.writer, flat, module_doc);
-    } else {
-        try docs.renderText(gpa, &buf.writer, flat, module_doc);
-    }
-
-    const body = std.mem.trim(u8, buf.written(), "\n");
-
-    var out_buf: [4096]u8 = undefined;
-    var out = revo.stdout().writer(init.io, &out_buf);
-    if (splice) {
-        const old = try std.Io.Dir.cwd().readFileAlloc(
-            init.io,
-            "/dev/stdin",
-            arena,
-            std.Io.Limit.unlimited,
-        );
-        const spliced = try docs.spliceMarkdown(arena, old, body);
-        try out.interface.writeAll(spliced);
-    } else {
-        try out.interface.writeAll(body);
-        try out.interface.writeAll("\n");
-    }
-    try out.flush();
 }
 
 fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, config: Config) !void {
@@ -674,7 +482,6 @@ fn runSource(
 
     try vm.setProgramDebugInfo(artifact.spans, source, path);
 
-    // std.debug.print("running\n", .{});
     try runCompiledArtifact(init, gpa, &vm, path, artifact, source, config.echo_last);
 }
 
