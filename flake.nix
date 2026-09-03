@@ -50,11 +50,11 @@
               inherit name version src;
               nativeBuildInputs = [ makeWrapper ];
               installPhase = ''
-                					mkdir -p $out/revo
-                					cp -r * $out/revo
-                					mkdir $out/bin
-                					makeWrapper "${revo}/bin/revo" "$out/bin/${name}" --add-flags "$out/revo/${entry-point}.rv"
-                				'';
+                mkdir -p $out/revo
+                cp -r * $out/revo
+                mkdir $out/bin
+                makeWrapper "${revo}/bin/revo" "$out/bin/${name}" --add-flags "$out/revo/${entry-point}.rv"
+              '';
             };
           build-test = build {
             name = "modules";
