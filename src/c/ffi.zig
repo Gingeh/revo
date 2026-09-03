@@ -12,7 +12,10 @@ const Data = memory.Data;
 const functions = vm.functions;
 const Tuple = vm.tuple.Tuple;
 const RevoBinding = functions.RevoBinding;
+const HostBinding = functions.HostBinding;
 const CFnPtr = functions.CFnPtr;
+const HostFn = functions.HostFn;
+const HostFunc = revo.std_lib.HostFunc;
 
 // for error/missing returns
 const nil_val = Data.new.nil();
@@ -215,6 +218,45 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
         try registered.append(vm_ptr.runtime.alloc, .{
             .name = std.mem.span(bindings_ptr[i].name),
             .fn_ptr = @ptrCast(@alignCast(bindings_ptr[i].fn_ptr)),
+        });
+    }
+
+    try vm_ptr.loaded_extensions.append(vm_ptr.runtime.alloc, lib);
+    return try registered.toOwnedSlice(vm_ptr.runtime.alloc);
+}
+
+///
+/// load a shared lib's `revo_native_bindings` as host functions
+///
+/// each binding's fn_ptr is a HostFn (*const fn ([]const Data, *VM) HostResult)
+/// so the vm does arity n type checking on call
+pub fn loadNative(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
+    if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {
+        return error.OsNotSupported;
+    }
+    if (builtin.target.os.tag == .windows) {
+        return error.OsNotSupported;
+    }
+
+    var lib = try std.DynLib.open(lib_path);
+
+    const bindings_ptr: [*]const HostBinding = lib.lookup([*]const HostBinding, "revo_native_bindings") orelse {
+        return error.NoBindings;
+    };
+
+    var registered = try std.ArrayList(HostFunc).initCapacity(vm_ptr.runtime.alloc, 16);
+    defer registered.deinit(vm_ptr.runtime.alloc);
+
+    var i: usize = 0;
+    while (@as(?[*:0]const u8, bindings_ptr[i].name) != null) : (i += 1) {
+        const b = bindings_ptr[i];
+        const name = std.mem.span(b.name);
+        try registered.append(vm_ptr.runtime.alloc, .{
+            .name = name,
+            .arity = b.arity,
+            .variadic = b.variadic,
+            .param_types = &.{},
+            .func = @ptrCast(@alignCast(b.fn_ptr)),
         });
     }
 

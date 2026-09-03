@@ -32,7 +32,7 @@ pub const Frame = struct {
     closure_id: ?mem.FunctionID,
 };
 
-pub const HostFn = *const fn (args: []const Data, vm: *revo.VM) HostResult;
+pub const HostFn = *const fn (args: []const Data, vm: *revo.VM) anyerror!HostResult;
 
 /// binding table entry for a dlopen'd extension; every binding lands in
 /// the module table under the import's name. the typed interface for an
@@ -40,6 +40,16 @@ pub const HostFn = *const fn (args: []const Data, vm: *revo.VM) HostResult;
 pub const RevoBinding = extern struct {
     name: [*:0]const u8,
     fn_ptr: *const anyopaque,
+};
+
+/// native binding entry for zig extensions that use HostFn directly
+/// extensions gotta export a null-terminated array of these as `revo_native_bindings`
+/// the vm registers each as a host function with arity checking
+pub const HostBinding = extern struct {
+    name: [*:0]const u8,
+    fn_ptr: *const anyopaque,
+    arity: u8,
+    variadic: bool,
 };
 
 pub const CFnPtr = *const fn (
