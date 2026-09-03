@@ -16,8 +16,9 @@ fn the_basics() do
   const f = 3.14
   print(n, f)
 
-  # strings - double quotes process escapes, single quotes are literal
-  # string methods are called with :method syntax
+  # strings;
+  #   double quotes process escapes, single quotes are literal
+  #   string methods are called with :method syntax
   const s = "hello"
   const multiline_str = "
   any string is multiline
@@ -27,18 +28,22 @@ fn the_basics() do
   """
   print(s, "HELLO":lower(), "hello":upper(), "a,b,c":split(","))
 
-  # atoms are static symbols like this
+  # atoms;
+  #   static symbols, like numbers if they were represented with words
   print(:ok, :false, :nil)
 
   # falsey values are :false, 0, :nil, everything else is true
   print(not :false, not 0, not :nil, not "hi")
 
-  # tables are a hybrid array plus hash, accessed with [] and .field
+  # tables;
+  #   a hybrid array plus hash, accessed with [] and .field
+  #   sort of like lua, but keys are atoms
   const arr = {1, 2, 3}
   const hash = {k = "v", x = 10}
   print(arr, hash, arr[0], hash.k)
 
-  # tuples - immutable sequences, indexed at 0
+  # tuples;
+  #   immutable sequences, indexed at 0
   const tup = (1, 2, 3)
   print(tup[0])
   # destructuring with (a, b) = tuple
@@ -140,7 +145,8 @@ fn tuples() do
   end
   print(block_result)
 
-  # tuple destructuring: unpack into multiple variables
+  # tuple destructuring;
+  #   unpack into multiple variables
   const data = (100, "hello", :ok)
   const (status_code, message, tag) = data
   print(status_code, message, tag)
@@ -204,7 +210,8 @@ fn error_handling() do
   print(result, fallback)
 end
 
-# structs: named types with fields and methods
+# structs;
+#   named types with fields and methods
 fn structs() do
   print("\nstructs")
 
@@ -240,20 +247,20 @@ end
 
 #* this is a public, documented struct *#
 pub struct Hi {
-	#* this field is documented *#
-	field: number,
-	#* this is a member function *#
-	fn new() Hi{},
-	#* 
-	and this is a method
-	here's a usage example for it
-	```
-	let o = Hi{field = 10}
-	o:get_field()
-	# => 10
-	```
-	*#
-	fn get_field(self: Hi) self.field
+  #* this field is documented *#
+  field: number,
+  #* this is a member function *#
+  fn new() Hi{},
+  #* 
+  and this is a method
+  here's a usage example for it
+  ```
+  let o = Hi{field = 10}
+  o:get_field()
+  # => 10
+  ```
+  *#
+  fn get_field(self: Hi) self.field
 }
 
 # methods: calling with :syntax like lua
@@ -282,7 +289,8 @@ fn methods() do
   print(result)
 end
 
-# fibers: super lightweight concurrency with spawn/join and channels
+# fibers;
+#   super lightweight concurrency with spawn/join and channels
 fn fibers() do
   print("\nfibers")
 
@@ -294,7 +302,8 @@ fn fibers() do
   print(join(f1))
   print(join(f2))
 
-  # channels: buffered communication between fibers
+  # channels;
+  #   buffered communication between fibers
   const ch = chan(2)
   send(ch, 1)
   send(ch, 2)
@@ -302,14 +311,16 @@ fn fibers() do
   print(recv(ch))
 end
 
-# nonblocking io: looks blocking but runs concurrently
+# nonblocking io;
+#   looks blocking but runs concurrently
 fn nonblocking() do
   print("\nnonblocking io")
 
   # revo's async io looks like blocking code but parks the fiber instead
   # this lets you write synchronous-looking code that runs concurrently
 
-  # simulate async operations: they look blocking but yield to other fibers
+  # simulate async operations
+  #   they look blocking but yield to other fibers
   const work1 = spawn fn() do
     let r = 0
     for i in 0..1000 do
@@ -326,7 +337,8 @@ fn nonblocking() do
     r
   end
 
-  # both run concurrently: join waits for both to complete
+  # both run concurrently;
+  #   join waits for both to complete
   const r1 = join(work1)
   const r2 = join(work2)
   print("concurrent results:", r1, r2)
@@ -351,7 +363,8 @@ fn nonblocking() do
   print("producer/consumer done")
 end
 
-# macros: compile-time code transformation
+# macros;
+#   compile-time code transformers
 fn macros() do
   print("\nmacros")
 
@@ -364,7 +377,8 @@ fn macros() do
   print(twice!(1, 2))
 end
 
-# proc macros: compile-time procedural code generation
+# proc macros;
+#   compile-time procedural code generation
 fn proc_macros() do
   print("\nproc macros")
 
@@ -375,7 +389,8 @@ fn proc_macros() do
   print("see examples/proc.rv for proc macro examples")
 end
 
-# comp: compile-time evaluation
+# comp;
+#   compile-time evaluation
 fn comp_time() do
   print("\ncomp")
 
@@ -389,7 +404,7 @@ fn comp_time() do
   print(config.version, config.env, config.features)
 end
 
-# stdlib: standard library functions
+# some builtin globals
 fn stdlib() do
   print("\nstdlib")
 
@@ -437,12 +452,24 @@ fn stdlib() do
   print(t2)
 end
 
-# modules: import and share code
+# modules! to you, they're just tables
 fn modules() do
   print("\nmodules")
 
-  # import loads a module file - the last expression becomes the module value
-  # modules are cached - same path returns the same table
+  # import loads a module file
+  # the last expression becomes the module value
+  # modules are cached
+  # same path returns the same table
+  # functions can be modules too
+
+  fn a() do
+    # this is private
+    const a = 10
+    # and this is public
+    pub const hi = 5
+    pub const hey = 15
+  end
+  print("module function: #{a()}")
 
   # const math_utils = import "lib"
   # math_utils.add(1, 2)
@@ -457,7 +484,8 @@ fn modules() do
   print("import loads .rv files, see examples/lib.rv")
 end
 
-# tests: compile and run only with --test flag
+# tests;
+#   compile and run only with --test flag
 fn run_tests() do
   print("\ntests")
 

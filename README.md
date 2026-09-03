@@ -99,7 +99,15 @@ revo
 
 ### made with revo
 
-- you can submit a project via issues/email/discord
+- if you want to feature your project on the readme, you can submit a project via issues/email/discord
+
+### in c/zig/odin/what have you
+
+you can extend revo in (essentially) any language or embed it from any language
+
+there are two apis:
+- zig: [loadable extensions](./examples/foreign/zig), [embeddable revo](./examples/foreign/zig-embed)
+- c: [loadable extensions](./examples/foreign/c), [embeddable revo](./examples/foreign/c-embed)
 
 ### credits
 
