@@ -1,4 +1,4 @@
-//! doc extraction and docgen rendering (plain text + html)
+//! doc extraction and docgen rendering (terminal text + html)
 
 const std = @import("std");
 const revo = @import("../root.zig");
@@ -7,6 +7,18 @@ const Writer = std.Io.Writer;
 pub const FnSpec = api.FnSpec;
 pub const FieldSpec = api.FieldSpec;
 const headOf = api.headOf;
+
+const bold = "\x1b[1m";
+const dim = "\x1b[2m";
+const reset = "\x1b[0m";
+const cyan = "\x1b[36m";
+const magenta = "\x1b[35m";
+const blue = "\x1b[34m";
+const yellow = "\x1b[33m";
+
+fn style(w: *Writer, code: []const u8) !void {
+    try revo.pretty.style(w, code);
+}
 
 // -- [extract] ---------------------------------------------------------------
 
@@ -241,7 +253,9 @@ pub fn renderText(
     module_doc: []const u8,
 ) !void {
     if (module_doc.len > 0) {
+        try style(w, dim);
         try writeIndentedDoc(w, module_doc, 0);
+        try style(w, reset);
         try w.writeAll("\n");
     }
 
@@ -258,7 +272,10 @@ fn renderTextGlobals(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpe
     defer planned.deinit(alloc);
     if (planned.items.len == 0) return;
 
-    try w.writeAll("globals\n");
+    try style(w, bold);
+    try w.writeAll("globals");
+    try style(w, reset);
+    try w.writeAll("\n");
     for (planned.items) |p| {
         try renderTextFn(w, p.spec, p.spec.sig, 2, 4);
         try renderTextNestedMethods(alloc, w, specs, p.spec.name, 4, 6, consumed);
@@ -270,18 +287,28 @@ fn renderTextModules(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpe
     defer names.deinit(alloc);
     if (names.items.len == 0) return;
 
-    try w.writeAll("modules\n");
+    try style(w, bold);
+    try w.writeAll("modules");
+    try style(w, reset);
+    try w.writeAll("\n");
     for (names.items) |mod_name| {
         var planned = try collectModule(alloc, specs, mod_name);
         defer planned.deinit(alloc);
 
-        try w.writeAll("\n  module ");
+        try w.writeAll("\n  ");
+        try style(w, dim);
+        try w.writeAll("module ");
+        try style(w, reset);
+        try style(w, bold ++ cyan);
         try w.writeAll(mod_name);
+        try style(w, reset);
         try w.writeAll("\n");
 
         for (planned.items) |p| {
             if (p.spec.module_doc.len > 0) {
+                try style(w, dim);
                 try writeIndentedDoc(w, p.spec.module_doc, 4);
+                try style(w, reset);
                 try w.writeByte('\n');
                 break;
             }
@@ -305,13 +332,21 @@ fn renderTextMethods(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpe
     }
     if (remaining.items.len == 0) return;
 
-    try w.writeAll("methods\n");
+    try style(w, bold);
+    try w.writeAll("methods");
+    try style(w, reset);
+    try w.writeAll("\n");
     for (remaining.items) |target_name| {
         var planned = try collectMethods(alloc, specs, target_name);
         defer planned.deinit(alloc);
 
-        try w.writeAll("\n  type ");
+        try w.writeAll("\n  ");
+        try style(w, dim);
+        try w.writeAll("type ");
+        try style(w, reset);
+        try style(w, bold ++ blue);
         try w.writeAll(target_name);
+        try style(w, reset);
         try w.writeAll("\n");
 
         for (planned.items) |p| try renderTextFn(w, p.spec, stripMethodPrefix(p.spec.sig), 4, 6);
@@ -339,23 +374,47 @@ fn renderTextFn(w: *Writer, spec: *const FnSpec, sig: []const u8, sig_indent: us
     try w.writeAll("\n");
     try writeIndent(w, sig_indent);
     if (spec.is_value) {
-        try w.print("{s}\n", .{spec.name});
+        try style(w, cyan);
+        try w.print("{s}", .{spec.name});
+        try style(w, reset);
+        try w.writeAll("\n");
         try writeIndent(w, doc_indent);
-        try w.writeAll("(value)\n");
+        try style(w, dim);
+        try w.writeAll("(value)");
+        try style(w, reset);
+        try w.writeAll("\n");
     } else {
-        try w.print("fn {s}\n", .{sig});
+        try style(w, magenta);
+        try w.writeAll("fn");
+        try style(w, reset);
+        try w.writeByte(' ');
+        const name_end = std.mem.indexOf(u8, sig, "(") orelse sig.len;
+        try style(w, cyan);
+        try w.writeAll(sig[0..name_end]);
+        try style(w, reset);
+        try w.writeAll(sig[name_end..]);
+        try w.writeAll("\n");
     }
 
     if (spec.core_key) |k| {
         try writeIndent(w, doc_indent);
-        try w.print("metatable key: {s}\n", .{@tagName(k)});
+        try style(w, dim);
+        try w.writeAll("metatable key: ");
+        try style(w, reset);
+        try style(w, yellow);
+        try w.print("{s}", .{@tagName(k)});
+        try style(w, reset);
+        try w.writeAll("\n");
     }
 
     if (spec.doc.len > 0) {
         try writeIndentedDoc(w, spec.doc, doc_indent);
     } else {
         try writeIndent(w, doc_indent);
-        try w.writeAll("undocumented :(\n");
+        try style(w, dim);
+        try w.writeAll("undocumented :(");
+        try style(w, reset);
+        try w.writeAll("\n");
     }
 
     if (spec.fields.len > 0) try renderTextFields(w, spec.fields, doc_indent);
@@ -365,8 +424,16 @@ fn renderTextFields(w: *Writer, fields: []const FieldSpec, indent: usize) !void 
     try w.writeAll("\n");
     for (fields) |fl| {
         try writeIndent(w, indent);
-        try w.print("- {s}", .{fl.name});
-        if (fl.type_text.len > 0) try w.print(": {s}", .{fl.type_text});
+        try w.writeAll("- ");
+        try style(w, bold);
+        try w.writeAll(fl.name);
+        try style(w, reset);
+        if (fl.type_text.len > 0) {
+            try w.writeAll(": ");
+            try style(w, blue);
+            try w.writeAll(fl.type_text);
+            try style(w, reset);
+        }
         if (fl.doc.len > 0) {
             try w.writeAll("\n");
             var it = std.mem.splitScalar(u8, fl.doc, '\n');
