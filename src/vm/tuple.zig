@@ -23,7 +23,9 @@ pub const Tuple = struct {
 
 pub const TuplePool = struct {
     alloc: std.mem.Allocator,
-    tuples: std.ArrayList(?Tuple),
+    // boxed: slots hold stable *Tuple pointers, so get() survives create().
+    box_pool: std.heap.MemoryPool(Tuple),
+    tuples: std.ArrayList(?*Tuple),
     marks: std.DynamicBitSet,
     dead: std.ArrayList(memory.TupleID),
     first: usize = pool.end,
@@ -33,6 +35,7 @@ pub const TuplePool = struct {
     pub fn init(alloc: std.mem.Allocator) !TuplePool {
         return TuplePool{
             .alloc = alloc,
+            .box_pool = .empty,
             .tuples = try .initCapacity(alloc, 4),
             .marks = try .initEmpty(alloc, 64),
             .dead = .empty,
@@ -41,9 +44,10 @@ pub const TuplePool = struct {
     }
 
     pub fn deinit(self: *TuplePool) void {
-        for (self.tuples.items) |*maybe_t| {
-            if (maybe_t.*) |*t| t.deinit();
+        for (self.tuples.items) |maybe_t| {
+            if (maybe_t) |t| t.deinit();
         }
+        self.box_pool.deinit(self.alloc);
         self.tuples.deinit(self.alloc);
         self.marks.deinit();
         self.dead.deinit(self.alloc);
@@ -57,6 +61,7 @@ pub const TuplePool = struct {
             self.alloc,
             Tuple,
             memory.TupleID,
+            &self.box_pool,
             &self.tuples,
             &self.marks,
             &self.dead,
@@ -69,7 +74,7 @@ pub const TuplePool = struct {
 
     pub fn get(self: *TuplePool, id: memory.TupleID) !*Tuple {
         if (id >= self.tuples.items.len) return error.InvalidTuple;
-        if (self.tuples.items[id]) |*t| return t;
+        if (self.tuples.items[id]) |t| return t;
         return error.InvalidTuple;
     }
 
@@ -86,6 +91,7 @@ pub const TuplePool = struct {
             self.alloc,
             Tuple,
             memory.TupleID,
+            &self.box_pool,
             &self.tuples,
             &self.marks,
             &self.dead,
@@ -117,9 +123,25 @@ pub const TuplePool = struct {
     }
 };
 
-fn freeTuple(t: *Tuple, _: std.mem.Allocator) ?Tuple {
+fn freeTuple(t: *Tuple, _: std.mem.Allocator) void {
     t.deinit();
-    return null;
+}
+
+test "boxed tuple pointers survive pool growth from create()" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
+
+    const id = try vm.tuples.create(&[_]Data{ Data.new.num(7), Data.new.num(8) });
+    const t = try vm.tuples.get(id); // pointer we intend to keep using
+
+    // grow the slot array far past its initial capacity; boxing keeps the Tuple
+    // itself put so `t` stays valid (raw create() notes no gc pressure).
+    var i: usize = 0;
+    while (i < 512) : (i += 1) _ = try vm.tuples.create(&[_]Data{Data.new.num(0)});
+
+    try std.testing.expectEqual(@as(usize, 2), t.items.len);
+    try std.testing.expectEqual(Data.new.num(7), t.items[0]);
+    try std.testing.expectEqual(t, try vm.tuples.get(id)); // same stable address
 }
 
 test "parses tuple literals and keeps paren grouping distinct" {

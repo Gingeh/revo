@@ -1250,7 +1250,7 @@ pub inline fn tableFast(
         std.debug.assert(
             self.tables.tables.items[id] != null,
         );
-        return &self.tables.tables.items[id].?;
+        return self.tables.tables.items[id].?;
     }
     return self.tables.get(id);
 }
@@ -1266,7 +1266,7 @@ inline fn functionFast(
         std.debug.assert(
             self.functions.functions.items[id] != null,
         );
-        return &self.functions.functions.items[id].?;
+        return self.functions.functions.items[id].?;
     }
     return self.functions.get(id) catch |e| {
         if (e == error.FunctionDNE) {

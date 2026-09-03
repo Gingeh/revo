@@ -128,14 +128,18 @@ pub const Function = union(enum) {
 
 pub const FunctionPool = struct {
     alloc: std.mem.Allocator,
-    functions: std.ArrayList(?Function),
+    // boxed: function/upvalue slots hold stable pointers, so a *Function or
+    // *Upvalue from get() survives later create() calls.
+    function_box_pool: std.heap.MemoryPool(Function),
+    functions: std.ArrayList(?*Function),
     function_marks: std.DynamicBitSet,
     function_dead: std.ArrayList(mem.FunctionID),
     function_first: usize = pool.end,
     function_last: usize = pool.end,
     function_next: std.ArrayList(usize),
     prototypes: std.ArrayList(Prototype),
-    upvalues: std.ArrayList(?Upvalue),
+    upvalue_box_pool: std.heap.MemoryPool(Upvalue),
+    upvalues: std.ArrayList(?*Upvalue),
     upvalue_marks: std.DynamicBitSet,
     upvalue_dead: std.ArrayList(UpvalueID),
     upvalue_first: usize = pool.end,
@@ -146,11 +150,13 @@ pub const FunctionPool = struct {
     pub fn init(alloc: std.mem.Allocator) !FunctionPool {
         return FunctionPool{
             .alloc = alloc,
+            .function_box_pool = .empty,
             .functions = try .initCapacity(alloc, 16),
             .function_marks = try .initEmpty(alloc, 64),
             .function_dead = .empty,
             .function_next = try .initCapacity(alloc, 16),
             .prototypes = try .initCapacity(alloc, 16),
+            .upvalue_box_pool = .empty,
             .upvalues = try .initCapacity(alloc, 16),
             .upvalue_marks = try .initEmpty(alloc, 64),
             .upvalue_dead = .empty,
@@ -160,8 +166,8 @@ pub const FunctionPool = struct {
     }
 
     pub fn deinit(self: *FunctionPool) void {
-        for (self.functions.items) |*maybe_f| {
-            if (maybe_f.*) |f| switch (f) {
+        for (self.functions.items) |maybe_f| {
+            if (maybe_f) |f| switch (f.*) {
                 .closure => |closure| self.alloc.free(closure.upvalues),
                 .c_function => {},
                 .host => {},
@@ -174,6 +180,8 @@ pub const FunctionPool = struct {
             self.alloc.free(proto.const_local_bits);
         }
         for (self.segments.items) |seg| self.alloc.free(seg);
+        self.function_box_pool.deinit(self.alloc);
+        self.upvalue_box_pool.deinit(self.alloc);
         self.functions.deinit(self.alloc);
         self.function_marks.deinit();
         self.function_dead.deinit(self.alloc);
@@ -191,6 +199,7 @@ pub const FunctionPool = struct {
             self.alloc,
             Function,
             mem.FunctionID,
+            &self.function_box_pool,
             &self.functions,
             &self.function_marks,
             &self.function_dead,
@@ -275,6 +284,7 @@ pub const FunctionPool = struct {
             self.alloc,
             Upvalue,
             UpvalueID,
+            &self.upvalue_box_pool,
             &self.upvalues,
             &self.upvalue_marks,
             &self.upvalue_dead,
@@ -287,7 +297,7 @@ pub const FunctionPool = struct {
 
     pub inline fn get(self: *FunctionPool, id: mem.FunctionID) !*Function {
         if (id >= self.functions.items.len) return error.FunctionDNE;
-        if (self.functions.items[id]) |*f| return f;
+        if (self.functions.items[id]) |f| return f;
         return error.FunctionDNE;
     }
 
@@ -298,7 +308,7 @@ pub const FunctionPool = struct {
 
     pub inline fn getUpvalue(self: *FunctionPool, id: UpvalueID) !*Upvalue {
         if (id >= self.upvalues.items.len) return error.FunctionDNE;
-        if (self.upvalues.items[id]) |*u| return u;
+        if (self.upvalues.items[id]) |u| return u;
         return error.FunctionDNE;
     }
 
@@ -323,6 +333,7 @@ pub const FunctionPool = struct {
             self.alloc,
             Function,
             mem.FunctionID,
+            &self.function_box_pool,
             &self.functions,
             &self.function_marks,
             &self.function_dead,
@@ -336,6 +347,7 @@ pub const FunctionPool = struct {
             self.alloc,
             Upvalue,
             UpvalueID,
+            &self.upvalue_box_pool,
             &self.upvalues,
             &self.upvalue_marks,
             &self.upvalue_dead,
@@ -352,7 +364,7 @@ pub const FunctionPool = struct {
         while (fid != pool.end) {
             const f = self.functions.items[fid].?;
             total += 48;
-            switch (f) {
+            switch (f.*) {
                 .closure => |closure| total += @sizeOf(UpvalueID) * closure.upvalues.len,
                 .host, .c_function => {},
             }
@@ -376,17 +388,14 @@ pub const FunctionPool = struct {
     }
 };
 
-fn freeFunction(f: *Function, alloc: std.mem.Allocator) ?Function {
+fn freeFunction(f: *Function, alloc: std.mem.Allocator) void {
     switch (f.*) {
         .closure => |closure| alloc.free(closure.upvalues),
         .host, .c_function => {},
     }
-    return null;
 }
 
-fn freeUpvalue(_: *Upvalue, _: std.mem.Allocator) ?Upvalue {
-    return null;
-}
+fn freeUpvalue(_: *Upvalue, _: std.mem.Allocator) void {}
 
 test "functions call with lexical locals" {
     try t.topNumber(
