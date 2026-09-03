@@ -95,14 +95,6 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             }
             if (nested) try writer.terminateRecord();
         },
-        .struct_val => {
-            const struct_val_id = data.asStructVal().?;
-            const struct_val = try vm.struct_instances.get(struct_val_id);
-            for (struct_val.fields) |field| {
-                try writeCsvValue(field, vm, writer, true);
-            }
-            if (nested) try writer.terminateRecord();
-        },
         .tuple => {
             const tuple_id = data.asTuple().?;
             const tuple = try vm.tuples.get(tuple_id);
@@ -111,6 +103,7 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             }
             if (nested) try writer.terminateRecord();
         },
+        .struct_val => return error.UnsupportedCsvValue,
         .struct_type => return error.UnsupportedCsvValue,
         .function => return error.UnsupportedCsvValue,
         .foreign => return error.UnsupportedCsvValue,
