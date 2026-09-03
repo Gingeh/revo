@@ -7,7 +7,7 @@ const Data = revo.Data;
 const VM = revo.VM;
 const HostResult = root.HostResult;
 
-const csv = VM.csv;
+const csv = @import("./vendor/csv.zig");
 const Reader = csv.Reader;
 const Writer = csv.Writer;
 const Record = csv.Record;
