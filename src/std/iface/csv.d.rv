@@ -1,0 +1,8 @@
+#! encode values as csv and decode csvs back into revo values !#
+
+#* encodes revo value as csv string *#
+pub declare csv.encode = fn(value: any) -> !string
+
+#* decodes csv string into revo value *#
+pub declare csv.decode = fn(source: string) -> !any/string
+

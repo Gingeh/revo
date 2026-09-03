@@ -2087,6 +2087,7 @@ pub fn markData(self: *VM, data: Data) void {
 }
 
 test {
+    _ = @import("csv.zig");
     _ = @import("debug.zig");
     _ = @import("functions.zig");
     _ = @import("interner.zig");
@@ -2137,3 +2138,4 @@ const Scheduler = @import("scheduler.zig");
 const struct_mod = @import("struct.zig");
 const vm_exec = @import("exec.zig");
 const vm_gc = @import("gc.zig");
+pub const csv = @import("csv.zig");
