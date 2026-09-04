@@ -180,7 +180,7 @@ pub fn parse(allocator: Allocator, args: []const [:0]const u8, res: *Result) !vo
         //   positional or passthrough (also every token once
         //   no_more_flags is set, flag-looking or not)
         if (no_more_flags or !looksLikeFlag(str)) {
-            if (!looksLikeFlag(str)) {
+            if (!no_more_flags and !looksLikeFlag(str)) {
                 if (res.nextPositional()) |arg| {
                     arg.value = str;
                     if (arg.terminal) no_more_flags = true;
@@ -346,8 +346,10 @@ test "compile mode: output path is captured but excluded from passthrough" {
 
     try std.testing.expect(commands[0].triggered);
     try std.testing.expectEqualStrings("script.rv", my_args[0].value.?);
-    try std.testing.expectEqualStrings("out.rvo", my_args[1].value.?);
-    try std.testing.expectEqual(@as(usize, 1), leftover.items.len); // just the script
+    try std.testing.expect(my_args[1].value == null); // terminal consumed everything, output unfilled
+    try std.testing.expectEqual(@as(usize, 2), leftover.items.len); // script + output path
+    try std.testing.expectEqualStrings("script.rv", leftover.items[0]);
+    try std.testing.expectEqualStrings("out.rvo", leftover.items[1]);
 }
 
 test "unrecognized leading word falls through to script path" {
