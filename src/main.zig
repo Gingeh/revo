@@ -9,35 +9,16 @@ const Artifact = revo.lang.Artifact;
 const VM = revo.VM;
 const pretty = revo.pretty;
 
+const ap = @import("argparse.zig");
 const repl = @import("repl.zig");
 
-const USAGE =
+const SYNOPSIS =
     \\usage: revo [options] [script [args...]]
     \\       revo <command> [options]
     \\
-    \\options:
-    \\  -e code          run code
-    \\  -i               enter repl after executing
-    \\  -d,-D,-P         output the the program's result in {display, debug, pretty} mode
-    \\  --test           run with test blocks
-    \\  -h, --help       show this help message
-    \\
-    \\commands:
-    \\  compile          compile script to bytecode instead of running
-    \\                   runs only the comp/proc blocks
-    \\  repl             start repl (default with no args)
-    \\  version          show version and build info
-    \\
-++ (if (lsp_enabled)
-    \\  lsp              start the lsp
-    \\
-else
-    "") ++
-    \\  dis              show bytecode disassembly instead of running
-    \\  bench[n]         run with performance counters ([n] iterations, 1 if not specified)
-    \\  doc              extract doc comments from a file, dir, or the pwd workspace
-    \\                   --html    render as html instead of markdown
-    \\                   --splice  splice output into markdown piped on stdin
+;
+
+const EXAMPLES =
     \\
     \\if the first argument is a command that exists, it gets ran;
     \\otherwise, it's treated as a script path
@@ -62,7 +43,15 @@ else
     "") ++
     \\  revo repl                         start repl explicitly
     \\  revo lsp.rv                       run a script literally named lsp.rv
+    \\
 ;
+
+/// argparse just cant do this
+fn usageText(allocator: Allocator, args: []const ap.Arg, commands: []const ap.Command) ![]const u8 {
+    const auto = try ap.usage(allocator, args, commands);
+    defer allocator.free(auto);
+    return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ SYNOPSIS, auto, EXAMPLES });
+}
 
 const ExecutionMode = enum { run, repl, bench, disassemble, compile, docs, docs_html, lsp };
 
@@ -137,26 +126,15 @@ fn runMain(init: std.process.Init) !void {
 
     const args = try init.minimal.args.toSlice(arena);
 
+    // no args: piped stdin or interactive repl
     if (args.len < 2) {
-        const stdin_file = revo.stdin();
-        if (!try stdin_file.isTty(init.io)) {
-            const source = std.Io.Dir.cwd().readFileAlloc(
-                init.io,
-                "/dev/stdin",
-                arena,
-                std.Io.Limit.unlimited,
-            ) catch |err| {
-                printError(init, "reading stdin - {}", .{err});
-                return error.FileError;
-            };
-
-            const cfg: Config = .{};
+        const source = try readStdin(init, arena);
+        if (source) |s| {
             var vm = try initVM(init, init.gpa, &.{args[0]});
             defer vm.deinit();
-            try runSource(init, init.gpa, "<stdin>", source, cfg);
+            try runSource(init, init.gpa, "<stdin>", s, .{});
             return;
         }
-
         var vm = try initVM(init, init.gpa, &.{args[0]});
         defer vm.deinit();
         try repl.run(&vm, init.gpa, init);
@@ -165,59 +143,30 @@ fn runMain(init: std.process.Init) !void {
 
     const config = try parseArgs(init, args);
 
+    // early-return modes
     if (config.mode == .repl) {
         var vm = try initVM(init, init.gpa, config.argv);
         defer vm.deinit();
         return try repl.run(&vm, init.gpa, init);
     }
-
     if (config.mode == .lsp) {
         var project = revo.lang.Project.detectFromCwd(init.io, init.gpa);
         defer project.deinit(init.gpa);
         return try @import("lsp_main").runLsp(init.gpa, init.io, project.mode, project.root);
     }
-
-    // docs modes always run the docgen pipeline: extract from a file, a dir
-    // of sources, the pwd workspace, or a piped source; `--html` outputs html,
-    // without it outputs markdown; `--html` with piped stdin splices into the page
     if (config.mode == .docs or config.mode == .docs_html) {
-        try docs.Cli.run(
-            init,
-            init.gpa,
-            arena,
-            config.script_path,
-            config.mode == .docs_html,
-            config.force_splice,
-        );
-        return;
+        return try docs.Cli.run(init, init.gpa, arena, config.script_path, config.mode == .docs_html, config.force_splice);
     }
 
-    // if script path `-` then explicit stdin;
-    // else if no script path and stdin is pipe, read stdin then run
+    // script path or stdin
     if (config.script_path) |path| {
         if (std.mem.eql(u8, path, "-")) {
-            const source = std.Io.Dir.cwd().readFileAlloc(
-                init.io,
-                "/dev/stdin",
-                arena,
-                std.Io.Limit.unlimited,
-            ) catch |err| {
-                printError(init, "reading stdin - {}", .{err});
-                return error.FileError;
-            };
-            if (std.mem.startsWith(u8, source, &revo.bytecode.MAGIC)) {
-                try runBytecode(init, init.gpa, "<stdin>", source, config);
-            } else {
-                try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
-            }
-            if (config.inline_code) |code| try runInlineCode(init, init.gpa, code, config);
-            if (!config.interactive) return;
+            try runFromStdin(init, init.gpa, arena, config);
         } else {
             const source = std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, std.Io.Limit.unlimited) catch |err| {
                 printError(init, "{s} '{s}'", .{ @errorName(err), path });
                 return error.FileError;
             };
-
             if (std.mem.endsWith(u8, path, ".rvo")) {
                 switch (config.mode) {
                     .run => try runBytecode(init, init.gpa, path, source, config),
@@ -248,27 +197,12 @@ fn runMain(init: std.process.Init) !void {
             } else {
                 try handleSource(init, init.gpa, arena, path, source, config);
             }
-            if (!config.interactive) return;
         }
+        if (!config.interactive) return;
     } else {
-        const stdin_file = revo.stdin();
-        if (!try stdin_file.isTty(init.io)) {
-            const source = std.Io.Dir.cwd().readFileAlloc(
-                init.io,
-                "/dev/stdin",
-                arena,
-                std.Io.Limit.unlimited,
-            ) catch |err| {
-                printError(init, "reading stdin - {}", .{err});
-                return error.FileError;
-            };
-            if (std.mem.startsWith(u8, source, &revo.bytecode.MAGIC)) {
-                try runBytecode(init, init.gpa, "<stdin>", source, config);
-            } else {
-                try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
-            }
-            if (!config.interactive and config.inline_code == null) return;
-        }
+        // no script path: check for piped stdin
+        try runFromStdin(init, init.gpa, arena, config);
+        if (!config.interactive and config.inline_code == null) return;
     }
 
     if (config.inline_code) |code| {
@@ -293,6 +227,29 @@ fn printSuccess(init: std.process.Init, comptime fmt: []const u8, args: anytype)
     defer buf.deinit();
     pretty.printSuccess(&buf.writer, fmt, args) catch return;
     std.debug.print("{s}", .{buf.written()});
+}
+
+fn readStdin(init: std.process.Init, arena: Allocator) !?[]const u8 {
+    const stdin_file = revo.stdin();
+    if (try stdin_file.isTty(init.io)) return null;
+    return std.Io.Dir.cwd().readFileAlloc(
+        init.io,
+        "/dev/stdin",
+        arena,
+        std.Io.Limit.unlimited,
+    ) catch |err| {
+        printError(init, "reading stdin - {}", .{err});
+        return error.FileError;
+    };
+}
+
+fn runFromStdin(init: std.process.Init, gpa: Allocator, arena: Allocator, config: Config) !void {
+    const source = (try readStdin(init, arena)) orelse return;
+    if (std.mem.startsWith(u8, source, &revo.bytecode.MAGIC)) {
+        try runBytecode(init, gpa, "<stdin>", source, config);
+    } else {
+        try handleSource(init, gpa, arena, "<stdin>", source, config);
+    }
 }
 
 fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8) !VM {
@@ -366,92 +323,136 @@ fn runCompiledArtifact(
     }
 }
 
+fn validBenchIters(remainder: []const u8) bool {
+    if (remainder.len == 0) return true;
+    _ = std.fmt.parseUnsigned(u32, remainder, 10) catch return false;
+    return true;
+}
+
 /// revo --options-go-here [subcommand/script name] --rest-goes-to-script
 fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
+    const allocator = init.arena.allocator();
     var config: Config = .{};
-    var i: usize = 1;
+    var leftover: std.ArrayList([:0]const u8) = .empty;
 
-    var argv: std.ArrayList([:0]const u8) = .empty;
+    // no im not putting these into helpers
+    var arg_list = [_]ap.Arg{
+        .{ .name = "e", .short = 'e', .kind = .string, .description = "run code" },
+        .{ .name = "i", .short = 'i', .kind = .boolean, .description = "enter repl after executing" },
+        .{ .name = "d", .short = 'd', .kind = .boolean, .description = "output the program's result in display mode" },
+        .{ .name = "D", .short = 'D', .kind = .boolean, .description = "output the program's result in debug mode" },
+        .{ .name = "P", .short = 'P', .kind = .boolean, .description = "output the program's result in pretty mode" },
+        .{ .name = "test", .kind = .boolean, .description = "run with test blocks" },
+        .{ .name = "html", .kind = .boolean, .description = "render as html instead of markdown (doc)" },
+        .{ .name = "splice", .kind = .boolean, .description = "splice output into markdown piped on stdin (doc)" },
+        .{ .name = "help", .short = 'h', .kind = .boolean, .description = "show this help message" },
+        // terminal positional:
+        //   stops flag-parsing, goes to passthru argv
+        //   output path (compile mode) is handled below by hand
+        .{ .name = "script", .kind = .positional, .terminal = true, .passthrough = true },
+    };
 
-    // leading command word
-    if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) blk: {
-        const cmd = args[i];
-        if (std.mem.eql(u8, cmd, "compile")) {
-            config.mode = .compile;
-        } else if (std.mem.eql(u8, cmd, "repl")) {
-            config.mode = .repl;
-        } else if (if (lsp_enabled) std.mem.eql(u8, cmd, "lsp") else false) {
-            config.mode = .lsp;
-        } else if (std.mem.eql(u8, cmd, "dis")) {
-            config.mode = .disassemble;
-        } else if (std.mem.eql(u8, cmd, "doc")) {
-            config.mode = .docs;
-        } else if (std.mem.eql(u8, cmd, "version")) {
-            std.debug.print("revo {s} ({s})\n", .{ build_opts.version, build_opts.git_commit });
-            return error.VersionRequested;
-        } else if (std.mem.startsWith(u8, cmd, "bench")) {
-            // bench / bench[n]; anything else falls through to script path
-            const n = cmd[5..];
-            const iters = if (n.len == 0) 1 else std.fmt.parseUnsigned(u32, n, 10) catch break :blk;
-            config.mode = .bench;
-            config.bench_iters = iters;
-        } else break :blk;
-
-        i += 1;
+    var commands_buf: [7]ap.Command = undefined;
+    var n: usize = 0;
+    inline for (&[_]struct { name: []const u8, prefix: bool, has_validate: bool, desc: []const u8 }{
+        .{ .name = "compile", .prefix = false, .has_validate = false, .desc = "compile script to bytecode instead of running" },
+        .{ .name = "repl", .prefix = false, .has_validate = false, .desc = "start repl (default with no args)" },
+        .{ .name = "lsp", .prefix = false, .has_validate = false, .desc = "start the lsp" },
+        .{ .name = "dis", .prefix = false, .has_validate = false, .desc = "show bytecode disassembly instead of running" },
+        .{ .name = "doc", .prefix = false, .has_validate = false, .desc = "extract doc comments from a file, dir, or the pwd workspace" },
+        .{ .name = "version", .prefix = false, .has_validate = false, .desc = "show version and build info" },
+        .{ .name = "bench", .prefix = true, .has_validate = true, .desc = "run with performance counters ([n] iterations, 1 if not specified)" },
+    }) |cmd_def| {
+        if (comptime lsp_enabled or cmd_def.name[0] != 'l' or cmd_def.name[1] != 's' or cmd_def.name[2] != 'p') {
+            commands_buf[n] = .{
+                .name = cmd_def.name,
+                .prefix = cmd_def.prefix,
+                .validate = if (cmd_def.has_validate) validBenchIters else null,
+                .description = cmd_def.desc,
+            };
+            n += 1;
+        }
     }
+    const commands = commands_buf[0..n];
 
-    // options, never parsed past the script name
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-        if (!std.mem.startsWith(u8, arg, "-") or std.mem.eql(u8, arg, "-")) break;
-        if (std.mem.eql(u8, arg, "-e")) {
-            i += 1;
-            if (i >= args.len) {
-                printError(init, "-e requires an argument", .{});
-                return error.InsufficientArgs;
-            }
-            try argv.append(init.arena.allocator(), args[0]);
-            config.inline_code = args[i];
-        } else if (std.mem.eql(u8, arg, "-i")) {
-            config.interactive = true;
-        } else if (std.mem.eql(u8, arg, "-d")) {
-            config.echo_last = .display;
-        } else if (std.mem.eql(u8, arg, "-D")) {
-            config.echo_last = .debug;
-        } else if (std.mem.eql(u8, arg, "-P")) {
-            config.echo_last = .pretty;
-        } else if (std.mem.eql(u8, arg, "--test")) {
-            config.test_mode = true;
-        } else if (std.mem.eql(u8, arg, "--html")) {
-            if (config.mode == .docs) config.mode = .docs_html;
-        } else if (std.mem.eql(u8, arg, "--splice")) {
-            config.force_splice = true;
-        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            std.debug.print("{s}\n", .{USAGE});
+    var res = ap.Result{ .args = &arg_list, .commands = commands, .leftover = &leftover };
+
+    ap.parse(allocator, args[1..], &res) catch |err| {
+        if (arg_list[8].enabled) { // help always wins
+            const text = try usageText(allocator, &arg_list, commands);
+            defer allocator.free(text);
+            std.debug.print("{s}\n", .{text});
             return error.HelpRequested;
-        } else {
-            printError(init, "unknown option '{s}'", .{arg});
-            std.debug.print("{s}\n", .{USAGE});
-            return error.UnknownCommand;
+        }
+        switch (err) {
+            error.MissingValue => {
+                printError(init, "{s} requires an argument", .{res.err_token.?});
+                return error.InsufficientArgs;
+            },
+            error.UnexpectedLongArg, error.UnexpectedShortArg => {
+                printError(init, "unknown option '{s}'", .{res.err_token.?});
+                const text = try usageText(allocator, &arg_list, commands);
+                defer allocator.free(text);
+                std.debug.print("{s}\n", .{text});
+                return error.UnknownCommand;
+            },
+            else => return err,
+        }
+    };
+
+    if (arg_list[8].enabled) { // help
+        const text = try usageText(allocator, &arg_list, commands);
+        defer allocator.free(text);
+        std.debug.print("{s}\n", .{text});
+        return error.HelpRequested;
+    }
+
+    // map commands to execution mode
+    for (commands) |cmd| {
+        if (cmd.triggered) {
+            if (std.mem.eql(u8, cmd.name, "version")) {
+                std.debug.print("revo {s} ({s})\n", .{ build_opts.version, build_opts.git_commit });
+                return error.VersionRequested;
+            }
+            if (std.mem.eql(u8, cmd.name, "compile")) config.mode = .compile;
+            if (std.mem.eql(u8, cmd.name, "repl")) config.mode = .repl;
+            if (std.mem.eql(u8, cmd.name, "lsp")) config.mode = .lsp;
+            if (std.mem.eql(u8, cmd.name, "dis")) config.mode = .disassemble;
+            if (std.mem.eql(u8, cmd.name, "doc")) config.mode = .docs;
+            if (std.mem.eql(u8, cmd.name, "bench")) {
+                config.mode = .bench;
+                config.bench_iters = if (cmd.value.len == 0) 1 else std.fmt.parseUnsigned(u32, cmd.value, 10) catch 1;
+            }
         }
     }
 
-    // first positional is the script; the rest is runtime argv.
-    // compile takes one extra positional - the output path
-    while (i < args.len) : (i += 1) {
-        if (config.script_path == null and config.inline_code == null) {
-            config.script_path = args[i];
-            try argv.append(init.arena.allocator(), args[i]);
-        } else if (config.mode == .compile and config.output_path == null and
-            !std.mem.startsWith(u8, args[i], "-"))
-        {
-            config.output_path = args[i];
-        } else {
-            try argv.append(init.arena.allocator(), args[i]);
+    // map flags
+    config.interactive = arg_list[1].enabled; // -i
+    config.test_mode = arg_list[5].enabled; // --test
+    config.force_splice = arg_list[7].enabled; // --splice
+    if (arg_list[2].enabled) config.echo_last = .display; // -d
+    if (arg_list[3].enabled) config.echo_last = .debug; // -D
+    if (arg_list[4].enabled) config.echo_last = .pretty; // -P
+    if (arg_list[6].enabled and config.mode == .docs) config.mode = .docs_html; // --html
+
+    // -e always gets the script slot
+    if (arg_list[0].value) |code| { // -e
+        config.inline_code = code;
+        try leftover.insert(allocator, 0, args[0]);
+    } else {
+        config.script_path = arg_list[9].value; // script positional
+    }
+
+    // compile mode: steal the second positional as output path
+    if (config.mode == .compile and leftover.items.len >= 2) {
+        const candidate = leftover.items[1];
+        if (!std.mem.startsWith(u8, candidate, "-")) {
+            config.output_path = candidate;
+            _ = leftover.orderedRemove(1);
         }
     }
 
-    config.argv = try argv.toOwnedSlice(init.arena.allocator());
+    config.argv = try leftover.toOwnedSlice(allocator);
     return config;
 }
 
