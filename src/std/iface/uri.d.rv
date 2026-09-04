@@ -1,0 +1,7 @@
+#! parse uri strings !#
+
+#* parses string as uri *#
+pub declare uri.decode = fn(value: string) -> !table
+
+#* formats uri table as string *#
+pub declare uri.encode = fn(value: table) -> !string
