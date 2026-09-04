@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - stdlib:
   - `exit(number)`
   - `revo.dofile(path)` -- do file & return; resole path like `import`
+  - `csv.decode`, `csv.encode`
+  - trig functions and sign in `math`
 - default arguments
 
     ```ruby
@@ -84,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
     ```ruby
     fn g() do
-      foo = bar
+      foo = bar;
       (10, 11, 12)
     end; g()
     # was: tried to call bar(10, 11, 12) and assign that to foo
