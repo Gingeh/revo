@@ -25,7 +25,7 @@ fn decode(args: []const Data, vm: *VM) !HostResult {
     try parseComponent(uri.host, "host", root_id, vm);
     try parseComponent(uri.fragment, "fragment", root_id, vm);
     try parseComponent(uri.user, "user", root_id, vm);
-    try parsePath(&uri, root_id, vm);
+    try parseComponent(uri.path, "path", root_id, vm);
     try parseQuery(&uri, root_id, vm);
     try parsePort(&uri, root_id, vm);
 
@@ -43,7 +43,7 @@ fn encode(args: []const Data, vm: *VM) !HostResult {
     try writePart(table, "user", null, "@", &out.writer, vm);
     try writePart(table, "host", null, null, &out.writer, vm);
     try writePort(table, &out.writer, vm);
-    try writePath(table, &out.writer, vm);
+    try writePart(table, "path", null, null, &out.writer, vm);
     try writeQuery(table, &out.writer, vm);
     try writePart(table, "fragment", "#", null, &out.writer, vm);
 
@@ -54,10 +54,8 @@ fn encode(args: []const Data, vm: *VM) !HostResult {
 
 fn writePart(table: *Table, name: []const u8, prefix: ?[]const u8, postfix: ?[]const u8, w: *std.Io.Writer, vm: *VM) !void {
     const key = try vm.internAtom(name);
-    const part = table.getRawAtom(key, vm);
-    if (part) |p| {
-        const value_string = p.asString();
-        if (value_string) |val| {
+    if (table.getRawAtom(key, vm)) |part| {
+        if (part.asString()) |val| {
             if (prefix) |pre| try w.writeAll(pre);
             try w.writeAll(vm.stringValue(val));
             if (postfix) |post| try w.writeAll(post);
@@ -67,12 +65,10 @@ fn writePart(table: *Table, name: []const u8, prefix: ?[]const u8, postfix: ?[]c
 
 fn writePort(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
     const key = try vm.internAtom("port");
-    const port = table.getRawAtom(key, vm);
-    if (port) |p| {
-        const port_num = p.asNum();
-        if (port_num) |n| {
+    if (table.getRawAtom(key, vm)) |port| {
+        if (port.asNum()) |num| {
             try w.writeAll(":");
-            try w.print("{d}", .{n});
+            try w.print("{d}", .{num});
         }
     }
 }
@@ -87,59 +83,65 @@ fn writeAuthority(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
     }
 }
 
-fn writePath(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
-    const key = try vm.internAtom("path");
-    const path = table.getRawAtom(key, vm);
-    if (path) |p| {
-        const path_id = p.asTable();
-        if (path_id) |p_id| {
-            const path_table = try vm.tables.get(p_id);
-            for (path_table.array.items) |item| {
-                const item_id = item.asStr();
-                if (item_id) |id| {
-                    try w.writeAll("/");
-                    try w.writeAll(vm.stringValue(id));
-                }
-            }
+fn writeQuery(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
+    if (table.getRawAtom(try vm.internAtom("query"), vm)) |query| {
+        if (query.asTable()) |query_id| {
+            const query_table = try vm.tables.get(query_id);
+            try w.writeAll("?");
+            var first = true;
+            try writeArrayQuery(query_table, w, &first, vm);
+            try writeHashQuery(query_table, w, &first, vm);
         }
     }
 }
 
-fn writeQuery(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
-    const key = try vm.internAtom("query");
-    const query = table.getRawAtom(key, vm);
-    if (query) |q| {
-        const query_id = q.asTable();
-        if (query_id) |q_id| {
-            const query_table = try vm.tables.get(q_id);
-            try w.writeAll("?");
-            for (query_table.array.items, 0..) |item, idx| {
-                const item_id = item.asStr();
-                if (item_id) |id| {
-                    if (idx != 0) {
-                        try w.writeAll("&");
+fn writeArrayQuery(table: *Table, w: *std.Io.Writer, first: *bool, vm: *VM) !void {
+    for (table.array.items) |item| {
+        const item_id = item.asStr();
+        const num_id = item.asNum();
+        if ((item_id != null or num_id != null) and !first.*) {
+            try w.writeAll("&");
+        }
+        if (num_id) |id| {
+            try w.print("{d}", .{id});
+            first.* = false;
+        } else if (item_id) |id| {
+            try w.writeAll(vm.stringValue(id));
+            first.* = false;
+        }
+    }
+}
+
+fn writeHashQuery(table: *Table, w: *std.Io.Writer, first: *bool, vm: *VM) !void {
+    var it = table.hash.orderedIterator();
+    while (it.next()) |param| {
+        if (param.key.asAtom()) |key| {
+            if (param.val.asTable()) |param_id| {
+                if (vm.tables.get(param_id)) |param_table| {
+                    for (param_table.array.items) |item| {
+                        if (!first.*) try w.writeAll("&");
+                        try w.writeAll(vm.stringValue(key));
+                        try w.writeAll("=");
+
+                        if (item.asStr()) |val| {
+                            try w.writeAll(vm.stringValue(val));
+                        } else if (item.asNum()) |val| {
+                            try w.print("{d}", .{val});
+                        }
+                        first.* = false;
                     }
-                    try w.writeAll(vm.stringValue(id));
+                } else |_| {}
+            } else {
+                if (!first.*) try w.writeAll("&");
+                try w.writeAll(vm.stringValue(key));
+                try w.writeAll("=");
+
+                if (param.val.asStr()) |val| {
+                    try w.writeAll(vm.stringValue(val));
+                } else if (param.val.asNum()) |val| {
+                    try w.print("{d}", .{val});
                 }
-            }
-            // add separator if previous items were written
-            if (query_table.array.items.len > 0 and query_table.hash.count > 0) try w.writeAll("&");
-            var idx: usize = 0;
-            var it = query_table.hash.orderedIterator();
-            while (it.next()) |param| {
-                const param_key = param.key.asAtom();
-                if (param_key) |k| {
-                    if (idx != 0) {
-                        try w.writeAll("&");
-                    }
-                    try w.writeAll(vm.stringValue(k));
-                    try w.writeAll("=");
-                    const param_val = param.val.asStr();
-                    if (param_val) |val| {
-                        try w.writeAll(vm.stringValue(val));
-                    }
-                }
-                idx += 1;
+                first.* = false;
             }
         }
     }
@@ -155,28 +157,32 @@ fn parseParam(param: []const u8, query_id: usize, vm: *VM) !void {
     if (std.mem.indexOfScalar(u8, param, '=')) |i| {
         const raw_key = param[0..i];
         const key = try vm.internAtom(raw_key);
-        const raw_value = param[i + 1 ..];
+        const val = param[i + 1 ..];
+        const data = if (val.len == 0) Data.new.nil() else try valData(val, vm);
+        if (query.getRawAtom(key, vm)) |existing| {
+            // key exists, add to or create a table
+            if (existing.asTable()) |id| {
+                var table = try vm.tables.get(id);
+                try table.push(data);
+            } else {
+                const id = try vm.tables.create();
+                var table = try vm.tables.get(id);
 
-        if (raw_value.len == 0) {
-            try query.putRawAtom(key, Data.new.nil(), vm);
+                try table.push(existing);
+                try table.push(data);
+                try query.putRawAtom(key, Data.new.table(id), vm);
+            }
         } else {
-            try query.putRawAtom(key, try vm.ownDataString(raw_value), vm);
+            try query.putRawAtom(key, data, vm);
         }
     } else {
         try query.push(try vm.ownDataString(param));
     }
 }
 
-fn parsePath(uri: *const Uri, root_id: usize, vm: *VM) !void {
-    // split path into parts
-    var parts = std.mem.tokenizeScalar(u8, uri.path.percent_encoded, '/');
-    const table_id = try vm.tables.create();
-    var path = try vm.tables.get(table_id);
-    while (parts.next()) |part| {
-        try path.push(try vm.ownDataString(part));
-    }
-    var root_table = try vm.tables.get(root_id);
-    try root_table.putRawAtom(try vm.internAtom("path"), Data.new.table(table_id), vm);
+fn valData(val: []const u8, vm: *VM) !Data {
+    const num = std.fmt.parseFloat(f64, val) catch return try vm.ownDataString(val);
+    return Data.new.num(num);
 }
 
 fn parseQuery(uri: *const Uri, root_id: usize, vm: *VM) !void {
@@ -194,18 +200,19 @@ fn parseQuery(uri: *const Uri, root_id: usize, vm: *VM) !void {
 }
 
 fn parsePort(uri: *const Uri, root_id: usize, vm: *VM) !void {
-    if (uri.port) |p| {
-        const port = Data.new.num(p);
+    if (uri.port) |port| {
+        const port_data = Data.new.num(port);
         var root_table = try vm.tables.get(root_id);
-        try root_table.putRawAtom(try vm.internAtom("port"), port, vm);
+        try root_table.putRawAtom(try vm.internAtom("port"), port_data, vm);
     }
 }
 
 fn parseComponent(component: ?Component, name: []const u8, root_id: usize, vm: *VM) !void {
     if (component) |c| {
+        const key = try vm.internAtom(name);
         const value = try vm.ownDataString(c.percent_encoded);
         var root_table = try vm.tables.get(root_id);
-        try root_table.putRawAtom(try vm.internAtom(name), value, vm);
+        try root_table.putRawAtom(key, value, vm);
     }
 }
 
@@ -216,10 +223,10 @@ test "encode url" {
         \\   host = "example.com",
         \\   fragment = "woah",
         \\   user = "username",
-        \\   path = { "p", "TRUE" },
-        \\   query = { "1", "2", chilling = "yeah" },
+        \\   path = "/p/TRUE",
+        \\   query = { "1", "2", chilling = "yeah", t = { "y", "n" } },
         \\   port = 67
         \\ })?
     ;
-    try testing.topString(src, "https://username@example.com:67/p/TRUE?1&2&chilling=yeah#woah");
+    try testing.topString(src, "https://username@example.com:67/p/TRUE?1&2&chilling=yeah&t=y&t=n#woah");
 }
