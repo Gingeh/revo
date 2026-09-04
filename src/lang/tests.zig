@@ -3374,7 +3374,7 @@ test "import of non-existent file reports runtime error" {
     try t.expectRuntimeErrorInDir(module_dir,
         \\ import "./nonexistent"
         \\ nonexistent
-    , .Panic);
+    , .ModuleNotFound);
 }
 
 test "import empty module does not crash" {

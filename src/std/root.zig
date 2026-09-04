@@ -815,7 +815,7 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         vm.module_dir,
         vm.project_root,
         vm.package_path.items,
-    ) orelse return .other("module not found!");
+    ) orelse return HostResult.errModuleNotFound();
 
     defer vm.runtime.alloc.free(resolved_path);
     if (std.mem.endsWith(u8, resolved_path, ".d.rv")) {
@@ -865,7 +865,7 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         _ = vm.invalidateModuleCache(resolved_path);
     }
     for (vm.loading_stack.items) |loading| {
-        if (std.mem.eql(u8, loading, resolved_path)) return HostResult.other("cyclic import detected");
+        if (std.mem.eql(u8, loading, resolved_path)) return HostResult.errCyclicImport();
     }
 
     const source = try std.Io.Dir.cwd().readFileAlloc(
@@ -885,7 +885,7 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         if (err != error.OutOfMemory) vm.runtime.alloc.free(cache_key);
         return switch (err) {
             error.OutOfMemory => error.OutOfMemory,
-            else => HostResult.other("module error"),
+            else => HostResult.errImportFailed(@errorName(err)),
         };
     };
     _ = vm.loading_stack.pop();
@@ -921,6 +921,11 @@ pub const HostErrPayload = union(enum) {
     type_error: struct { arg: ?usize, expected: []const u8, got: []const u8 },
     host_error: revo.vm.HostError,
     parked: void,
+    module_not_found: void,
+    cyclic_import: void,
+    import_failed: []const u8,
+    assertion_failed: []const u8,
+    io_error: []const u8,
     other: []const u8,
 };
 
@@ -951,6 +956,21 @@ pub const HostResult = union(enum) {
     }
     pub fn panic() HostResult {
         return .{ .err = .{ .other = "panic" } };
+    }
+    pub fn errModuleNotFound() HostResult {
+        return .{ .err = .{ .module_not_found = {} } };
+    }
+    pub fn errCyclicImport() HostResult {
+        return .{ .err = .{ .cyclic_import = {} } };
+    }
+    pub fn errImportFailed(msg: []const u8) HostResult {
+        return .{ .err = .{ .import_failed = msg } };
+    }
+    pub fn errAssertionFailed(msg: []const u8) HostResult {
+        return .{ .err = .{ .assertion_failed = msg } };
+    }
+    pub fn errIo(msg: []const u8) HostResult {
+        return .{ .err = .{ .io_error = msg } };
     }
 
     pub fn Ok(vm: *VM, value: Data) !HostResult {

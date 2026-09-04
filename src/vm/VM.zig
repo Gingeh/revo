@@ -964,8 +964,8 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
 /// instruction's result register so a park mid-callee resumes with the value
 /// in place; callers that discard or consume the result directly pass null.
 pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const Data, result_reg: ?opcode.Register) EvalError!Data {
-    self.host_call_depth += 1;
-    defer self.host_call_depth -= 1;
+    const saved_host_call_depth = self.host_call_depth;
+    self.host_call_depth = saved_host_call_depth + 1;
 
     const fiber = self.currentFiber();
     const initial_frame_depth = fiber.frames.items.len;
@@ -993,9 +993,11 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
             slot_len: usize,
             pc: usize,
             frame_depth: usize,
+            saved_depth: usize,
         ) void {
             f.registers_len = slot_len;
             f.pc = pc;
+            v.host_call_depth = saved_depth;
             v.closeUpvalues(slot_len) catch {};
             while (f.frames.items.len > frame_depth) {
                 _ = f.frames.pop();
@@ -1029,25 +1031,37 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
 
     const argc: opcode.Register = @intCast(argc_usize);
 
+    // host_call_depth blocks tco during this initial callRegister
+    // the fiber.pc at this point may belong to the outer dispatch loop which is like stale
+    // so reusing the current frame via tco would corrupt the caller\s state
     self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg }) catch |e| {
         if (e == error.Parked) {
             self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
             return e;
         }
-        unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth);
+        unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth, saved_host_call_depth);
         return e;
     };
 
+    // that callRegister is done
+    // clear host_call_depth so that recursive tcs within the dispatched function can tco
+    // restore the saved depth on all exit paths
+    self.host_call_depth = 0;
+
     if (fiber.frames.items.len > caller_frame_depth) {
         const exec_result = vm_exec.execFiberUntilDepth(self, caller_frame_depth) catch |e| {
+            self.host_call_depth = saved_host_call_depth;
             if (e == error.Parked) {
                 self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
                 return e;
             }
-            unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth);
+            unwind(self, fiber, initial_slot_len, initial_pc, initial_frame_depth, saved_host_call_depth);
             return e;
         };
+        self.host_call_depth = saved_host_call_depth;
         if (exec_result) |_| return error.Panic;
+    } else {
+        self.host_call_depth = saved_host_call_depth;
     }
 
     const result = fiber.registers[callee_slot];
@@ -1446,6 +1460,24 @@ fn callNonClosureFunction(
                         .other => |msg| {
                             try self.setRuntimeMessage(msg);
                             return error.Panic;
+                        },
+                        .module_not_found => {
+                            return error.ModuleNotFound;
+                        },
+                        .cyclic_import => {
+                            return error.CyclicImport;
+                        },
+                        .import_failed => |msg| {
+                            try self.setRuntimeMessage(msg);
+                            return error.ImportFailed;
+                        },
+                        .assertion_failed => |msg| {
+                            try self.setPanicMessage(msg);
+                            return error.Panic;
+                        },
+                        .io_error => |msg| {
+                            try self.setRuntimeMessage(msg);
+                            return error.IoError;
                         },
                     }
                 },
