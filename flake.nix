@@ -14,12 +14,9 @@
     {
       packages = forEachSystem (
         system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        with pkgs;
-        {
-          default = stdenv.mkDerivation {
+        with nixpkgs.legacyPackages.${system};
+        rec {
+          revo = stdenv.mkDerivation {
             name = "revo";
             version = "git";
             src = ./.;
@@ -37,6 +34,8 @@
               in
               "ln -s ${zigDeps} $ZIG_GLOBAL_CACHE_DIR/p";
           };
+          revo-small = revo.overrideAttrs { zigBuildFlags = [ "-Dfeatures=" "-Doptimize=ReleaseSmall" ]; };
+          default = revo;
 
           build =
             {
@@ -44,7 +43,7 @@
               version,
               src,
               entry-point ? "main",
-              revo ? default,
+              revo ? revo-small,
             }:
             stdenv.mkDerivation {
               inherit name version src;
