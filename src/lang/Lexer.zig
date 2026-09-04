@@ -127,7 +127,7 @@ pub const TokenType = enum {
             .plus, .minus, .star, .slash, .slash_slash, .percent, .caret, .caret_assign, .eq, .neq, .lt, .gt, .lte, .gte, .assign, .plus_assign, .minus_assign, .star_assign, .slash_assign, .percent_assign, .concat, .concat_assign, .arrow, .fat_arrow, .dot, .dotdot, .colon, .comma, .semicolon, .pipe, .pipe_forward, .huh, .bang, .lparen, .rparen, .lbracket, .rbracket, .lsquiggly, .rsquiggly, .attribute => .operator,
             .comment => .comment,
             .doc_comment => .comment,
-            .module_doc => .comment,
+            .module_doc => .module_doc,
             .ident, .eof => null,
         };
     }
@@ -277,6 +277,7 @@ pub const TokenClass = enum {
     operator,
     enum_member,
     comment,
+    module_doc,
 };
 
 /// check if an ident token at `pos` (byte offset right after the ident) is a function call

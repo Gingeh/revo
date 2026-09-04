@@ -146,6 +146,7 @@ const Handler = struct {
                         "operator",
                         "enumMember",
                         "comment",
+                        "moduleDoc",
                     },
                     .tokenModifiers = &.{},
                 },
