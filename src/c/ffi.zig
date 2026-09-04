@@ -214,10 +214,15 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
     defer registered.deinit(vm_ptr.runtime.alloc);
 
     var i: usize = 0;
-    while (@as(?[*:0]const u8, bindings_ptr[i].name) != null) : (i += 1) {
+    while (i < 4096) : (i += 1) {
+        const b = bindings_ptr[i];
+        const name_ptr: ?[*:0]const u8 = @ptrCast(b.name);
+        if (name_ptr == null) break;
+        const fn_ptr: ?*const anyopaque = @ptrCast(b.fn_ptr);
+        if (fn_ptr == null) return error.InvalidBinding;
         try registered.append(vm_ptr.runtime.alloc, .{
-            .name = std.mem.span(bindings_ptr[i].name),
-            .fn_ptr = @ptrCast(@alignCast(bindings_ptr[i].fn_ptr)),
+            .name = std.mem.span(name_ptr.?),
+            .fn_ptr = @ptrCast(@alignCast(fn_ptr.?)),
         });
     }
 
@@ -248,15 +253,19 @@ pub fn loadNative(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
     defer registered.deinit(vm_ptr.runtime.alloc);
 
     var i: usize = 0;
-    while (@as(?[*:0]const u8, bindings_ptr[i].name) != null) : (i += 1) {
+    while (i < 4096) : (i += 1) {
         const b = bindings_ptr[i];
-        const name = std.mem.span(b.name);
+        const name_ptr: ?[*:0]const u8 = @ptrCast(b.name);
+        if (name_ptr == null) break;
+        const fn_ptr: ?*const anyopaque = @ptrCast(b.fn_ptr);
+        if (fn_ptr == null) return error.InvalidBinding;
+        const name = std.mem.span(name_ptr.?);
         try registered.append(vm_ptr.runtime.alloc, .{
             .name = name,
             .arity = b.arity,
             .variadic = b.variadic,
             .param_types = &.{},
-            .func = @ptrCast(@alignCast(b.fn_ptr)),
+            .func = @ptrCast(@alignCast(fn_ptr.?)),
         });
     }
 

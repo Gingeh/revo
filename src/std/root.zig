@@ -886,9 +886,15 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
                 );
             }
             return .okData(Data.new.table(t_id));
-        } else |_| {}
-        // fall back to c path for legacy extensions
-        const mods = try revo.ffi.loadC(vm, resolved_path);
+        } else |err| switch (err) {
+            error.NoBindings => {},
+            else => return .{ .err = .{ .import_failed = @errorName(err) } },
+        }
+
+        const mods = revo.ffi.loadC(vm, resolved_path) catch |err| switch (err) {
+            error.NoBindings => return .{ .err = .{ .import_failed = "extension has no revo_native_bindings or revo_bindings export" } },
+            else => return .{ .err = .{ .import_failed = @errorName(err) } },
+        };
         defer vm.runtime.alloc.free(mods);
         const t_id = try vm.tables.create();
         const tbl = try vm.tables.get(t_id);

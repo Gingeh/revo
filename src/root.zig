@@ -389,6 +389,7 @@ pub const table = vm.table;
 pub const tuple = vm.tuple;
 pub const functions = vm.functions;
 pub const HostBinding = functions.HostBinding;
+pub const host_binding_size = @sizeOf(functions.HostBinding);
 pub const module = vm.module;
 pub const opcode = vm.opcode;
 pub const bytecode = vm.bytecode;
