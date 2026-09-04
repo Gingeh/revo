@@ -8,15 +8,34 @@ const logger = std.log.scoped(.@"build/revo");
 
 const VERSION = "0.1.1";
 
-const release_targets: []const []const u8 = &.{
-    "aarch64-macos", // good
-    "x86_64-linux-musl", // good
-    "aarch64-linux-musl", // probably good
-    "x86_64-macos", // untested
-    "x86_64-windows", // missing dll loading, isocline and asio
-    "wasm32-freestanding", // good, see `wasm/`
-    // "wasm64-freestanding", // good, see `wasm/`. use wasm32 instead
-    "wasm32-wasi", // good, see `wasm/` (the wasi version is not a cli)
+const ReleaseTarget = struct {
+    triple: []const u8,
+    wasi_cli: bool = false,
+};
+
+const release_targets: []const ReleaseTarget = &.{
+    .{ .triple = "aarch64-macos" }, // good
+    .{ .triple = "x86_64-linux-musl" }, // good
+    .{ .triple = "aarch64-linux-musl" }, // probably good
+    .{ .triple = "x86_64-macos" }, // untested
+    .{ .triple = "x86_64-windows" }, // missing dll loading, isocline and async
+    .{ .triple = "wasm32-freestanding" }, // good, see `wasm/`
+    // .{ .triple = "wasm64-freestanding" }, // good, see `wasm/`. use wasm32 instead
+    .{ .triple = "wasm32-wasi" }, // web build with js host imports
+    .{ .triple = "wasm32-wasi", .wasi_cli = true }, // cli build with wasi syscalls (wasmtime/runnable)
+};
+
+const Features = packed struct {
+    /// ~ requires libc, not available on windows/wasi/freestanding
+    isocline: bool = false,
+    /// ~  available everywhere except freestanding
+    lsp: bool = false,
+    /// ~  available everywhere
+    regex: bool = false,
+    /// ~  available everywhere except freestanding
+    mimalloc: bool = false,
+    zig_backend: bool = false,
+    // ~ async: requires posix threads, not available on windows/wasi/freestanding
 };
 
 const release_target_queries = blk: {
@@ -25,12 +44,12 @@ const release_target_queries = blk: {
     // pre-computes queries
     var arr: [release_targets.len]std.Target.Query = undefined;
     var bad_targets: []const u8 = &.{};
-    for (release_targets, &arr) |in, *out| {
-        out.* = std.Target.Query.parse(.{ .arch_os_abi = in }) catch {
+    for (release_targets, &arr) |target_def, *out| {
+        out.* = std.Target.Query.parse(.{ .arch_os_abi = target_def.triple }) catch {
             if (bad_targets.len >= 1) {
                 bad_targets = bad_targets ++ ", ";
             }
-            bad_targets = bad_targets ++ "\"" ++ in ++ "\"";
+            bad_targets = bad_targets ++ "\"" ++ target_def.triple ++ "\"";
         };
     }
     if (bad_targets.len >= 1) {
@@ -39,14 +58,6 @@ const release_target_queries = blk: {
 
     const c_arr = arr;
     break :blk &c_arr;
-};
-
-const Features = packed struct {
-    isocline: bool = false,
-    lsp: bool = false,
-    regex: bool = false,
-    mimalloc: bool = false,
-    zig_backend: bool = false,
 };
 
 const BinaryType = enum { nightly, release };
@@ -101,15 +112,20 @@ pub fn build(b: *Build) !void {
     // Defaults to 'musl' toolchain for linux system because otherwise the build fails with default settings,
     // but not when enabled 'llvm' and 'lld'. -hamza (Jun 14 2026)
     const with_glibc = builtin.os.tag == .linux and
-        (b.option(bool, "glibc", "Build with llvm and link with glibc") orelse false);
+        (b.option(bool, "glibc", "build with LLVM and link with glibc") orelse false);
+
+    const with_dynamic = b.option(bool, "dynamic", "force dynamic libc linking if available (warns if unsupported)") orelse false;
+    if (with_dynamic and builtin.os.tag != .linux) {
+        logger.warn("-Ddynamic is only meaningful on linux (other platforms already use dynamic libc)", .{});
+    }
+
+    const wasi_cli = b.option(bool, "wasi-cli", "build wasi target as cli (uses wasi syscalls instead of js imports)") orelse false;
+
     const target = if (builtin.os.tag == .linux)
-        b.standardTargetOptions(.{ .default_target = if (with_glibc) .{ .abi = .gnu } else .{ .abi = .musl } })
+        b.standardTargetOptions(.{ .default_target = if (with_glibc or with_dynamic) .{ .abi = .gnu } else .{ .abi = .musl } })
     else
         b.standardTargetOptions(.{});
 
-    // TODO: nan-boxing stores pointer tags in the high bits of a 64-bit value
-    // 32bit builds are unsupported until a good implementation of tagged data is made
-    // (wasm32 is fine: 32-bit pointers fit below the tag region)
     const is_freestanding = target.result.os.tag == .freestanding;
     const is_wasm = target.result.cpu.arch.isWasm();
 
@@ -124,7 +140,15 @@ pub fn build(b: *Build) !void {
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, zig_backend") orelse
         // isocline needs libc and not wasm; wasi gets lsp but not isocline
+        // async is disabled on windows/wasi/freestanding (handled in src/root.zig)
         if (is_freestanding) "" else if (is_wasm) "lsp,regex,mimalloc" else "isocline,lsp,regex,mimalloc";
+
+    // windows missing features: isocline (no libc), async (no posix threads)
+    if (builtin.os.tag == .windows) {
+        if (std.mem.indexOf(u8, features_str, "isocline") != null) {
+            logger.warn("isocline is not available on windows, disabling", .{});
+        }
+    }
 
     const test_filters = b.option(
         []const []const u8,
@@ -212,8 +236,10 @@ pub fn build(b: *Build) !void {
             .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
         } else &.{},
     });
+    // wasi-cli uses main.zig (wasi syscalls), web uses main_wasm.zig (js imports)
+    const is_wasi_cli = wasi_cli and is_wasm;
     const exe_mod = b.createModule(.{
-        .root_source_file = b.path(if (is_wasm) "src/main_wasm.zig" else "src/main.zig"),
+        .root_source_file = b.path(if (is_wasi_cli) "src/main.zig" else if (is_wasm) "src/main_wasm.zig" else "src/main.zig"),
         .target = target,
         .optimize = effective_optimize,
         .link_libc = !is_freestanding,
@@ -293,6 +319,14 @@ pub fn build(b: *Build) !void {
         // the vm dispatch loop's frame alone can exceed the default 1mb size in ReleaseSafe
         wasm_lib.stack_size = 16 * 1024 * 1024;
         const wasm_install = b.addInstallArtifact(wasm_lib, .{});
+        b.getInstallStep().dependOn(&wasm_install.step);
+    } else if (is_wasm) {
+        // wasm builds (wasi-cli) need larger stack for dispatch frame
+        // yes its that big lol my bad
+        const wasm_exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
+        wasm_exe.stack_size = 16 * 1024 * 1024;
+        wasm_exe.rdynamic = true;
+        const wasm_install = b.addInstallArtifact(wasm_exe, .{});
         b.getInstallStep().dependOn(&wasm_install.step);
     } else {
         const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
@@ -403,14 +437,18 @@ pub fn build(b: *Build) !void {
             .dest_dir = .{ .override = .{ .custom = "release" } },
         };
 
-        for (release_targets, release_target_queries) |target_str, query| {
+        for (release_targets, release_target_queries) |target_def, query| {
+            const target_str = target_def.triple;
             const release_target = b.resolveTargetQuery(query);
             const release_is_fs = release_target.result.os.tag == .freestanding;
             const release_is_wasm = release_target.result.cpu.arch.isWasm();
+            const release_is_wasi = release_target.result.os.tag == .wasi;
+            const release_is_wasi_cli = target_def.wasi_cli;
             const release_optimize: std.builtin.OptimizeMode = if (release_is_wasm) .ReleaseSmall else .ReleaseFast;
 
             const release_lsp_enabled = features.lsp and !release_is_fs;
-            const release_isocline_enabled = features.isocline and !release_is_fs;
+            // isocline not available on windows, wasi, or freestanding
+            const release_isocline_enabled = features.isocline and !release_is_fs and !release_is_wasi and builtin.os.tag != .windows;
 
             const rel_options = b.addOptions();
             rel_options.addOption(bool, "is_freestanding", release_is_fs);
@@ -487,8 +525,16 @@ pub fn build(b: *Build) !void {
                 } else &.{},
             });
 
+            // wasi-cli uses main.zig (wasi syscalls), web uses main_wasm.zig (js imports)
+            const release_main_file = if (release_is_wasi_cli)
+                "src/main.zig"
+            else if (release_is_wasm)
+                "src/main_wasm.zig"
+            else
+                "src/main.zig";
+
             const release_mod = b.createModule(.{
-                .root_source_file = b.path(if (release_is_wasm) "src/main_wasm.zig" else "src/main.zig"),
+                .root_source_file = b.path(release_main_file),
                 .target = release_target,
                 .optimize = release_optimize,
                 .link_libc = !release_is_fs,
@@ -509,12 +555,18 @@ pub fn build(b: *Build) !void {
             }
 
             const release_exe = b.addExecutable(.{
-                .name = binName(b, target_str, .nightly),
+                .name = if (release_is_wasi_cli)
+                    binName(b, "wasm32-wasi-cli", .nightly)
+                else
+                    binName(b, target_str, .nightly),
                 .root_module = release_mod,
             });
             if (release_is_fs) {
                 release_exe.entry = .disabled;
                 // same oversized dispatch frame as the dev wasm build
+                release_exe.stack_size = 16 * 1024 * 1024;
+            } else if (release_is_wasm) {
+                // wasm builds need larger stack for dispatch frame
                 release_exe.stack_size = 16 * 1024 * 1024;
             }
             release_exe.rdynamic = true;
