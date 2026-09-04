@@ -46,6 +46,7 @@ pub const iface_groups: []const IfaceGroup = &.{
     .{ .name = "revo", .src = @embedFile("iface/revo.d.rv") },
     .{ .name = "compress", .src = @embedFile("iface/compress.d.rv") },
     .{ .name = "rng", .src = @embedFile("iface/rng.d.rv") },
+    .{ .name = "argparse", .src = @embedFile("iface/argparse.d.rv") },
 };
 
 /// the zig side of one spec: registry key + implementation
@@ -80,6 +81,7 @@ pub const impl_groups: []const ImplGroup = if (regex_on) &.{
     .{ .name = "revo", .impls = @import("revo.zig").impls },
     .{ .name = "compress", .impls = @import("compress.zig").impls },
     .{ .name = "rng", .impls = @import("rng.zig").impls },
+    .{ .name = "argparse", .impls = @import("argparse_std.zig").impls },
 } else &.{
     .{ .name = "root", .impls = @import("root.zig").root_impls },
     .{ .name = "os", .impls = @import("root.zig").os_impls },
@@ -97,6 +99,7 @@ pub const impl_groups: []const ImplGroup = if (regex_on) &.{
     .{ .name = "revo", .impls = @import("revo.zig").impls },
     .{ .name = "compress", .impls = @import("compress.zig").impls },
     .{ .name = "rng", .impls = @import("rng.zig").impls },
+    .{ .name = "argparse", .impls = @import("argparse_std.zig").impls },
 };
 
 /// merged, runtime view of the stdlib surface; built by `loadAllSpecs`

@@ -9,14 +9,14 @@ const logger = std.log.scoped(.@"build/revo");
 const VERSION = "0.1.1";
 
 const release_targets: []const []const u8 = &.{
-    "x86_64-linux-musl",
-    // "aarch64-linux-musl",
-    // "x86_64-macos",
-    "aarch64-macos",
-    "x86_64-windows",
-    "wasm32-freestanding",
-    "wasm32-wasi",
-    "wasm64-freestanding",
+    "aarch64-macos", // good
+    "x86_64-linux-musl", // good
+    "aarch64-linux-musl", // probably good
+    "x86_64-macos", // untested
+    "x86_64-windows", // missing dll loading, isocline and asio
+    "wasm32-freestanding", // good, see `wasm/`
+    // "wasm64-freestanding", // good, see `wasm/`. use wasm32 instead
+    "wasm32-wasi", // good, see `wasm/` (the wasi version is not a cli)
 };
 
 const release_target_queries = blk: {

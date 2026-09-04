@@ -9,7 +9,7 @@ const Artifact = revo.lang.Artifact;
 const VM = revo.VM;
 const pretty = revo.pretty;
 
-const ap = @import("argparse.zig");
+const ap = revo.argparse;
 const repl = @import("repl.zig");
 
 const SYNOPSIS =

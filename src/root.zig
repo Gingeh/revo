@@ -418,3 +418,4 @@ pub const pretty = @import("./pretty.zig");
 pub const async_backend = @import("./runtime/async_backend.zig");
 pub const std_net = @import("./std/net.zig");
 pub const std_lib = @import("./std/root.zig");
+pub const argparse = @import("./argparse.zig");

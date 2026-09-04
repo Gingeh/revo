@@ -72,6 +72,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `revo.dofile(path)` -- do file & return; resole path like `import`
   - `csv.decode`, `csv.encode`
   - trig functions and sign in `math`
+  - `argparse.parse`, `argparse.usage`: [docs & example](https://github.com/if-not-nil/revo/blob/main/examples/builtins/iter.rv)
+
+      ```ruby
+        const result = argparse.parse(fn(p) do
+          p:flag(:verbose, { short = "v", description = "enable verbose output" })
+          p:option(:output, { short = "o", description = "output file" })
+          p:command(:compile, { description = "compile a file" })
+          p:positional(:script, { description = "input script" })
+        end, argv)
+
+        if result.err do
+          print("error:", result.err)
+        end else do
+          print("flags:", result.flags)
+          print("commands:", result.commands)
+          print("positionals:", result.positionals)
+          print("leftover:", result.leftover)
+          print("")
+          print(argparse.usage(result))
+        end
+      ```
+
 - default arguments
 
     ```ruby

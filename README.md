@@ -105,9 +105,9 @@ revo
 
 you can extend revo in (essentially) any language or embed it from any language
 
-there are two apis:
-- zig: [loadable extensions](./examples/foreign/zig), [embeddable revo](./examples/foreign/zig-embed)
-- c: [loadable extensions](./examples/foreign/c), [embeddable revo](./examples/foreign/c-embed)
+there are two APIs for two ABIs:
+- zig: [loadable extensions](https://github.com/if-not-nil/revo/tree/main/examples/foreign/zig) | todo: embedding
+- c: [loadable extensions](https://github.com/if-not-nil/revo/tree/main/examples/foreign/c) | todo: embedding
 
 ### credits
 
