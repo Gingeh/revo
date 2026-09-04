@@ -21,3 +21,9 @@ pub declare __internal_dotest = fn(name: string, body: function) -> :ok
 #* internal, pls dont use. runs a test suite *#
 pub declare __internal_dosuite = fn(name: string, body: function) -> :ok
 
+#* returns value of environment variable, or nil if not set *#
+pub declare getenv = fn(name: string) -> string?
+
+#* sets an environment variable, returns :ok *#
+pub declare setenv = fn(name: string, value: string) -> :ok
+

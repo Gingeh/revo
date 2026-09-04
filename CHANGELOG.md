@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `exit(number)`
   - `revo.dofile(path)` -- do file & return; resole path like `import`
   - `csv.decode`, `csv.encode`
+  - `os.getenv`, `os.setenv`
   - trig functions and sign in `math`
   - `argparse.parse`, `argparse.usage`: [docs & example](https://github.com/if-not-nil/revo/blob/main/examples/builtins/iter.rv)
 

@@ -42,6 +42,8 @@ pub const os_impls: []const api.Impl = &.{
     .{ .name = "import", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, import) },
     .{ .name = "__internal_dotest", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dotest) },
     .{ .name = "__internal_dosuite", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dosuite) },
+    .{ .name = "getenv", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, getenv_) },
+    .{ .name = "setenv", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .string }) else define(&[_]TypeSpec{ .string, .string }, setenv_) },
 };
 
 pub fn register_stdlib(vm: *revo.VM) !void {
@@ -797,6 +799,51 @@ pub fn exit(args: []const Data, vm: *VM) noreturn {
     const status: u8 = numToInt(u8, n) orelse 255;
     std.process.exit(status);
 }
+
+pub fn getenv_(args: []const Data, vm: *VM) !HostResult {
+    const name = args[0].asString() orelse return .{ .err = .{ .type_error = .{
+        .arg = 0,
+        .expected = "string",
+        .got = typeof(args[0], vm),
+    } } };
+
+    const name_s = vm.stringValue(name);
+    const name_z = try vm.runtime.alloc.dupeSentinel(u8, name_s, 0);
+    defer vm.runtime.alloc.free(name_z);
+    // really dont feel like threading environ_map down from main, sorry
+    if (std.c.getenv(name_z)) |val| {
+        const slice = std.mem.span(val);
+        return .{ .ok = try vm.ownDataString(slice) };
+    }
+    return .{ .ok = Data.new.nil() };
+}
+
+pub fn setenv_(args: []const Data, vm: *VM) !HostResult {
+    const name = args[0].asString() orelse return .{ .err = .{ .type_error = .{
+        .arg = 0,
+        .expected = "string",
+        .got = typeof(args[0], vm),
+    } } };
+    const value = args[1].asString() orelse return .{ .err = .{ .type_error = .{
+        .arg = 1,
+        .expected = "string",
+        .got = typeof(args[1], vm),
+    } } };
+
+    const name_s = vm.stringValue(name);
+    const value_s = vm.stringValue(value);
+    const name_z = try vm.runtime.alloc.dupeSentinel(u8, name_s, 0);
+    defer vm.runtime.alloc.free(name_z);
+    const value_z = try vm.runtime.alloc.dupeSentinel(u8, value_s, 0);
+    defer vm.runtime.alloc.free(value_z);
+
+    // really dont feel like threading environ_map down from main, sorry
+    _ = libc_setenv(name_z.ptr, value_z.ptr, 1);
+    return .{ .ok = Data.new.core(.ok) };
+}
+
+extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+const libc_setenv = setenv;
 
 pub fn import(args: []const Data, vm: *VM) !HostResult {
     if (args.len != 1) return .{ .err = .{ .wrong_arity = .{ .got = args.len, .expected = 1 } } };
