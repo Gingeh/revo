@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-05
+
+big release - many misc bugs are fixed but not noted
+
 ### Added
 
 - any function is a module
@@ -44,28 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     const pi = 3.14
     ```
 
-    ```bash
-    ~/projects/revo λ revo doc ./hi.rv
-    globals
 
-      S
-        (value)
-        this is a struct
+<img width="1018" height="925" alt="image" src="https://github.com/user-attachments/assets/69b74a23-c98e-4f4d-9b10-25c05631921c" />
 
-        - x: num
-          holds a number
-
-      pi
-        (value)
-        2 digits of precision
-        ```
-
-    - multiline module docs via `#! !#`
-
-        ```ruby
-        #! module does this and that !#
-        ...
-    ```
 
 - stdlib:
   - `exit(number)`
@@ -98,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - default arguments
 
     ```ruby
-        # vvvvv here
+       # vvvvv here
     fn f(a = 2, ?b) do
       (a, b)
     end; hi()
@@ -146,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- dunder methods now looked up through the normal order
 - `table.remove(t, key)` -- now works with both indices (array part) and keys (hash part)
 - **Breaking:** doc-comments are `#* ... *#` now, comments attach to any declaration and are stored in types, hover follows aliases, repl `:h` renders exactly what hover renders
 - **Breaking:** cli is now subcommand-based: `compile`, `repl`, `dis`, `bench`, `docs`, `lsp`. options must come before the script name, everything after goes to runtime argv. the old flags like `-b` and `--dis` are gone in favor of their subcommands
@@ -156,6 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Native` renamed to `Host` throughout the codebase
 - lsp: fn return type hints, nested document symbols, parameter hover and param types in hover signatures
 - semantic: top-level re-declarations shadow the module surface while fn-local bindings no longer leak into it; table methods written as `fn name(self)` inside a table literal get typed
+- ...much more
 
 ### Fixed
 
@@ -166,6 +153,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - lsp signature help deep-copies parsed types so shared comptime sentinels can't dangle
 - vm: table printing now consistent for `%v` `%?` `%p`; atom keys without `:`, ` = ` separator, multiline for debug/pretty when 2+ hash entries, pretty grouped array line, colored braces for empty
 - vm: string escapes `\b` `\f` `\v` `\0` `\xXX` now rendered for non-printable bytes
+- ...much more
+
+## new contributors
+* [gh:hachem-wtf](https://github.com/hachem-wtf) in https://github.com/if-not-nil/revo/pull/45
+* [gh:Gingeh](https://github.com/Gingeh) in https://github.com/if-not-nil/revo/pull/47
+* [cb:cstk](https://codeberg.org/cstk) in https://codeberg.org/lung/revo/pulls/19
+
+**full changelog**: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
+
+> binaries are statically linked with musl when possible (this is why their sizes can reach >4mb). compile with `zig build -Doptimize=ReleaseSafe -Ddynamic` if you need a dynamically linked binary
 
 ## [0.1.1] - 2026-08-10
 
@@ -197,6 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - new std module: `compress`
 - compiler return type propagation
 
-[Unreleased]: https://github.com/if-not-nil/revo/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/if-not-nil/revo/compare/0.1.2...HEAD
+[0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.0a...0.1.1
 [0.1.0a]: https://github.com/if-not-nil/revo/releases/tag/0.1.0a

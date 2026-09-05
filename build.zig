@@ -6,7 +6,7 @@ const Build = std.Build;
 const Module = Build.Module;
 const logger = std.log.scoped(.@"build/revo");
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 const ReleaseTarget = struct {
     triple: []const u8,
@@ -23,6 +23,11 @@ const release_targets: []const ReleaseTarget = &.{
     // .{ .triple = "wasm64-freestanding" }, // good, see `wasm/`. use wasm32 instead
     .{ .triple = "wasm32-wasi" }, // web build with js host imports
     .{ .triple = "wasm32-wasi", .wasi_cli = true }, // cli build with wasi syscalls (wasmtime/runnable)
+
+    // entirely untested:
+    .{ .triple = "x86_64-freebsd-none" }, // probably good
+    .{ .triple = "x86_64-openbsd-none" }, // probably good
+    // nobody runs netbsd anymore
 };
 
 const Features = packed struct {
@@ -444,7 +449,7 @@ pub fn build(b: *Build) !void {
             const release_is_wasm = release_target.result.cpu.arch.isWasm();
             const release_is_wasi = release_target.result.os.tag == .wasi;
             const release_is_wasi_cli = target_def.wasi_cli;
-            const release_optimize: std.builtin.OptimizeMode = if (release_is_wasm) .ReleaseSmall else .ReleaseFast;
+            const release_optimize: std.builtin.OptimizeMode = if (release_is_wasm) .ReleaseSmall else .ReleaseSafe;
 
             const release_lsp_enabled = features.lsp and !release_is_fs;
             // isocline not available on windows, wasi, or freestanding
@@ -556,9 +561,9 @@ pub fn build(b: *Build) !void {
 
             const release_exe = b.addExecutable(.{
                 .name = if (release_is_wasi_cli)
-                    binName(b, "wasm32-wasi-cli", .nightly)
+                    binName(b, "wasm32-wasi-cli", .release)
                 else
-                    binName(b, target_str, .nightly),
+                    binName(b, target_str, .release),
                 .root_module = release_mod,
             });
             if (release_is_fs) {
