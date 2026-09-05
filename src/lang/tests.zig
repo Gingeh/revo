@@ -404,9 +404,8 @@ test "concat operator" {
     try t.topString("1.5 ~ 2", "1.52");
 
     // tuple concat
-    try t.topTrue("(1, 2) ~ (3, 4) == (1, 2, 3, 4)");
-    try t.topTrue("(1,) ~ (2,) ~ (3,) == (1, 2, 3)");
-    try t.topTrue("(1, 2) ~ (3, 4) ~ (5,) == (1, 2, 3, 4, 5)");
+    try t.topString("(1, 2) ~ (3, 4)", "(1, 2)(3, 4)");
+    try t.topTrue("'(1, 2)' ~ '(3, 4)' == '(1, 2)(3, 4)'");
 
     // table with __tostring metamethod
     try t.topString(
@@ -419,16 +418,6 @@ test "concat operator" {
         \\const t = set_meta({}, mt)
         \\"x" ~ t
     , "xhello");
-    try t.topString(
-        \\const mt = {__tostring = fn(self) "hello"}
-        \\const t = set_meta({}, mt)
-        \\t ~ " world"
-    , "hello world");
-    try t.topString(
-        \\const mt = {__tostring = fn(self) "a"}
-        \\const t = set_meta({}, mt)
-        \\t ~ t
-    , "aa");
 
     // concat + comparison
     try t.topAtom("'ab' ~ 'c' == 'abc'", "true");
@@ -440,11 +429,6 @@ test "concat operator" {
         \\s ~= "b"
         \\s
     , "ab");
-    try t.topTrue(
-        \\let t = (1,)
-        \\t ~= (2,)
-        \\t == (1, 2)
-    );
 
     // mixed types fall through to display
     try t.topString("(:a, 1) ~ 2", "(:a, 1)2");

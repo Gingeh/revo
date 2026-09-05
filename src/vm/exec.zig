@@ -1235,17 +1235,6 @@ noinline fn execConcat(
         return null;
     };
 
-    // tuple + tuple fast path
-    if (lhs.asTuple()) |lt| if (rhs.asTuple()) |rt| {
-        const l_tuple = try self.tuples.get(lt);
-        const r_tuple = try self.tuples.get(rt);
-        self.noteGCPressure(l_tuple.items.len * @sizeOf(Data) + r_tuple.items.len * @sizeOf(Data));
-        const combined = try std.mem.concat(alloc, Data, &.{ l_tuple.items, r_tuple.items });
-        defer alloc.free(combined);
-        regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(combined)));
-        return null;
-    };
-
     // number + number fast path
     if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
         const combined = try std.fmt.allocPrint(alloc, "{d}{d}", .{ ln, rn });

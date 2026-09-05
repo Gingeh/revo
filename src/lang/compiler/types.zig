@@ -384,15 +384,11 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
-        .@"union", .concat => .{ .tag = .any },
-        .add, .sub, .mul, .div, .mod, .pow => blk: {
-            if (l.tag == .number and r.tag == .number) break :blk .{ .tag = .number };
-            break :blk .{ .tag = .any };
-        },
-        .int_div => blk: {
-            if (l.tag == .number and r.tag == .number) break :blk .{ .tag = .number };
-            break :blk .{ .tag = .any };
-        },
+        .@"union" => .{ .tag = .any },
+        .concat => .{ .tag = .string },
+        .add, .sub, .div, .mod, .pow => if (l.tag == .number and r.tag == .number) .{ .tag = .number } else .{ .tag = .any },
+        .mul => if (l.tag == .number and r.tag == .number) .{ .tag = .number } else .{ .tag = .any },
+        .int_div => if (l.tag == .number and r.tag == .number) .{ .tag = .number } else .{ .tag = .any },
         .band, .bor, .bxor, .shl, .shr => if (l.tag == .number and r.tag == .number) .{ .tag = .number } else .{ .tag = .any },
         .eq, .neq, .lt, .gt, .lte, .gte => .{ .tag = .bool },
     };

@@ -272,7 +272,6 @@ test "string metatable" {
     try testing.topString("string(\"asdf\")", "asdf");
     try testing.topString("\"asdf\"[2]", "d");
     try testing.topString("\"asdf\" ~ \"qwer\"", "asdfqwer");
-    try testing.topString("\"ab\" * 3", "ababab");
 }
 
 /// > string:contains?(substr: string) -> bool

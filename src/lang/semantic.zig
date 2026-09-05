@@ -629,14 +629,37 @@ const SemanticChecker = struct {
             .binary => |b| blk: {
                 const l = try self.analyzeNode(b.left);
                 const r = try self.analyzeNode(b.right);
-                if (b.op == .add or b.op == .sub or b.op == .div or b.op == .mod or b.op == .pow) {
-                    if (l.tag == .number and r.tag == .string or l.tag == .string and r.tag == .number) {
-                        try self.appendError(
-                            try std.fmt.allocPrint(self.alloc, "cannot {s} {s} and {s}", .{ @tagName(b.op), try l.formatType(self.alloc), try r.formatType(self.alloc) }),
-                            node.span,
-                            "invalid operands",
-                        );
-                    }
+                switch (b.op) {
+                    .add, .sub, .div, .int_div, .mod, .pow => {
+                        if ((l.tag == .number and r.tag == .string) or (l.tag == .string and r.tag == .number)) {
+                            try self.appendError(
+                                try std.fmt.allocPrint(self.alloc, "cannot {s} {s} and {s}", .{ @tagName(b.op), try l.formatType(self.alloc), try r.formatType(self.alloc) }),
+                                node.span,
+                                "invalid operands",
+                            );
+                        }
+                    },
+                    .mul => {
+                        if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                            try self.appendError(
+                                try std.fmt.allocPrint(self.alloc, "cannot multiply {s} and {s}", .{ try l.formatType(self.alloc), try r.formatType(self.alloc) }),
+                                node.span,
+                                "invalid operands",
+                            );
+                        }
+                    },
+                    .concat => {},
+                    .band, .bor, .bxor, .shl, .shr => {
+                        if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                            try self.appendError(
+                                try std.fmt.allocPrint(self.alloc, "cannot apply {s} to {s} and {s}", .{ @tagName(b.op), try l.formatType(self.alloc), try r.formatType(self.alloc) }),
+                                node.span,
+                                "invalid operands",
+                            );
+                        }
+                    },
+                    .eq, .neq, .lt, .gt, .lte, .gte => {},
+                    .@"union" => unreachable,
                 }
                 break :blk types_mod.inferExprType(self, node);
             },

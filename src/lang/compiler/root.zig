@@ -679,7 +679,7 @@ pub const Compiler = struct {
                 const left_type = type_check.inferExprType(self, b.left);
                 const right_type = type_check.inferExprType(self, b.right);
 
-                const both_numeric = left_type.tag == .number and right_type.tag == .number;
+                const both_numeric = b.op != .concat and left_type.tag == .number and right_type.tag == .number;
 
                 const specialized_op: Opcode = if (both_numeric)
                     switch (b.op) {
@@ -695,14 +695,13 @@ pub const Compiler = struct {
                         .bxor => .bxor,
                         .shl => .shl,
                         .shr => .shr,
-                        .concat => .concat,
                         .eq => .eq_int,
                         .neq => .neq_int,
                         .lt => .lt_int,
                         .gt => .gt_int,
                         .lte => .lte_int,
                         .gte => .gte_int,
-                        .@"union" => unreachable,
+                        .concat, .@"union" => unreachable,
                     }
                 else switch (b.op) {
                     .@"union" => unreachable,
