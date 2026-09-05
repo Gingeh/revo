@@ -26,6 +26,9 @@ pub declare table.insert = fn(self: table, pos: num, value: any) -> :ok
 #* inserts elements as last *#
 pub declare table.push = fn(self: table, values: any...) -> table
 
+#* removes and returns the last array element, or :nil if empty *#
+pub declare table.pop = fn(self: table) -> any | :nil
+
 #* removes element at position or key, returns removed value *#
 pub declare table.remove = fn(self: table, key: any) -> any
 
@@ -82,4 +85,3 @@ pub declare table.len = fn(self: table) -> num
 
 #* merges two tables (union) *#
 pub declare table.add = fn(self: table, other: table) -> table
-
