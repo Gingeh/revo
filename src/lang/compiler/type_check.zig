@@ -126,9 +126,12 @@ pub fn inferCallReturnType(
     if (callee_type == .function) {
         const fn_sig = callee_type.function;
         const ret = fn_sig.return_type;
+
         if (fn_sig.type_params.len > 0 and ret != .any)
             return genericSubstReturnType(self, fn_sig.type_params, type_args, args, fn_sig.params, ret);
         if (ret != .any) return ret;
+        if (callee.expr == .fn_expr and callee.expr.fn_expr.return_type == null)
+            return inferExprType(self, callee.expr.fn_expr.body);
     }
 
     if (callee.expr == .ident) {

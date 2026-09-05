@@ -864,7 +864,7 @@ const SemanticChecker = struct {
                     .name = field.name,
                     .type_name = if (field.type_name) |tn| switch (tn.kind) {
                         .named => |n| n,
-                        else => types_mod.typeName(field_type),
+                        else => try types_mod.typeName(field_type, self.alloc),
                     } else null,
                     .field_type = field_type,
                 });

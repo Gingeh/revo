@@ -481,7 +481,7 @@ pub fn compileStruct(
                     .field_type = field_type,
                     .type_name = if (item.field.type_name) |tn| switch (tn.kind) {
                         .named => |n| n,
-                        else => types_mod.typeName(field_type),
+                        else => try types_mod.typeName(field_type, self.alloc),
                     } else null,
                     .default_val = if (item.field.default_value) |dv|
                         evalConstNode(self, dv)

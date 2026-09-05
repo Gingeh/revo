@@ -137,7 +137,7 @@ pub const TypeInfo = union(enum) {
                 try buf.appendSlice(alloc, ret);
                 break :blk try buf.toOwnedSlice(alloc);
             },
-            else => try alloc.dupe(u8, typeName(self)),
+            else => try typeName(self, alloc),
         };
     }
 };
@@ -177,12 +177,21 @@ const ANY_TI: TypeInfo = .{ .any = {} };
 /// sentinel for a generic table (no key/value constraints)
 pub const TABLE_GENERIC: TypeInfo = .{ .table = .{ .key = null, .value = &ANY_TI } };
 
-pub fn typeName(T: TypeInfo) []const u8 {
+pub fn typeName(T: TypeInfo, alloc: std.mem.Allocator) ![]const u8 {
     return switch (T) {
-        .atom => |s| if (s.len == 0) "atom" else s,
-        .struct_type, .type_var => |s| s,
-        .table => "table",
-        else => @tagName(T),
+        .atom => |s| if (s.len == 0)
+            try alloc.dupe(u8, "atom")
+        else if (s[0] == ':')
+            try alloc.dupe(u8, s)
+        else blk: {
+            var buf = try alloc.alloc(u8, s.len + 1);
+            buf[0] = ':';
+            @memcpy(buf[1..], s);
+            break :blk buf;
+        },
+        .struct_type, .type_var => |s| try alloc.dupe(u8, s),
+        .table => try alloc.dupe(u8, "table"),
+        else => try alloc.dupe(u8, @tagName(T)),
     };
 }
 

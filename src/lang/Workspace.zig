@@ -1901,6 +1901,19 @@ const IdentCollector = struct {
     text: []const u8,
 
     pub fn visit(self: *@This(), node: *const lang.Node) void {
+        if (node.expr == .fn_expr) {
+            for (node.expr.fn_expr.params) |p| {
+                if (std.mem.eql(u8, p.name, self.name)) {
+                    const start = offsetToPosition(self.text, p.name_span.start);
+                    const end = offsetToPosition(self.text, p.name_span.end);
+                    self.out.append(self.alloc, .{
+                        .file_id = self.file_id,
+                        .name = self.snap_name,
+                        .range = .{ .start = start, .end = end },
+                    }) catch {};
+                }
+            }
+        }
         if (node.expr == .ident) {
             if (std.mem.eql(u8, node.expr.ident, self.name)) {
                 const start = offsetToPosition(self.text, node.span.start);
