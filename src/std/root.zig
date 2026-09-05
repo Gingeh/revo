@@ -49,21 +49,29 @@ pub const os_impls: []const api.Impl = &.{
 
 pub fn register_stdlib(vm: *revo.VM) !void {
     vm.loaded_specs = try api.loadAllSpecs(vm.runtime.alloc);
+
+    const argv_atom = try vm.internAtom("argv");
+    const all = api.full_specs;
+    try api.registerAll(vm, all, mtPrototype);
+    try attachMathPi(vm);
+    try typeUtils(vm);
+
     const argv_id = try vm.tables.create();
+    const argv_val = Data.new.table(argv_id);
+    try vm.globals.put(argv_atom, argv_val);
+    try vm.stdlib_globals.put(argv_atom, argv_val);
+}
+
+/// argv has to be populated after compilation
+/// get rid of this one at some point
+pub fn populateArgv(vm: *revo.VM) !void {
+    const argv_atom = try vm.internAtom("argv");
+    const argv_val = vm.globals.get(argv_atom) orelse return;
+    const argv_id = argv_val.asTable() orelse return;
     const argv = try vm.tables.get(argv_id);
     for (vm.runtime.argv) |arg| {
         try argv.push(try vm.ownDataString(arg));
     }
-    const argv_val = Data.new.table(argv_id);
-    try vm.globals.put(try vm.internAtom("argv"), argv_val);
-    try vm.stdlib_globals.put(try vm.internAtom("argv"), argv_val);
-
-    const all = api.full_specs;
-
-    try api.registerAll(vm, all, mtPrototype);
-
-    try attachMathPi(vm);
-    try typeUtils(vm);
 }
 
 fn attachMathPi(vm: *revo.VM) !void {

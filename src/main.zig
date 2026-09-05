@@ -132,11 +132,13 @@ fn runMain(init: std.process.Init) !void {
         if (source) |s| {
             var vm = try initVM(init, init.gpa, &.{args[0]});
             defer vm.deinit();
+            try revo.std_lib.populateArgv(&vm);
             try runSource(init, init.gpa, "<stdin>", s, .{});
             return;
         }
         var vm = try initVM(init, init.gpa, &.{args[0]});
         defer vm.deinit();
+        try revo.std_lib.populateArgv(&vm);
         try repl.run(&vm, init.gpa, init);
         return;
     }
@@ -147,6 +149,7 @@ fn runMain(init: std.process.Init) !void {
     if (config.mode == .repl) {
         var vm = try initVM(init, init.gpa, config.argv);
         defer vm.deinit();
+        try revo.std_lib.populateArgv(&vm);
         return try repl.run(&vm, init.gpa, init);
     }
     if (config.mode == .lsp) {
@@ -212,6 +215,7 @@ fn runMain(init: std.process.Init) !void {
 
     var vm = try initVM(init, init.gpa, config.argv);
     defer vm.deinit();
+    try revo.std_lib.populateArgv(&vm);
     try repl.run(&vm, init.gpa, init);
 }
 
@@ -464,6 +468,7 @@ fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, confi
     defer gpa.free(artifact.instructions);
     defer gpa.free(artifact.spans);
 
+    try revo.std_lib.populateArgv(&vm);
     try runCompiledArtifact(init, gpa, &vm, "<inline>", artifact, code, config.echo_last);
 }
 
@@ -483,6 +488,7 @@ fn runSource(
 
     try vm.setProgramDebugInfo(artifact.spans, source, path);
 
+    try revo.std_lib.populateArgv(&vm);
     try runCompiledArtifact(init, gpa, &vm, path, artifact, source, config.echo_last);
 }
 
@@ -506,6 +512,7 @@ fn runBytecode(
         std.debug.print("debug info error - {}\n", .{err});
     };
 
+    try revo.std_lib.populateArgv(&vm);
     try runCompiledArtifact(
         init,
         gpa,
@@ -570,6 +577,7 @@ fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source:
         std.debug.print("debug info error - {}\n", .{err});
     };
 
+    try revo.std_lib.populateArgv(&vm);
     try benchArtifact(init, gpa, &vm, path, artifact, source, config.bench_iters, config.echo_last);
 }
 
@@ -593,6 +601,7 @@ fn benchBytecode(
         std.debug.print("debug info error - {}\n", .{err});
     };
 
+    try revo.std_lib.populateArgv(&vm);
     try benchArtifact(
         init,
         gpa,
