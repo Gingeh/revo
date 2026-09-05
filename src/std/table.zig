@@ -6,6 +6,7 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "unwrap", .f = root.define(&.{.table}, @"try") },
     .{ .name = "insert", .f = root.define(&.{ .table, .number, .any }, insert) },
     .{ .name = "push", .f = root.defineVariadic(&.{.table}, push) },
+    .{ .name = "pop", .f = root.define(&.{.table}, pop) },
     .{ .name = "remove", .f = root.define(&.{ .table, .any }, remove) },
     .{ .name = "join", .f = root.define(&.{ .table, .string }, join) },
     .{ .name = "keys", .f = root.define(&.{.table}, keys) },
@@ -101,6 +102,19 @@ fn push(args: []const Data, vm: *VM) !HostResult {
     try table.array.appendSlice(vm.runtime.alloc, args[1..]);
 
     return .okData(Data.new.table(table_id));
+}
+
+/// > table:pop() -> any | :nil
+/// removes and returns the last array element, or :nil if empty
+fn pop(args: []const Data, vm: *VM) !HostResult {
+    if (args.len != 1) return .errArity(args.len, 1);
+    const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
+
+    if (table.array.items.len == 0) return .okData(Data.new.nil());
+
+    const removed = table.array.orderedRemove(table.array.items.len - 1);
+    return .okData(removed);
 }
 
 /// > table:join(delim: string) -> string
@@ -468,6 +482,8 @@ test "table methods" {
     try testing.topFalse("{1, 2, 3}:contains?(5)");
     try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
     try testing.topNumber("iter.sum({1, 2, 3})", 6);
+    try testing.topNumber("{1, 2, 3}:pop()", 3);
+    try testing.topNumber("let a = {1, 2, 3}; a:pop(); a:len()", 2);
 }
 
 test "contains? and index_of compare string content, not ids" {
