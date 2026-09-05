@@ -9,14 +9,17 @@ pub const impls: []const api.Impl = &.{
 fn len(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const t = try vm.tuples.get(id);
+
     return .{ .ok = Data.new.num(t.items.len) };
 }
 
 fn index(args: []const Data, vm: *VM) !HostResult {
     const id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const n = args[1].asNum() orelse return .okData(revo.Data.new.core(.undef));
+
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
+
     if (idx >= t.items.len) return .okData(revo.Data.new.core(.missing));
     return .okData(t.items[idx]);
 }
@@ -24,10 +27,13 @@ fn index(args: []const Data, vm: *VM) !HostResult {
 fn add(args: []const Data, vm: *VM) !HostResult {
     const left_id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const right_id = args[1].asTuple() orelse return .errType(1, "tuple", root.typeof(args[1], vm));
+
     const left = try vm.tuples.get(left_id);
     const right = try vm.tuples.get(right_id);
+
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, left.items.len + right.items.len);
     defer items.deinit(vm.runtime.alloc);
+
     try items.appendSlice(vm.runtime.alloc, left.items);
     try items.appendSlice(vm.runtime.alloc, right.items);
     return .okData(Data.new.tuple(try vm.tuples.create(items.items)));
@@ -37,9 +43,12 @@ fn mul(args: []const Data, vm: *VM) !HostResult {
     const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", root.typeof(args[0], vm));
     const n = args[1].asNum() orelse return .errType(1, "num", root.typeof(args[1], vm));
     const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer num", root.typeof(args[1], vm));
-    if (times < 0) return .errType(1, "non-negative num", "negative num");
+
+    if (times < 0)
+        return .errType(1, "non-negative num", "negative num");
     const tuple = try vm.tuples.get(tuple_id);
     var items = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, tuple.items.len * @as(usize, @intCast(times)));
+
     defer items.deinit(vm.runtime.alloc);
     for (0..@as(usize, @intCast(times))) |_| {
         try items.appendSlice(vm.runtime.alloc, tuple.items);

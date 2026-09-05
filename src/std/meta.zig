@@ -10,17 +10,17 @@ pub fn set_debug(args: []const Data, vm: *VM) !HostResult {
 }
 
 // get metatable
-pub fn get_metatable_(args: []const Data, vm: *VM) !HostResult {
+pub fn get_meta(args: []const Data, vm: *VM) !HostResult {
     const mt = try vm.getMetatableId(args[0]);
     return if (mt) |id| .{ .ok = Data.new.table(id) } else .{ .ok = revo.Data.new.core(.undef) };
 }
 
-/// > set_metatable(tbl: table, meta: table) -> table
+/// > set_meta(tbl: table, meta: table) -> table
 /// returns table with the mt set
 ///     t = {}
 ///     mt = {get_val = fn() 42}
-///     set_metatable(t, mt)
-pub fn set_metatable_(args: []const Data, vm: *VM) !HostResult {
+///     set_meta(t, mt)
+pub fn set_meta(args: []const Data, vm: *VM) !HostResult {
     const mt = if (args[1].asAtom()) |a|
         if (a == revo.core_atoms.atomId(.nil)) null else return .errType(1, "nil atom or table", "atom")
     else if (args[1].asTable()) |id|

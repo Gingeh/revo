@@ -795,7 +795,7 @@ test "putRaw: integer key > len in empty table goes to hash" {
 test "table lookup order" {
     try testing.topString(
         \\ const mt = {metafield = "second-", __index = fn(self) "last"}
-        \\ const t = set_metatable({normal = "first-"}, mt)
+        \\ const t = set_meta({normal = "first-"}, mt)
         \\ t.normal ~ t.metafield ~ t.something
     , "first-second-last");
 }
@@ -849,7 +849,7 @@ test "tuple keys match by content" {
 test "metatable __tostring works on tables" {
     try testing.topString(
         \\ const mt = {__tostring = fn(self) "custom"}
-        \\ const t = set_metatable({a = 1}, mt)
+        \\ const t = set_meta({a = 1}, mt)
         \\ string(t)
     , "custom");
 }
@@ -857,7 +857,7 @@ test "metatable __tostring works on tables" {
 test "metatable __index for field access" {
     try testing.topNumber(
         \\ const mt = {__index = fn(self, key) 42}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.missing_field
     , 42);
 }
@@ -865,7 +865,7 @@ test "metatable __index for field access" {
 test "metatable __newindex for field assignment" {
     try testing.topNumber(
         \\ const mt = {__newindex = fn(self, key, value) table.rawset(self, key, 99)}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.x = 5
         \\ t.x
     , 99);
@@ -874,17 +874,17 @@ test "metatable __newindex for field assignment" {
 test "multiple tables can share same metatable" {
     try testing.topTrue(
         \\ const mt = {get_val = fn(self) 77}
-        \\ const t1 = set_metatable({}, mt)
-        \\ const t2 = set_metatable({x = 1}, mt)
+        \\ const t1 = set_meta({}, mt)
+        \\ const t2 = set_meta({x = 1}, mt)
         \\ t1:get_val() == 77 and t2:get_val() == 77
     );
 }
 
-test "get_metatable retrieves correct metatable" {
+test "get_meta retrieves correct metatable" {
     try testing.topTrue(
         \\ const mt = {get_val = fn(self) 50}
-        \\ const t = set_metatable({}, mt)
-        \\ const retrieved_mt = get_metatable(t)
+        \\ const t = set_meta({}, mt)
+        \\ const retrieved_mt = get_meta(t)
         \\ retrieved_mt == mt
     );
 }
@@ -892,7 +892,7 @@ test "get_metatable retrieves correct metatable" {
 test "metatable on metatable works" {
     try testing.topNumber(
         \\ const mt = {get_val = fn(self) 9}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t:get_val()
     , 9);
 }
@@ -900,7 +900,7 @@ test "metatable on metatable works" {
 test "metamethod failures are runtime errors" {
     try testing.expectRuntimeFailureWithMessage(
         \\ const mt = {__tostring = fn(self) panic("boom")}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ string(t)
     , .Panic, "boom");
 }
@@ -908,7 +908,7 @@ test "metamethod failures are runtime errors" {
 test "method calls on metatable tables work" {
     try testing.topNumber(
         \\ const mt = {get_x = fn(self) self.x}
-        \\ const t = set_metatable({x = 12}, mt)
+        \\ const t = set_meta({x = 12}, mt)
         \\ t:get_x()
     , 12);
 }
@@ -916,7 +916,7 @@ test "method calls on metatable tables work" {
 test "non-table values can use metatable fields as methods" {
     try testing.topString(
         \\ const mt = {reverse = fn(self) "fdsa"}
-        \\ set_metatable("", mt)
+        \\ set_meta("", mt)
         \\ "asdf":reverse()
     , "fdsa");
 }

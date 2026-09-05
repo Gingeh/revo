@@ -557,7 +557,7 @@ test "repl parked metamethod resumes with correct result" {
     try std.testing.expect(try env.session.step(&env.out.writer,
         \\ const ch = chan()
         \\ spawn fn() send(ch, 42)
-        \\ const t = set_metatable({}, { __index = fn(_self, k) recv(ch) })
+        \\ const t = set_meta({}, { __index = fn(_self, k) recv(ch) })
         \\ t.foo
     ));
 

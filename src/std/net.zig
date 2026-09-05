@@ -348,7 +348,7 @@ pub fn wrapSocket(vm: *VM, entry_ptr: *SocketEntry, is_server: bool) !Data {
     try mt.putRawAtom(revo.core_atoms.__index.atomId(), socket_module_data, vm);
 
     const mt_array = [_]Data{ Data.new.table(sock_table), Data.new.table(metatable) };
-    const set_result = try meta.set_metatable_(&mt_array, vm);
+    const set_result = try meta.set_meta(&mt_array, vm);
     if (set_result != .ok) return error.SetMetatableFailed;
 
     // socket handles own an os resource, keep the finalizer attached to the

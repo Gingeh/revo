@@ -1,8 +1,8 @@
 pub const impls: []const api.Impl = &.{
     .{ .name = "rawget", .f = root.define(&.{ .table, .any }, rawget) },
     .{ .name = "rawset", .f = root.define(&.{ .table, .any, .any }, rawset) },
-    .{ .name = "get_meta", .f = root.define(&.{ .table }, @import("meta.zig").get_metatable_) },
-    .{ .name = "set_meta", .f = root.define(&.{ .table, .any }, @import("meta.zig").set_metatable_) },
+    .{ .name = "get_meta", .f = root.define(&.{.table}, @import("meta.zig").get_meta) },
+    .{ .name = "set_meta", .f = root.define(&.{ .table, .any }, @import("meta.zig").set_meta) },
     .{ .name = "unwrap", .f = root.define(&.{.table}, @"try") },
     .{ .name = "insert", .f = root.define(&.{ .table, .number, .any }, insert) },
     .{ .name = "push", .f = root.defineVariadic(&.{.table}, push) },

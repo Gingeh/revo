@@ -411,22 +411,22 @@ test "concat operator" {
     // table with __tostring metamethod
     try t.topString(
         \\const mt = {__tostring = fn(self) "custom"}
-        \\const t = set_metatable({}, mt)
+        \\const t = set_meta({}, mt)
         \\t ~ ""
     , "custom");
     try t.topString(
         \\const mt = {__tostring = fn(self) "hello"}
-        \\const t = set_metatable({}, mt)
+        \\const t = set_meta({}, mt)
         \\"x" ~ t
     , "xhello");
     try t.topString(
         \\const mt = {__tostring = fn(self) "hello"}
-        \\const t = set_metatable({}, mt)
+        \\const t = set_meta({}, mt)
         \\t ~ " world"
     , "hello world");
     try t.topString(
         \\const mt = {__tostring = fn(self) "a"}
-        \\const t = set_metatable({}, mt)
+        \\const t = set_meta({}, mt)
         \\t ~ t
     , "aa");
 
@@ -689,12 +689,12 @@ test "field assignment works" {
 test "string conversion metamethods __tostring" {
     try t.topString(
         \\ const mt = {__tostring = fn(self) "custom"}
-        \\ const t = set_metatable({a = 1}, mt)
+        \\ const t = set_meta({a = 1}, mt)
         \\ string(t)
     , "custom");
     try t.topString(
         \\ const mt = {__tostring = fn(self) "42"}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ string(t)
     , "42");
 }
@@ -702,13 +702,13 @@ test "string conversion metamethods __tostring" {
 test "display formatting uses __display and falls back to __tostring" {
     try t.topString(
         \\ const mt = {__display = fn(self) "visible", __tostring = fn(self) "hidden"}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ fmt("%v", t)
     , "visible");
 
     try t.topString(
         \\ const mt = {__tostring = fn(self) "fallback"}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ fmt("%v", t)
     , "fallback");
 }
@@ -716,12 +716,12 @@ test "display formatting uses __display and falls back to __tostring" {
 test "string interpolation uses formatting modes" {
     try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
-        \\ const value = set_metatable({}, mt)
+        \\ const value = set_meta({}, mt)
         \\ "value = #{value}"
     , "value = visible");
     try t.topString(
         \\ const mt = {__display = fn(self) "visible", __debug = fn(self) "debug"}
-        \\ const value = set_metatable({}, mt)
+        \\ const value = set_meta({}, mt)
         \\ "value = #{value:?}"
     , "value = \"debug\"");
     try t.topString(
@@ -732,7 +732,7 @@ test "string interpolation uses formatting modes" {
 test "metamethod __index for field access" {
     try t.topNumber(
         \\ const mt = {__index = fn(self, key) 42}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.missing_field
     , 42);
 }
@@ -740,7 +740,7 @@ test "metamethod __index for field access" {
 test "plain metatable fields resolve before __index" {
     try t.topNumber(
         \\ const mt = {value = 7, __index = fn(self, key) 99}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.value
     , 7);
 }
@@ -748,7 +748,7 @@ test "plain metatable fields resolve before __index" {
 test "metamethod failures are runtime errors not host panics" {
     try t.expectRuntimeFailureWithMessage(
         \\ const mt = {__tostring = fn(self) panic("boom")}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ string(t)
     , .Panic, "boom");
 }
@@ -783,7 +783,7 @@ test "if-let works" {
 test "metamethod __newindex for field assignment" {
     try t.topNumber(
         \\ const mt = {__newindex = fn(self, key, value) table.rawset(self, key, 99)}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.x = 5
         \\ t.x
     , 99); // todo assert!(99 == t.x = 5)
@@ -792,7 +792,7 @@ test "metamethod __newindex for field assignment" {
 test "method calls require obj:method(args)" {
     try t.topNumber(
         \\ const mt = {get_x = fn(self) self.x}
-        \\ const t = set_metatable({x = 12}, mt)
+        \\ const t = set_meta({x = 12}, mt)
         \\ t:get_x()
     , 12);
     try t.topNumber(
@@ -819,7 +819,7 @@ test "metatable-backed constructor and instance methods compile" {
     defer vm.deinit();
 
     const source =
-        \\ let DB = set_metatable({}, {
+        \\ let DB = set_meta({}, {
         \\     open = fn(self) print("opened"),
         \\     close = fn(self) print("closed"),
         \\     new = fn(self, filename) do self["filename"] = filename end
@@ -844,7 +844,7 @@ test "metatable-backed constructor and instance methods compile" {
 test "plain field access returns the raw resolved value" {
     try t.topType(
         \\ const mt = {id = fn(self) self}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ t.id
     , .function);
 }
@@ -852,7 +852,7 @@ test "plain field access returns the raw resolved value" {
 test "non-table values can use plain metatable fields as methods" {
     try t.topString(
         \\ const mt = {reverse = fn(self) "fdsa"}
-        \\ set_metatable("", mt)
+        \\ set_meta("", mt)
         \\ "asdf":reverse()
     , "fdsa");
 }
@@ -3127,7 +3127,7 @@ test "assignment expression returns assigned value" {
 
 test "for loop calls iterator" {
     try t.topNumber(
-        \\ let t = set_metatable({}, {
+        \\ let t = set_meta({}, {
         \\   __iter = fn(self) do
         \\     let i = 0
         \\     fn() do

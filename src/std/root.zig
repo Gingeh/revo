@@ -15,8 +15,8 @@ pub const root_impls: []const api.Impl = &.{
     .{ .name = "fmt", .f = defineVariadic(&[_]TypeSpec{.string}, fmt) },
     .{ .name = "len", .f = define(&[_]TypeSpec{.any}, len_) },
     .{ .name = "inspect", .f = define(&[_]TypeSpec{.any}, inspect) },
-    .{ .name = "get_metatable", .f = define(&[_]TypeSpec{.any}, meta.get_metatable_) },
-    .{ .name = "set_metatable", .f = define(&[_]TypeSpec{ .any, .any }, meta.set_metatable_) },
+    .{ .name = "get_meta", .f = define(&[_]TypeSpec{.any}, meta.get_meta) },
+    .{ .name = "set_meta", .f = define(&[_]TypeSpec{ .any, .any }, meta.set_meta) },
     .{ .name = "type", .f = define(&[_]TypeSpec{.any}, typeof_) },
     .{ .name = "typeof", .f = define(&[_]TypeSpec{.any}, typeof_) },
     .{ .name = "expect", .f = define(&[_]TypeSpec{.any}, expect) },
@@ -292,7 +292,7 @@ test "fmt escapes literal percent" {
 test "fmt %? uses debug rendering" {
     try testing.topString(
         \\ const mt = {__debug = fn(self) "custom-debug"}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ fmt("%?", t)
     , "\"custom-debug\"");
 }
@@ -300,7 +300,7 @@ test "fmt %? uses debug rendering" {
 test "fmt rendering is recursive" {
     try testing.topString(
         \\ const mt = {__display = fn(self) "shown", __debug = fn(self) "debug"}
-        \\ const t = set_metatable({}, mt)
+        \\ const t = set_meta({}, mt)
         \\ fmt("%v|%?", {x = t}, {x = t})
     , "{ x = shown }|{ x = \"debug\" }");
 }
@@ -1188,23 +1188,23 @@ test "len" {
 
 test "meatballs are distinct" {
     try testing.topString(
-        \\ const a = set_metatable({}, {__tostring = fn(self) "foo"})
-        \\ const b = set_metatable({}, {__tostring = fn(self) "bar"})
+        \\ const a = set_meta({}, {__tostring = fn(self) "foo"})
+        \\ const b = set_meta({}, {__tostring = fn(self) "bar"})
         \\ string(a)
     , "foo");
 
     try testing.topString(
-        \\ const a = set_metatable(:true, {__tostring = fn(self) "foo"})
+        \\ const a = set_meta(:true, {__tostring = fn(self) "foo"})
         \\ string(1 == 1)
     , "foo");
 }
 
 test "bullshit: metatable constructors closures and method chaining" {
     try testing.topNumber(
-        \\ let Counter = set_metatable({}, {
+        \\ let Counter = set_meta({}, {
         \\   new = fn(start) do
         \\     const state = {n = start}
-        \\     set_metatable(state, {
+        \\     set_meta(state, {
         \\       inc = fn(s, step) do s.n = s.n + step s end,
         \\       value = fn(s) s.n
         \\     })

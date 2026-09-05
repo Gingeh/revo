@@ -11,10 +11,10 @@ pub declare len = fn(value: any) -> num
 pub declare inspect = fn(value: any) -> any
 
 #* returns metatable of value or :undef *#
-pub declare get_metatable = fn(value: any) -> table | :undef
+pub declare get_meta = fn(value: any) -> table | :undef
 
 #* sets metatable of value *#
-pub declare set_metatable = fn(value: any, meta: table|:nil) -> any
+pub declare set_meta = fn(value: any, meta: table|:nil) -> any
 
 #* returns type of value as atom; struct values return the type itself, which is callable *#
 pub declare type = fn(value: any) -> atom|type

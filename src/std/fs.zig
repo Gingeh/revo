@@ -32,7 +32,7 @@ fn wrapFile(vm: *VM, path: []const u8) !Data {
     const file_module = vm.globals.get(revo.core_atoms.file.atomId()) orelse return error.FileModuleNotFound;
     try mt.putRaw(try vm.dataAtom("__index"), file_module, vm);
 
-    const set_result = try meta.set_metatable_(&.{ Data.new.table(file_table), Data.new.table(metatable) }, vm);
+    const set_result = try meta.set_meta(&.{ Data.new.table(file_table), Data.new.table(metatable) }, vm);
     if (set_result != .ok) return error.SetMetatableFailed;
     return Data.new.table(file_table);
 }
