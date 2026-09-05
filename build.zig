@@ -23,6 +23,11 @@ const release_targets: []const ReleaseTarget = &.{
     // .{ .triple = "wasm64-freestanding" }, // good, see `wasm/`. use wasm32 instead
     .{ .triple = "wasm32-wasi" }, // web build with js host imports
     .{ .triple = "wasm32-wasi", .wasi_cli = true }, // cli build with wasi syscalls (wasmtime/runnable)
+
+    // entirely untested:
+    .{ .triple = "x86_64-freebsd-none" }, // probably good
+    .{ .triple = "x86_64-openbsd-none" }, // probably good
+    // nobody runs netbsd anymore
 };
 
 const Features = packed struct {
