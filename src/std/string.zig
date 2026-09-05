@@ -21,8 +21,6 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "ascii", .f = root.define(&.{.string}, ascii_f) },
     .{ .name = "contains?", .f = root.define(&.{ .string, .string }, contains) },
     .{ .name = "index_of", .f = root.define(&.{ .string, .string }, index_of) },
-    .{ .name = "add", .f = root.define(&.{ .string, .string }, add_f) },
-    .{ .name = "mul", .f = root.define(&.{ .string, .number }, mul_f) },
     .{ .name = "of_ascii", .f = root.define(&.{.number}, of_ascii) },
     .{ .name = "join", .f = root.define(&.{ .table, .string }, join) },
     .{ .name = "__call", .f = root.define(&.{ .any, .any }, string_call) },
@@ -74,16 +72,6 @@ fn len_f(args: []const Data, vm: *VM) !HostResult {
     return .{ .ok = Data.new.num(str.len) };
 }
 
-/// > string + other: string -> string
-/// concatenates two strings
-fn add_f(args: []const Data, vm: *VM) !HostResult {
-    const left = vm.stringValue(args[0].asString().?);
-    const right = vm.stringValue(args[1].asString().?);
-    const concatenated = try std.mem.concat(vm.runtime.alloc, u8, &.{ left, right });
-    const result = try vm.adoptDataStringNoDedup(concatenated);
-    return .{ .ok = result };
-}
-
 /// > string:upper() -> string
 /// converts string to uppercase
 fn upper_f(args: []const Data, vm: *VM) !HostResult {
@@ -102,25 +90,6 @@ fn lower_f(args: []const Data, vm: *VM) !HostResult {
     for (buf) |*c| c.* = std.ascii.toLower(c.*);
     const result = try vm.adoptDataStringNoDedup(buf);
     return .{ .ok = result };
-}
-
-/// > string * n: num -> string
-/// repeats string n times
-fn mul_f(args: []const Data, vm: *VM) !HostResult {
-    const str = vm.stringValue(args[0].asString().?);
-    const times = if (args[1].asNum()) |n|
-        root.numToInt(i64, n) orelse return .errType(1, "integer num", root.typeof(args[1], vm))
-    else
-        return .errType(1, "num", root.typeof(args[1], vm));
-    if (times < 0) return .errType(1, "positive num", root.typeof(args[1], vm));
-
-    const count: usize = @intCast(times);
-    const buf = try vm.runtime.alloc.alloc(u8, str.len * count);
-    for (0..count) |i| {
-        @memcpy(buf[i * str.len ..][0..str.len], str);
-    }
-    const result_str = try vm.adoptDataStringNoDedup(buf);
-    return .{ .ok = result_str };
 }
 
 /// > string:sub(start: num, length: num) -> string

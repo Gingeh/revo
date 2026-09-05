@@ -68,12 +68,6 @@ pub declare string.contains? = fn(self: string, substr: string) -> bool
 #* ret 0-based index of substring or nil *#
 pub declare string.index_of = fn(self: string, substr: string) -> num|:nil
 
-#* concatenates two strings *#
-pub declare string.add = fn(self: string, other: string) -> string
-
-#* repeats string n times *#
-pub declare string.mul = fn(self: string, n: num) -> string
-
 #*
 creates string from ASCII code(s)
 
@@ -88,4 +82,3 @@ pub declare string.join = fn(table: table, sep: string) -> string
 
 #* converts value to string: string(x) *#
 pub declare string.__call = fn(value: any) -> string
-
