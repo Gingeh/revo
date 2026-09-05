@@ -661,6 +661,8 @@ pub fn system_(tbl: []const Data, vm: *VM) !HostResult {
     const args = tbl[0].asTable().?;
     const table = try vm.tables.get(args);
 
+    if (table.array.items.len == 0) return .Err(vm, "EmptyArgs");
+
     var argv = try vm.runtime.alloc.alloc([]const u8, table.array.items.len);
     defer vm.runtime.alloc.free(argv);
     defer for (argv) |arg| vm.runtime.alloc.free(arg);
