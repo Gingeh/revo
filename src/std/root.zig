@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const revo = @import("../root.zig");
 const mem = revo.memory;
@@ -43,7 +44,7 @@ pub const os_impls: []const api.Impl = &.{
     .{ .name = "__internal_dotest", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dotest) },
     .{ .name = "__internal_dosuite", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .function }) else define(&[_]TypeSpec{ .string, .function }, dosuite) },
     .{ .name = "getenv", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{.string}) else define(&[_]TypeSpec{.string}, getenv_) },
-    .{ .name = "setenv", .f = if (revo.is_freestanding) defineStub(&[_]TypeSpec{ .string, .string }) else define(&[_]TypeSpec{ .string, .string }, setenv_) },
+    .{ .name = "setenv", .f = if (revo.is_freestanding or builtin.os.tag == .windows) defineStub(&[_]TypeSpec{ .string, .string }) else define(&[_]TypeSpec{ .string, .string }, setenv_) },
 };
 
 pub fn register_stdlib(vm: *revo.VM) !void {
@@ -871,6 +872,13 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         return .okData(Data.new.table(t_id));
     }
     if (std.mem.endsWith(u8, resolved_path, ".so") or std.mem.endsWith(u8, resolved_path, ".dylib")) {
+        const can_dlopen = switch (builtin.target.os.tag) {
+            .wasi, .freestanding, .windows => false,
+            else => true,
+        };
+        if (!can_dlopen) {
+            return .{ .err = .{ .import_failed = "dynamic library loading not supported on this platform" } };
+        }
         // try native (host function) path first; extensions that export
         // `revo_native_bindings` get full arity/type checking
         if (revo.ffi.loadNative(vm, resolved_path)) |native_mods| {
