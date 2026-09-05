@@ -24,7 +24,8 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "contains?", .f = root.define(&.{ .table, .any }, contains) },
     .{ .name = "unique", .f = root.define(&.{.table}, unique) },
     .{ .name = "len", .f = root.define(&.{.table}, len) },
-    .{ .name = "add", .f = root.define(&.{ .table, .table }, tableAdd) },
+    .{ .name = "add", .f = root.define(&.{ .table, .table }, add) },
+    .{ .name = "repeat", .f = root.define(&.{ .table, .number }, repeat) },
 };
 
 /// > unwrap(result: tuple) -> any
@@ -284,26 +285,40 @@ test "table library" {
     try testing.topNumber("len({1, 2, 3})", 3);
 }
 
-/// > table + other: table -> table
-/// merges two tables (union)
-fn tableAdd(args: []const Data, vm: *VM) !HostResult {
+/// > table:add(other: table) -> table
+/// returns new table with array parts of both tables concatenated
+fn add(args: []const Data, vm: *VM) !HostResult {
     const left_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
     const right_id = args[1].asTable() orelse return .errType(1, "table", typeof(args[1], vm));
 
-    const new_id = try vm.tables.create();
-    const new_t = try vm.tables.get(new_id);
     const left = try vm.tables.get(left_id);
     const right = try vm.tables.get(right_id);
 
-    var hash_it = left.hash.orderedIterator();
-    while (hash_it.next()) |entry| {
-        try new_t.putRaw(entry.key, entry.val, vm);
+    const result_id = try vm.tables.create();
+    const result = try vm.tables.get(result_id);
+
+    try result.array.appendSlice(vm.runtime.alloc, left.array.items);
+    try result.array.appendSlice(vm.runtime.alloc, right.array.items);
+
+    return .okData(Data.new.table(result_id));
+}
+
+fn repeat(args: []const Data, vm: *VM) !HostResult {
+    const left_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
+    const n = args[1].asNum() orelse return .errType(1, "num", typeof(args[1], vm));
+    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer num", typeof(args[1], vm));
+    if (times < 0) return .errType(1, "non-negative num", "negative num");
+    const count: usize = @intCast(times);
+
+    const left = try vm.tables.get(left_id);
+    const result_id = try vm.tables.create();
+    const result = try vm.tables.get(result_id);
+
+    for (0..count) |_| {
+        try result.array.appendSlice(vm.runtime.alloc, left.array.items);
     }
-    hash_it = right.hash.orderedIterator();
-    while (hash_it.next()) |entry| {
-        try new_t.putRaw(entry.key, entry.val, vm);
-    }
-    return .okData(Data.new.table(new_id));
+
+    return .okData(Data.new.table(result_id));
 }
 
 /// > table:sort() -> table
@@ -484,6 +499,9 @@ test "table methods" {
     try testing.topNumber("iter.sum({1, 2, 3})", 6);
     try testing.topNumber("{1, 2, 3}:pop()", 3);
     try testing.topNumber("let a = {1, 2, 3}; a:pop(); a:len()", 2);
+    try testing.topNumber("{1, 2}:add({3, 4}):len()", 4);
+    try testing.topNumber("{1, 2}:repeat(3):len()", 6);
+    try testing.topNumber("{1, 2}:repeat(0):len()", 0);
 }
 
 test "contains? and index_of compare string content, not ids" {

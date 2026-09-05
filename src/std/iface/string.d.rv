@@ -82,3 +82,9 @@ pub declare string.join = fn(table: table, sep: string) -> string
 
 #* converts value to string: string(x) *#
 pub declare string.__call = fn(value: any) -> string
+
+#* concatenates two strings *#
+pub declare string.add = fn(self: string, other: string) -> string
+
+#* repeats string n times *#
+pub declare string.repeat = fn(self: string, n: num) -> string

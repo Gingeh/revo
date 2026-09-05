@@ -1,9 +1,3 @@
-//
-// the table
-//
-// one spec per registration entry. registration happens in root.zig
-// via api.registerAll
-
 pub const impls: []const api.Impl = &.{
     .{ .name = "len", .f = root.define(&.{.string}, len_f) },
     .{ .name = "upper", .f = root.define(&.{.string}, upper_f) },
@@ -24,13 +18,9 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "of_ascii", .f = root.define(&.{.number}, of_ascii) },
     .{ .name = "join", .f = root.define(&.{ .table, .string }, join) },
     .{ .name = "__call", .f = root.define(&.{ .any, .any }, string_call) },
+    .{ .name = "add", .f = root.define(&.{ .string, .string }, add) },
+    .{ .name = "repeat", .f = root.define(&.{ .string, .number }, repeat) },
 };
-
-//
-// registration
-//
-// method
-//
 
 /// > string:with(idx: num, char: string|num) -> string
 /// replaces character at index with given char or byte
@@ -244,6 +234,35 @@ fn string_call(args: []const Data, vm: *VM) !root.HostResult {
     return root.string_(args[1..], vm);
 }
 
+/// > string:add(other: string) -> string
+/// concatenates two strings
+fn add(args: []const Data, vm: *VM) !HostResult {
+    const l_str = vm.stringValue(args[0].asString().?);
+    const r_str = vm.stringValue(args[1].asString().?);
+    if (l_str.len == 0) return .{ .ok = args[1] };
+    if (r_str.len == 0) return .{ .ok = args[0] };
+    const buf = try std.mem.concat(vm.runtime.alloc, u8, &.{ l_str, r_str });
+    return .{ .ok = try vm.adoptDataStringNoDedup(buf) };
+}
+
+/// > string:repeat(n: num) -> string
+/// repeats string n times
+fn repeat(args: []const Data, vm: *VM) !HostResult {
+    const str = vm.stringValue(args[0].asString().?);
+    const n = args[1].asNum() orelse return .errType(1, "num", root.typeof(args[1], vm));
+    const times: i64 = root.numToInt(i64, n) orelse return .errType(1, "integer num", root.typeof(args[1], vm));
+    if (times < 0) return .errType(1, "non-negative num", "negative num");
+    const count: usize = @intCast(times);
+    if (count == 0) return .{ .ok = try vm.ownDataString("") };
+    if (count == 1) return .{ .ok = args[0] };
+    const total_len = std.math.mul(usize, str.len, count) catch return .other("result too large");
+    const buf = try vm.runtime.alloc.alloc(u8, total_len);
+    for (0..count) |i| {
+        @memcpy(buf[i * str.len ..][0..str.len], str);
+    }
+    return .{ .ok = try vm.adoptDataStringNoDedup(buf) };
+}
+
 test "string metatable" {
     try testing.topString("\"hello\":sub(0, 2)", "he");
 
@@ -325,6 +344,11 @@ test "string methods" {
     try testing.topString("'hello':replace('l', 'x')", "hexxo");
     try testing.expectCompileError("'hello':replace(1, 'x')", .ParseError);
     try testing.topString("'hello':add(' world')", "hello world");
+    try testing.topString("\"\":add(\"abc\")", "abc");
+    try testing.topString("\"abc\":add(\"\")", "abc");
+    try testing.topString("\"ab\":repeat(3)", "ababab");
+    try testing.topString("\"x\":repeat(1)", "x");
+    try testing.topString("\"x\":repeat(0)", "");
     try testing.expectRuntimeFailureWithMessage(
         \\ "abc":with(1, "")
     , .TypeError, "arg 2: wants non-empty string, got string");

@@ -629,7 +629,7 @@ const SemanticChecker = struct {
             .binary => |b| blk: {
                 const l = try self.analyzeNode(b.left);
                 const r = try self.analyzeNode(b.right);
-                    if (b.op == .add or b.op == .sub or b.op == .div or b.op == .mod or b.op == .pow) {
+                if (b.op == .add or b.op == .sub or b.op == .div or b.op == .mod or b.op == .pow) {
                     if (l.tag == .number and r.tag == .string or l.tag == .string and r.tag == .number) {
                         try self.appendError(
                             try std.fmt.allocPrint(self.alloc, "cannot {s} {s} and {s}", .{ @tagName(b.op), try l.formatType(self.alloc), try r.formatType(self.alloc) }),

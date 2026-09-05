@@ -463,7 +463,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
 
     try writer.print(
         "revo {s} repl ({s} for {s})\n> :q to exit, :h <name> for docs, <C-j> to start new line\n",
-        .{build_options.version, build_options.git_commit, try builtin.target.linuxTriple(gpa)},
+        .{ build_options.version, build_options.git_commit, try builtin.target.linuxTriple(gpa) },
     );
     try writer.print("\x1b[0;95m# {s}\x1b[0m\n", .{
         splashText(splashSeed(vm, &banner_buffer, writer)),

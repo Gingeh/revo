@@ -16,3 +16,6 @@ pub declare tuple.add = fn(self: tuple, other: tuple) -> tuple
 
 #* repeats tuple n times *#
 pub declare tuple.mul = fn(self: tuple, n: num) -> tuple
+
+#* repeats tuple n times *#
+pub declare tuple.repeat = fn(self: tuple, n: num) -> tuple

@@ -4,6 +4,7 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "unwrap_err", .f = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_) },
     .{ .name = "add", .f = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add) },
     .{ .name = "mul", .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },
+    .{ .name = "repeat", .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },
 };
 
 fn len(args: []const Data, vm: *VM) !HostResult {
@@ -74,4 +75,10 @@ test "generic unwrap_err infers T" {
 test "untyped receivers resolve module fns via the metatable" {
     try testing.topNumber("fn f(t) do t:unwrap_err() end f((:err, 3))", 3);
     try testing.topNumber("fn f(t) do t:len() end f((1, 2, 3))", 3);
+}
+
+test "tuple add and repeat" {
+    try testing.topNumber("(1, 2):add((3, 4)):len()", 4);
+    try testing.topNumber("(1, 2):repeat(3):len()", 6);
+    try testing.topNumber("(1, 2):repeat(0):len()", 0);
 }
