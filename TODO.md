@@ -1,15 +1,16 @@
 ```text
 p for planned,
 ? for maybe,
-x for done
+x for done,
+/ for partially done
 ```
 
 ### core
 
-- [ ] variable arguments in user code
+- [x] variable arguments in user code
 - [x] default function arguments
-- [ ] ambient type declarations
-  - [ ] maybe via ambient `.d.rv` declaration files that are not parse-only without side-effects?
+- [x] ambient type declarations
+  - [x] maybe via ambient `.d.rv` declaration files that are not parse-only without side-effects?
 - [x] predictable type inference and typechecker
   - [x] needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
   - [x] needed for zerocost comptime type-checking (e.g., picking the right loop iterator)
@@ -51,7 +52,7 @@ x for done
     ```
 
 - [x] doc comment system
-- [ ] annotate more code (backwardly done after writing rn)
+- [x] annotate more code (backwardly done after writing rn)
 
 ### standard library
 
@@ -63,24 +64,25 @@ x for done
   - [ ] core libs: *(TBD)*
   - [ ] std libs: *(TBD)*
 - [x] regex
-- [ ] rng
+- [x] rng
 - [ ] http
 - [ ] dns
 - [ ] crypto (unsure)
 - [ ] datetime
-- [ ] os.getenv/os.setenv
+- [x] os.getenv/os.setenv
 - [ ] path
 - [ ] general-purpose serialization/deserialization
 - [ ] log
-- [ ] cli argument parsing, termios
-- [ ] random data structures
+- [x] cli argument parsing
+- [ ] termios
+- [ ] data structures (tbd)
 
 ### extensions & interop
 
-- [ ] better ext interfaces
+- [x] better ext interfaces
   - [x] more functions exposed to c
   - [x] zig extension api
-  - [ ] userdata type: raw memory area with no predefined operations
+  - [x] userdata type: raw memory area with no predefined operations
         wrap in a struct to define operations
 - [ ] wrappers
   - [ ] spyware: wraps data/function and shows all available stats (`__index`, `__newindex`, `__call`, etc.)
@@ -116,8 +118,6 @@ x for done
 - [x] http client/server
 - [x] json parsing and generation
 - [x] build system itself
-- [ ] simple key-value db with disk i/o
-- [ ] regex (wrap system engine from c, or adapt lua's match)
 
 ### language features
 
@@ -129,7 +129,7 @@ x for done
     1 + mean(12) "hi"  # prints "hi", returns 1 + 12
     ```
 
-  - [ ] `inspect`: print value with debug info, return unchanged
+  - [/] `inspect`: print value with debug info, return unchanged
 
     ```text
     1 + inspect(2) == 3
@@ -139,12 +139,12 @@ x for done
 
 ### cli
 
-- [ ] break&fix unwinding
+- [x] break&fix unwinding
   - [ ] when reflection exists, pull useful data from a recovered vm state
-- [ ] break&fix error spans
+- [x] break&fix error spans
 - [ ] progress indicators
-- help command
-  - [ ] docs for zig functions
+- [x] doc subcommand
+  - [x] doc for zig functions
         may be irrelevant if all signatures move to ambient declaration files
 
 ### build system
@@ -184,10 +184,10 @@ x for done
 <summary>single-file package usage</summary>
 
 ```ex
-pkgs!(
-    "github.com/if-not-nil/md-tcp",
-    markdown_over_tcp "github.com/if-not-nil/md-tcp"
-)
+import {
+    "git:github.com/if-not-nil/md-tcp",
+    markdown_over_tcp = "git:github.com/if-not-nil/md-tcp"
+}
 
 markdown_over_tcp:serve(6767)
 ```
