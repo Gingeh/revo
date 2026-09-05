@@ -1,6 +1,6 @@
 .{
     .name = .revo,
-    .version = "0.1.1",
+    .version = "0.1.2",
     .fingerprint = 0xa061c797cf26ac5,
     .minimum_zig_version = "0.16.0",
     // ALL dependencies are optional and have to remain as such, but are not yet lazy

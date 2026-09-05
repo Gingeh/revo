@@ -12,7 +12,7 @@ an expressive, dynamically-typed language for the joy of programming
 
 <img width="692" height="796" alt="demo" src="https://github.com/user-attachments/assets/ed30f8ab-9f33-4a7d-9072-72c50912ce4b" />
 
-![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange) ![version 0.1.1](https://img.shields.io/badge/version-0.1.1a-navy)
+![written in Zig](https://img.shields.io/badge/written%20in-Zig-orange) ![version 0.1.2](https://img.shields.io/badge/version-0.1.2-navy)
 
 [tools](#tools)
 | [editors](#editors)

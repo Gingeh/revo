@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-05
+
 ### Added
 
 - any function is a module
@@ -146,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- dunder methods now looked up through the normal order
 - `table.remove(t, key)` -- now works with both indices (array part) and keys (hash part)
 - **Breaking:** doc-comments are `#* ... *#` now, comments attach to any declaration and are stored in types, hover follows aliases, repl `:h` renders exactly what hover renders
 - **Breaking:** cli is now subcommand-based: `compile`, `repl`, `dis`, `bench`, `docs`, `lsp`. options must come before the script name, everything after goes to runtime argv. the old flags like `-b` and `--dis` are gone in favor of their subcommands
@@ -197,6 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - new std module: `compress`
 - compiler return type propagation
 
-[Unreleased]: https://github.com/if-not-nil/revo/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/if-not-nil/revo/compare/0.1.2...HEAD
+[0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.0a...0.1.1
 [0.1.0a]: https://github.com/if-not-nil/revo/releases/tag/0.1.0a
