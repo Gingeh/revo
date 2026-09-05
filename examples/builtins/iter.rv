@@ -20,17 +20,16 @@ for x in iter.range(0, 10, 3) do print(x) end
 
 # pipes and transformers (all lazy, collect to materialize)
 iter.range(10)
-  |> iter.filter(fn(x) x % 2 == 0)
-  |> iter.collect()
-  |> for x in _
-     print(x)
+  :filter(fn(x) x % 2 == 0)
+  :collect()
+  |> for x in _ print(x)
 # { 0, 2, 4, 6, 8 }
 
 iter.range(1, 11)
-  |> iter.map(fn(x) x * x)
-  |> iter.filter(fn(x) x > 20)
-  |> iter.take(3)
-  |> iter.collect()
+  :map(fn(x) x * x)
+  :filter(fn(x) x > 20)
+  :take(3)
+  :collect()
 # {25, 36, 49}
 
 iter.range(1, 6) |> iter.fold(fn(a, b) a * b)
@@ -39,6 +38,7 @@ iter.range(1, 6) |> iter.fold(fn(a, b) a * b)
 #
 # custom object with an __iter metamethod
 #
+# 
 let Counter = set_metatable({
   {:zero, "none"},
   {:one, "singular"},

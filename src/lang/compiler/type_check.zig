@@ -10,7 +10,7 @@ const FunctionSignature = types_mod.FunctionSignature;
 const state_mod = @import("state.zig");
 
 pub fn checkType(expected: TypeInfo, actual: TypeInfo) !void {
-    if (expected == .any or actual == .any) return;
+    if (expected.tag == .any or actual.tag == .any) return;
     if (expected.eql(actual)) return;
     if (types_mod.canCoerce(actual, expected)) return;
     return error.TypeError;
@@ -33,11 +33,11 @@ pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
 
 fn inferTypeMap(self: *Compiler, name: []const u8) TypeInfo {
     if (self.type_aliases.get(name)) |aliased| return aliased;
-    return .any;
+    return .{ .tag = .any };
 }
 
 const TypeParamSubst = struct {
-    entries: [4]struct { name: []const u8, type: TypeInfo } = @splat(.{ .name = &[_]u8{}, .type = .any }),
+    entries: [4]struct { name: []const u8, type: TypeInfo } = @splat(.{ .name = &[_]u8{}, .type = .{ .tag = .any } }),
     count: usize = 0,
 
     pub fn get(self: *const TypeParamSubst, name: []const u8) ?TypeInfo {
@@ -77,7 +77,7 @@ fn genericSubstReturnType(
                     .type = types_mod.resolveTypeName(self, type_args[i]),
                 };
         }
-        var arg_types: [4]TypeInfo = @splat(.any);
+        var arg_types: [4]TypeInfo = @splat(.{ .tag = .any });
         for (args, 0..) |a, i| {
             if (i < 4) arg_types[i] = inferExprType(self, a);
         }
@@ -89,7 +89,7 @@ fn genericSubstReturnType(
                     subst.put(tp, inferExprType(self, args[i])) catch {};
             }
         }
-        return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch .any;
+        return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch TypeInfo{ .tag = .any };
     }
     // fallback: heap-allocated map for many type params
     var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
@@ -98,11 +98,11 @@ fn genericSubstReturnType(
         if (i < type_args.len)
             param_map.put(tp, types_mod.resolveTypeName(self, type_args[i])) catch {};
     }
-    var arg_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, @min(args.len, 8)) catch return .any;
+    var arg_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, @min(args.len, 8)) catch return .{ .tag = .any };
     defer arg_types.deinit(self.alloc);
     for (args) |a| {
         if (arg_types.items.len >= 8) break;
-        arg_types.append(self.alloc, inferExprType(self, a)) catch return .any;
+        arg_types.append(self.alloc, inferExprType(self, a)) catch return .{ .tag = .any };
     }
     types_mod.bindTypeParams(&param_map, params, arg_types.items) catch {};
     if (type_args.len == 0) {
@@ -111,7 +111,7 @@ fn genericSubstReturnType(
                 param_map.put(tp, inferExprType(self, args[i])) catch {};
         }
     }
-    return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch .any;
+    return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch TypeInfo{ .tag = .any };
 }
 
 pub fn inferCallReturnType(
@@ -123,38 +123,38 @@ pub fn inferCallReturnType(
 ) TypeInfo {
     _ = implicit_self;
     const callee_type = inferExprType(self, callee);
-    if (callee_type == .function) {
-        const fn_sig = callee_type.function;
+    if (callee_type.tag == .function) {
+        const fn_sig = callee_type.tag.function;
         const ret = fn_sig.return_type;
 
-        if (fn_sig.type_params.len > 0 and ret != .any)
+        if (fn_sig.type_params.len > 0 and ret.tag != .any)
             return genericSubstReturnType(self, fn_sig.type_params, type_args, args, fn_sig.params, ret);
-        if (ret != .any) return ret;
+        if (ret.tag != .any) return ret;
         if (callee.expr == .fn_expr and callee.expr.fn_expr.return_type == null)
             return inferExprType(self, callee.expr.fn_expr.body);
     }
 
     if (callee.expr == .ident) {
         const fn_name = callee.expr.ident;
-        const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
-        if (sig.type_params.len > 0 and sig.return_type != .any)
+        const sig = state_mod.findFnSignature(self, fn_name) orelse return .{ .tag = .any };
+        if (sig.type_params.len > 0 and sig.return_type.tag != .any)
             return genericSubstReturnType(self, sig.type_params, type_args, args, sig.param_types, sig.return_type);
         return sig.return_type;
     }
 
-    return .any;
+    return .{ .tag = .any };
 }
 
 pub fn inferFieldType(self: *Compiler, object: *const Node, name: []const u8) TypeInfo {
-    return switch (inferExprType(self, object)) {
+    return switch (inferExprType(self, object).tag) {
         .struct_type => |struct_name| blk: {
-            const layout = self.struct_layouts.get(struct_name) orelse break :blk .any;
+            const layout = self.struct_layouts.get(struct_name) orelse break :blk .{ .tag = .any };
             for (layout) |f| {
                 if (std.mem.eql(u8, f.name, name)) break :blk f.field_type;
             }
-            break :blk .any;
+            break :blk .{ .tag = .any };
         },
-        else => .any,
+        else => .{ .tag = .any },
     };
 }
 
@@ -163,25 +163,27 @@ pub fn inferFnType(
     params: []const ast.FnParam,
     return_type: ?*ast.TypeExpr,
     type_params: []const []const u8,
+    doc: ?[]const u8,
 ) TypeInfo {
-    var param_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, params.len) catch return .any;
+    var param_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, params.len) catch return .{ .tag = .any };
     defer param_types.deinit(self.alloc);
-    var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, params.len) catch return .any;
+    var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, params.len) catch return .{ .tag = .any };
     defer param_names.deinit(self.alloc);
     for (params) |p| {
-        const pt = if (p.type_name) |tn| evalTypeExpr(self, tn) catch .any else .any;
-        param_types.append(self.alloc, pt) catch return .any;
-        param_names.append(self.alloc, p.name) catch return .any;
+        const pt = if (p.type_name) |tn| evalTypeExpr(self, tn) catch TypeInfo{ .tag = .any } else TypeInfo{ .tag = .any };
+        param_types.append(self.alloc, pt) catch return .{ .tag = .any };
+        param_names.append(self.alloc, p.name) catch return .{ .tag = .any };
     }
-    const ret = if (return_type) |rt| evalTypeExpr(self, rt) catch .any else .any;
-    const sig = self.alloc.create(FunctionSignature) catch return .any;
+    const ret = if (return_type) |rt| evalTypeExpr(self, rt) catch TypeInfo{ .tag = .any } else TypeInfo{ .tag = .any };
+    const sig = self.alloc.create(FunctionSignature) catch return .{ .tag = .any };
     sig.* = .{
-        .param_names = param_names.toOwnedSlice(self.alloc) catch return .any,
-        .params = param_types.toOwnedSlice(self.alloc) catch return .any,
+        .param_names = param_names.toOwnedSlice(self.alloc) catch return TypeInfo{ .tag = .any },
+        .params = param_types.toOwnedSlice(self.alloc) catch return TypeInfo{ .tag = .any },
         .return_type = ret,
         .type_params = type_params,
+        .doc = doc,
     };
-    return TypeInfo{ .function = sig };
+    return .{ .tag = .{ .function = sig } };
 }
 
 pub fn resolveTypeAlias(self: *Compiler, name: []const u8) ?TypeInfo {

@@ -284,7 +284,7 @@ fn compileAssignSimple(
         },
         .field => |field| {
             const object_type = type_check.inferExprType(self, field.object);
-            switch (object_type) {
+            switch (object_type.tag) {
                 .struct_type => |type_name| {
                     const type_id = self.vm.struct_types.findTypeByName(type_name) orelse {
                         // fallback to table set if struct not found
@@ -475,7 +475,7 @@ pub fn compileStruct(
                 const field_type: types_mod.TypeInfo = if (item.field.type_name) |tn|
                     try type_check.evalTypeExpr(self, tn)
                 else
-                    types_mod.TypeInfo.any;
+                    .{ .tag = .any };
                 try field_defs.append(self.alloc, .{
                     .name = item.field.name,
                     .field_type = field_type,
@@ -548,7 +548,7 @@ pub fn compileStruct(
                     b.target.expr.ident,
                     null,
                     b.value.expr.fn_expr.type_params,
-                    .{ .struct_type = name },
+                    .{ .tag = .{ .struct_type = name } },
                 )
             else
                 try self.compile(b.value, true);
@@ -559,7 +559,7 @@ pub fn compileStruct(
     };
 
     if (state.currentFunctionState(self) != null)
-        try state.setLocalTypeHint(self, name, .{ .struct_type = name });
+        try state.setLocalTypeHint(self, name, .{ .tag = .{ .struct_type = name } });
 }
 
 pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {

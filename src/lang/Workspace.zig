@@ -1095,8 +1095,8 @@ pub fn inspectDetailed(
         }
         if (sig_entry.value_ptr.return_type == null) {
             if (type_map.get(sig_entry.key_ptr.*)) |t| {
-                if (t == .function) {
-                    sig_entry.value_ptr.return_type = try types.clone(t.function.return_type, self.alloc);
+                if (t.tag == .function) {
+                    sig_entry.value_ptr.return_type = try types.clone(t.tag.function.return_type, self.alloc);
                 }
             }
         }
@@ -1149,19 +1149,19 @@ pub fn inlayHints(
 
     for (analysis.symbols) |sym| {
         const ti = sym.type_name orelse continue;
-        if (ti == .any or ti == .never) continue;
+        if (ti.tag == .any or ti.tag == .never) continue;
         if (sym.range.end.line < range.start.line or sym.range.start.line > range.end.line) continue;
 
         const line = sourceLine(snap.text, sym.range.start.line);
 
         // fn declarations get `-> ret` after the params; aliases fall
         // through to the generic `: type` hint below
-        if (ti == .function) {
+        if (ti.tag == .function) {
             const decl_needle = try std.fmt.allocPrint(alloc, "fn {s}(", .{sym.name});
             defer alloc.free(decl_needle);
             if (std.mem.indexOf(u8, line, decl_needle) != null) {
-                if (std.mem.indexOf(u8, line, "->") != null or ti.function.return_type == .any) continue;
-                const ret = try ti.function.return_type.formatType(alloc);
+                if (std.mem.indexOf(u8, line, "->") != null or ti.tag.function.return_type.tag == .any) continue;
+                const ret = try ti.tag.function.return_type.formatType(alloc);
                 defer alloc.free(ret);
 
                 var paren = sym.range.end.character;
@@ -2639,9 +2639,14 @@ fn addFieldCompletions(
                 if (entry.key.tag() == .atom) {
                     const name = vm.stringValue(entry.key.asAtom().?);
                     if (std.mem.startsWith(u8, name, prefix)) {
+                        var doc: ?[]const u8 = null;
+                        if (revo.std_lib.api.find(name)) |spec| {
+                            if (spec.doc.len > 0) doc = spec.doc;
+                        }
                         items.append(arena, .{
                             .label = name,
                             .kind = .field,
+                            .documentation = doc,
                         }) catch return;
                     }
                 }
@@ -3203,7 +3208,7 @@ test "workspace sig map survives typed fn invalidation" {
     const cache = ws.inspect_cache.getPtr(id) orelse return error.TestUnexpectedResult;
     const sig = cache.sig_map.get("f") orelse return error.TestUnexpectedResult;
     const p = sig.params[0].type_name.?;
-    try std.testing.expect(p == .table);
-    try std.testing.expect(p.table.key == null);
-    try std.testing.expect(p.table.value.* == .any);
+    try std.testing.expect(p.tag == .table);
+    try std.testing.expect(p.tag.table.key == null);
+    try std.testing.expect(p.tag.table.value.*.tag == .any);
 }

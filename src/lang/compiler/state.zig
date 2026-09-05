@@ -51,7 +51,7 @@ pub const FunctionState = struct {
         param_types: []const types.TypeInfo,
         required_count: usize,
         type_params: []const []const u8 = &.{},
-        return_type: types.TypeInfo = .any,
+        return_type: types.TypeInfo = .{ .tag = .any },
         default_values: []const ?*ast.Node = &.{},
     };
 
@@ -464,9 +464,9 @@ pub fn allocFnSig(
     var param_types = try std.ArrayList(types.TypeInfo).initCapacity(self.alloc, params.len);
     errdefer param_types.deinit(self.alloc);
     for (params) |p| try param_types.append(self.alloc, if (p.type_name) |tn|
-        type_parser.evalTypeExpr(self, tn) catch .any
+        type_parser.evalTypeExpr(self, tn) catch types.TypeInfo{ .tag = .any }
     else
-        .any);
+        types.TypeInfo{ .tag = .any });
 
     var required_count: usize = params.len;
     for (params) |p| {
@@ -483,9 +483,9 @@ pub fn allocFnSig(
         .required_count = required_count,
         .type_params = type_params,
         .return_type = if (return_type) |rt|
-            type_parser.evalTypeExpr(self, rt) catch .any
+            type_parser.evalTypeExpr(self, rt) catch types.TypeInfo{ .tag = .any }
         else
-            .any,
+            types.TypeInfo{ .tag = .any },
         .default_values = try default_values.toOwnedSlice(self.alloc),
     };
     return sig;

@@ -7,67 +7,72 @@ pub const UnionVariant = struct {
     types: []const TypeInfo,
 };
 
-pub const TypeInfo = union(enum) {
-    bool, // TODO: remove, make this be atom union of :true | :false
-    number,
-    string,
-    atom: []const u8,
-    tuple: []const TypeInfo,
-    @"union": []const UnionVariant,
-    table: struct {
-        key: ?*const TypeInfo,
-        value: *const TypeInfo,
-    },
-    struct_type: []const u8,
-    function: *const FunctionSignature,
-    any,
-    never,
-    type_var: []const u8,
+pub const TypeInfo = struct {
+    tag: Tag,
+    doc: ?[]const u8 = null,
+
+    pub const Tag = union(enum) {
+        bool, // TODO: remove, make this be atom union of :true | :false
+        number,
+        string,
+        atom: []const u8,
+        tuple: []const TypeInfo,
+        @"union": []const UnionVariant,
+        table: struct {
+            key: ?*const TypeInfo,
+            value: *const TypeInfo,
+        },
+        struct_type: []const u8,
+        function: *const FunctionSignature,
+        any,
+        never,
+        type_var: []const u8,
+    };
 
     pub fn eql(self: TypeInfo, other: TypeInfo) bool {
-        return switch (self) {
-            .bool => other == .bool,
-            .number => other == .number,
-            .string => other == .string,
-            .atom => |a| if (other == .atom) std.mem.eql(u8, atomPayload(a), atomPayload(other.atom)) else false,
-            .struct_type => |s| if (other == .struct_type) std.mem.eql(u8, s, other.struct_type) else false,
-            .tuple => |ts| if (other == .tuple) blk: {
-                if (ts.len != other.tuple.len) break :blk false;
-                for (ts, other.tuple) |a, b| if (!eql(a, b)) break :blk false;
+        return switch (self.tag) {
+            .bool => other.tag == .bool,
+            .number => other.tag == .number,
+            .string => other.tag == .string,
+            .atom => |a| if (other.tag == .atom) std.mem.eql(u8, atomPayload(a), atomPayload(other.tag.atom)) else false,
+            .struct_type => |s| if (other.tag == .struct_type) std.mem.eql(u8, s, other.tag.struct_type) else false,
+            .tuple => |ts| if (other.tag == .tuple) blk: {
+                if (ts.len != other.tag.tuple.len) break :blk false;
+                for (ts, other.tag.tuple) |a, b| if (!eql(a, b)) break :blk false;
                 break :blk true;
             } else false,
-            .@"union" => |us| if (other == .@"union") blk: {
-                if (us.len != other.@"union".len) break :blk false;
-                for (us, other.@"union") |a, b| {
+            .@"union" => |us| if (other.tag == .@"union") blk: {
+                if (us.len != other.tag.@"union".len) break :blk false;
+                for (us, other.tag.@"union") |a, b| {
                     if (!std.mem.eql(u8, a.name, b.name)) break :blk false;
                     if (a.types.len != b.types.len) break :blk false;
                     for (a.types, b.types) |at, bt| if (!eql(at, bt)) break :blk false;
                 }
                 break :blk true;
             } else false,
-            .table => |ti| if (other == .table) blk: {
-                const o = other.table;
+            .table => |ti| if (other.tag == .table) blk: {
+                const o = other.tag.table;
                 if (!eql(ti.value.*, o.value.*)) break :blk false;
                 if (ti.key) |tk| break :blk if (o.key) |ok| eql(tk.*, ok.*) else false;
                 break :blk o.key == null;
             } else false,
-            .function => |f| if (other == .function) blk: {
-                const o = other.function;
+            .function => |f| if (other.tag == .function) blk: {
+                const o = other.tag.function;
                 if (f == o) break :blk true;
                 if (!f.return_type.eql(o.return_type)) break :blk false;
                 if (f.params.len != o.params.len) break :blk false;
                 for (f.params, o.params) |a, b| if (!a.eql(b)) break :blk false;
                 break :blk true;
             } else false,
-            .type_var => |name| if (other == .type_var) std.mem.eql(u8, name, other.type_var) else false,
+            .type_var => |name| if (other.tag == .type_var) std.mem.eql(u8, name, other.tag.type_var) else false,
             .any => true,
-            .never => other == .never,
+            .never => other.tag == .never,
         };
     }
 
     /// alloc version of typeName, formats unions as well
     pub fn formatType(self: TypeInfo, alloc: std.mem.Allocator) ![]const u8 {
-        return switch (self) {
+        return switch (self.tag) {
             .never => try alloc.dupe(u8, "never"),
             .type_var => |n| try alloc.dupe(u8, n),
             .table => |tbl| blk: {
@@ -91,7 +96,7 @@ pub const TypeInfo = union(enum) {
                 errdefer buf.deinit(alloc);
                 for (variants, 0..) |v, i| {
                     if (i > 0) try buf.appendSlice(alloc, " | ");
-                    const is_tagged = v.types.len >= 2 and v.types[0] == .atom;
+                    const is_tagged = v.types.len >= 2 and v.types[0].tag == .atom;
                     if (is_tagged) try buf.append(alloc, '(');
                     for (v.types, 0..) |vt, j| {
                         if (j > 0) try buf.appendSlice(alloc, if (is_tagged) ", " else " ");
@@ -161,24 +166,25 @@ pub const FunctionSignature = struct {
     required_count: usize = 0,
     type_params: []const []const u8 = &.{},
     default_values: []const ?*ast.Node = &.{},
+    doc: ?[]const u8 = null,
 };
 
 /// sentinel "any function" type,,, matches any callable value
 /// ptr identity;; only matches when &ANY_FN_SIG is used
 pub const ANY_FN_SIG: FunctionSignature = .{
     .params = &.{},
-    .return_type = .any,
+    .return_type = .{ .tag = .any },
     .param_names = &.{},
     .is_any_fn_sig = true,
 };
 
 /// sentinel type info for `any` used by the generic table sentinel
-const ANY_TI: TypeInfo = .{ .any = {} };
+const ANY_TI: TypeInfo = .{ .tag = .any };
 /// sentinel for a generic table (no key/value constraints)
-pub const TABLE_GENERIC: TypeInfo = .{ .table = .{ .key = null, .value = &ANY_TI } };
+pub const TABLE_GENERIC: TypeInfo = .{ .tag = .{ .table = .{ .key = null, .value = &ANY_TI } } };
 
 pub fn typeName(T: TypeInfo, alloc: std.mem.Allocator) ![]const u8 {
-    return switch (T) {
+    return switch (T.tag) {
         .atom => |s| if (s.len == 0)
             try alloc.dupe(u8, "atom")
         else if (s[0] == ':')
@@ -191,21 +197,21 @@ pub fn typeName(T: TypeInfo, alloc: std.mem.Allocator) ![]const u8 {
         },
         .struct_type, .type_var => |s| try alloc.dupe(u8, s),
         .table => try alloc.dupe(u8, "table"),
-        else => try alloc.dupe(u8, @tagName(T)),
+        else => try alloc.dupe(u8, @tagName(T.tag)),
     };
 }
 
 /// deep-clone a TypeInfo into a new allocator
 pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
-    return switch (ti) {
+    return switch (ti.tag) {
         .bool, .number, .string, .any, .never => ti,
-        .atom => |s| TypeInfo{ .atom = try alloc.dupe(u8, s) },
-        .struct_type => |s| TypeInfo{ .struct_type = try alloc.dupe(u8, s) },
-        .type_var => |s| TypeInfo{ .type_var = try alloc.dupe(u8, s) },
+        .atom => |s| .{ .tag = .{ .atom = try alloc.dupe(u8, s) } },
+        .struct_type => |s| .{ .tag = .{ .struct_type = try alloc.dupe(u8, s) } },
+        .type_var => |s| .{ .tag = .{ .type_var = try alloc.dupe(u8, s) } },
         .tuple => |items| {
             const owned = try alloc.alloc(TypeInfo, items.len);
             for (items, 0..) |item, i| owned[i] = try clone(item, alloc);
-            return .{ .tuple = owned };
+            return .{ .tag = .{ .tuple = owned } };
         },
         .@"union" => |variants| {
             const owned = try alloc.alloc(UnionVariant, variants.len);
@@ -217,14 +223,14 @@ pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
                     .types = types_owned,
                 };
             }
-            return .{ .@"union" = owned };
+            return .{ .tag = .{ .@"union" = owned } };
         },
         .table => |tbl| {
             const key: ?*TypeInfo = if (tbl.key) |_| try alloc.create(TypeInfo) else null;
             if (key) |k| k.* = try clone(tbl.key.?.*, alloc);
             const value = try alloc.create(TypeInfo);
             value.* = try clone(tbl.value.*, alloc);
-            return .{ .table = .{ .key = key, .value = value } };
+            return .{ .tag = .{ .table = .{ .key = key, .value = value } } };
         },
         .function => |sig| {
             const owned = try alloc.create(FunctionSignature);
@@ -242,14 +248,15 @@ pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
                 .required_count = sig.required_count,
                 .type_params = type_params,
             };
-            return .{ .function = owned };
+            return .{ .tag = .{ .function = owned } };
         },
     };
 }
 
 /// free all heap-allocated memory owned by a TypeInfo
 pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
-    switch (ti.*) {
+    if (ti.doc) |d| alloc.free(d);
+    switch (ti.tag) {
         .bool, .number, .string, .any, .never => {},
         .atom, .struct_type, .type_var => |s| if (s.len > 0) alloc.free(s),
         .tuple => |items| {
@@ -283,25 +290,25 @@ pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
             alloc.destroy(@constCast(sig));
         },
     }
-    ti.* = .never;
+    ti.* = .{ .tag = .never };
 }
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
-    if (from == .never) return true;
-    if (to == .never) return false;
-    if (from.eql(to) or to == .any or from == .any or from == .type_var or to == .type_var) return true;
-    if (from == .table and to == .table) {
-        const from_table = from.table;
-        const to_table = to.table;
+    if (from.tag == .never) return true;
+    if (to.tag == .never) return false;
+    if (from.eql(to) or to.tag == .any or from.tag == .any or from.tag == .type_var or to.tag == .type_var) return true;
+    if (from.tag == .table and to.tag == .table) {
+        const from_table = from.tag.table;
+        const to_table = to.tag.table;
         if (!canCoerce(from_table.value.*, to_table.value.*)) return false;
         if (to_table.key == null) return true;
         if (from_table.key == null) return true;
         return canCoerce(from_table.key.?.*, to_table.key.?.*);
     }
     // function subtyping: contravariant params, covariant return
-    if (to == .function and from == .function) {
-        const to_sig = to.function;
-        const from_sig = from.function;
+    if (to.tag == .function and from.tag == .function) {
+        const to_sig = to.tag.function;
+        const from_sig = from.tag.function;
         // sentinel "any function" take and give any
         if (to_sig.is_any_fn_sig or from_sig.is_any_fn_sig) return true;
         // ret t: from's return must fit to's return
@@ -314,51 +321,51 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         return true;
     }
     // empty tuple (.len == 0) is a sentinel for "any tuple"
-    if (to == .tuple and from == .tuple) {
-        if (to.tuple.len == 0 or from.tuple.len == 0) return true;
-        if (to.tuple.len != from.tuple.len) return false;
-        for (to.tuple, from.tuple) |tt, ff| if (!canCoerce(ff, tt)) return false;
+    if (to.tag == .tuple and from.tag == .tuple) {
+        if (to.tag.tuple.len == 0 or from.tag.tuple.len == 0) return true;
+        if (to.tag.tuple.len != from.tag.tuple.len) return false;
+        for (to.tag.tuple, from.tag.tuple) |tt, ff| if (!canCoerce(ff, tt)) return false;
         return true;
     }
     // empty atom (.atom == "") is a sentinel for "any atom"
-    if (to == .atom and from == .atom) {
-        if (to.atom.len == 0 or from.atom.len == 0) return true;
-        return std.mem.eql(u8, to.atom, from.atom);
+    if (to.tag == .atom and from.tag == .atom) {
+        if (to.tag.atom.len == 0 or from.tag.atom.len == 0) return true;
+        return std.mem.eql(u8, to.tag.atom, from.tag.atom);
     }
     // :true and :false are bool
-    if (to == .bool and from == .atom) {
-        const name = atomPayload(from.atom);
+    if (to.tag == .bool and from.tag == .atom) {
+        const name = atomPayload(from.tag.atom);
         return std.mem.eql(u8, name, "true") or std.mem.eql(u8, name, "false");
     }
-    if (to == .@"union") {
+    if (to.tag == .@"union") {
         // fast-path for atom literals vs atom-only variants
-        if (from == .atom) {
-            for (to.@"union") |variant| {
-                if (variant.types.len == 1 and variant.types[0] == .atom) {
-                    if (std.mem.eql(u8, atomPayload(variant.types[0].atom), atomPayload(from.atom))) return true;
+        if (from.tag == .atom) {
+            for (to.tag.@"union") |variant| {
+                if (variant.types.len == 1 and variant.types[0].tag == .atom) {
+                    if (std.mem.eql(u8, atomPayload(variant.types[0].tag.atom), atomPayload(from.tag.atom))) return true;
                 }
             }
         }
-        for (to.@"union") |variant| {
+        for (to.tag.@"union") |variant| {
             if (unionVariantAccepts(variant, from)) return true;
         }
     }
-    if (from == .@"union") {
-        if (from.@"union".len == 0) return false;
-        for (from.@"union") |variant| {
+    if (from.tag == .@"union") {
+        if (from.tag.@"union".len == 0) return false;
+        for (from.tag.@"union") |variant| {
             if (!targetAcceptsVariant(variant, to)) return false;
         }
         return true;
     }
-    return from == .number and to == .number;
+    return from.tag == .number and to.tag == .number;
 }
 
 fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
     if (variant.types.len == 1) return canCoerce(value, variant.types[0]);
-    if (value != .tuple) return false;
-    if (value.tuple.len != variant.types.len) return false;
-    for (variant.types, value.tuple) |expected, actual| {
-        if (actual == .number and expected == .number) continue;
+    if (value.tag != .tuple) return false;
+    if (value.tag.tuple.len != variant.types.len) return false;
+    for (variant.types, value.tag.tuple) |expected, actual| {
+        if (actual.tag == .number and expected.tag == .number) continue;
         if (!canCoerce(actual, expected)) return false;
     }
     return true;
@@ -366,10 +373,10 @@ fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
 
 fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     if (variant.types.len == 1) return canCoerce(variant.types[0], target);
-    if (target != .tuple) return false;
-    if (target.tuple.len != variant.types.len) return false;
-    for (variant.types, target.tuple) |source, expected| {
-        if (source == .number and expected == .number) continue;
+    if (target.tag != .tuple) return false;
+    if (target.tag.tuple.len != variant.types.len) return false;
+    for (variant.types, target.tag.tuple) |source, expected| {
+        if (source.tag == .number and expected.tag == .number) continue;
         if (!canCoerce(source, expected)) return false;
     }
     return true;
@@ -377,31 +384,31 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
-        .@"union", .concat => .any,
+        .@"union", .concat => .{ .tag = .any },
         .add, .sub, .mul, .div, .mod, .pow => blk: {
-            if (l == .number and r == .number) break :blk .number;
-            break :blk .any;
+            if (l.tag == .number and r.tag == .number) break :blk .{ .tag = .number };
+            break :blk .{ .tag = .any };
         },
         .int_div => blk: {
-            if (l == .number and r == .number) break :blk .number;
-            break :blk .any;
+            if (l.tag == .number and r.tag == .number) break :blk .{ .tag = .number };
+            break :blk .{ .tag = .any };
         },
-        .band, .bor, .bxor, .shl, .shr => if (l == .number and r == .number) .number else .any,
-        .eq, .neq, .lt, .gt, .lte, .gte => .bool,
+        .band, .bor, .bxor, .shl, .shr => if (l.tag == .number and r.tag == .number) .{ .tag = .number } else .{ .tag = .any },
+        .eq, .neq, .lt, .gt, .lte, .gte => .{ .tag = .bool },
     };
 }
 
 pub fn inferUnaryOp(op: ast.UnOp, T: TypeInfo) TypeInfo {
     return switch (op) {
-        .negate => if (T == .number) T else .any,
-        .not => .bool,
-        else => .any,
+        .negate => if (T.tag == .number) T else .{ .tag = .any },
+        .not => .{ .tag = .bool },
+        else => .{ .tag = .any },
     };
 }
 
 pub fn inferIfType(then_type: TypeInfo, else_type: ?TypeInfo) TypeInfo {
     if (else_type) |et| return unifyBranchType(then_type, et);
-    return .any;
+    return .{ .tag = .any };
 }
 
 /// unify a branch type into the running if/orelse/match result:
@@ -409,17 +416,17 @@ pub fn inferIfType(then_type: TypeInfo, else_type: ?TypeInfo) TypeInfo {
 /// overwritten by a later concrete type (pattern vars narrow only while
 /// their scope is live, so re-inference after scope pop sees `any`)
 pub fn unifyBranchType(acc: TypeInfo, branch: TypeInfo) TypeInfo {
-    if (branch == .never) return acc;
-    if (acc == .never) return branch;
-    if (acc == .any) return branch;
-    if (branch == .any) return acc;
+    if (branch.tag == .never) return acc;
+    if (acc.tag == .never) return branch;
+    if (acc.tag == .any) return branch;
+    if (branch.tag == .any) return acc;
     if (acc.eql(branch)) return acc;
-    return .any;
+    return .{ .tag = .any };
 }
 
 pub fn inferMatchType(ctx: anytype, subject: *const ast.Node, arms: []const ast.MatchArm) TypeInfo {
     _ = subject;
-    var result: TypeInfo = .never;
+    var result: TypeInfo = .{ .tag = .never };
     for (arms) |arm| {
         result = unifyBranchType(result, inferExprType(ctx, arm.then));
     }
@@ -445,18 +452,18 @@ fn isOkTag(name: []const u8) bool {
 ///
 /// the shapes `?` and `orelse` unwrap at runtime
 pub fn isResultType(ti: TypeInfo) bool {
-    return switch (ti) {
+    return switch (ti.tag) {
         .@"union" => |us| blk: {
             for (us) |v| {
-                if (v.types.len >= 2 and v.types[0] == .atom and isResultTag(atomPayload(v.types[0].atom))) {
+                if (v.types.len >= 2 and v.types[0].tag == .atom and isResultTag(atomPayload(v.types[0].tag.atom))) {
                     break :blk true;
                 }
             }
             break :blk false;
         },
-        .tuple => |items| items.len >= 1 and items[0] == .atom and blk: {
-            const tag = atomPayload(items[0].atom);
-            break :blk isResultTag(tag);
+        .tuple => |items| items.len >= 1 and items[0].tag == .atom and blk: {
+            const at = atomPayload(items[0].tag.atom);
+            break :blk isResultTag(at);
         },
         else => false,
     };
@@ -466,27 +473,27 @@ pub fn isResultType(ti: TypeInfo) bool {
 /// `(:ok, T)` tagged tuple; mirrors the runtime, which yields only the
 /// first payload element
 pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
-    return switch (ti) {
+    return switch (ti.tag) {
         .@"union" => |variants| blk: {
             for (variants) |v| {
-                if (v.types.len >= 2 and v.types[0] == .atom and isOkTag(atomPayload(v.types[0].atom))) {
+                if (v.types.len >= 2 and v.types[0].tag == .atom and isOkTag(atomPayload(v.types[0].tag.atom))) {
                     break :blk v.types[1];
                 }
             }
-            break :blk .any;
+            break :blk .{ .tag = .any };
         },
         .tuple => |items| blk: {
-            if (items.len < 2 or items[0] != .atom) break :blk .any;
-            const tag = atomPayload(items[0].atom);
-            if (!isOkTag(tag)) break :blk .any;
+            if (items.len < 2 or items[0].tag != .atom) break :blk .{ .tag = .any };
+            const at = atomPayload(items[0].tag.atom);
+            if (!isOkTag(at)) break :blk .{ .tag = .any };
             break :blk items[1];
         },
-        else => .any,
+        else => .{ .tag = .any },
     };
 }
 
 pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.ArrayList(UnionVariant)) !void {
-    switch (ti) {
+    switch (ti.tag) {
         .@"union" => |us| for (us) |u| try variants.append(alloc, u),
         .tuple => |types| {
             if (types.len == 0) {
@@ -495,7 +502,7 @@ pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.Ar
                 // so it stays a matchable element inside a union
                 var one = try std.ArrayList(TypeInfo).initCapacity(alloc, 1);
                 errdefer one.deinit(alloc);
-                try one.append(alloc, .{ .tuple = types });
+                try one.append(alloc, .{ .tag = .{ .tuple = types } });
                 try variants.append(alloc, .{ .name = "", .types = try one.toOwnedSlice(alloc) });
                 return;
             }
@@ -511,38 +518,38 @@ pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.Ar
 }
 
 pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInfo).initComptime(.{
-    .{ "number", .number },
-    .{ "num", .number },
-    .{ "int", .number },
-    .{ "string", .string },
-    .{ "bool", .bool },
-    .{ "any", .any },
-    .{ "nil", TypeInfo{ .atom = ":nil" } },
-    .{ "tuple", TypeInfo{ .tuple = &.{} } }, // empty tuple is the "any tuple" sentinel
+    .{ "number", TypeInfo{ .tag = .number } },
+    .{ "num", TypeInfo{ .tag = .number } },
+    .{ "int", TypeInfo{ .tag = .number } },
+    .{ "string", TypeInfo{ .tag = .string } },
+    .{ "bool", TypeInfo{ .tag = .bool } },
+    .{ "any", TypeInfo{ .tag = .any } },
+    .{ "nil", TypeInfo{ .tag = .{ .atom = ":nil" } } },
+    .{ "tuple", TypeInfo{ .tag = .{ .tuple = &.{} } } }, // empty tuple is the "any tuple" sentinel
     .{ "table", TABLE_GENERIC },
-    .{ "function", TypeInfo{ .function = &ANY_FN_SIG } },
-    .{ "atom", TypeInfo{ .atom = "" } }, // empty atom payload is the "any atom" sentinel
-    .{ "never", .never },
-    .{ "parked", .any },
+    .{ "function", TypeInfo{ .tag = .{ .function = &ANY_FN_SIG } } },
+    .{ "atom", TypeInfo{ .tag = .{ .atom = "" } } }, // empty atom payload is the "any atom" sentinel
+    .{ "never", TypeInfo{ .tag = .never } },
+    .{ "parked", TypeInfo{ .tag = .any } },
 });
 
 pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
     if (type_name_map.get(name)) |res| return res;
-    if (name.len > 0 and name[0] == ':') return .{ .atom = name };
+    if (name.len > 0 and name[0] == ':') return .{ .tag = .{ .atom = name } };
     if (ctx.resolveTypeAlias(name)) |aliased| return aliased;
-    return .{ .struct_type = name };
+    return .{ .tag = .{ .struct_type = name } };
 }
 
 pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
     return switch (node.expr) {
-        .number => .number,
-        .string, .multiline_string => .string,
-        .hash => |name| .{ .atom = name },
-        .nil => .{ .atom = ":nil" },
+        .number => .{ .tag = .number },
+        .string, .multiline_string => .{ .tag = .string },
+        .hash => |name| .{ .tag = .{ .atom = name } },
+        .nil => .{ .tag = .{ .atom = ":nil" } },
         .ident => |name| ctx.inferIdentType(name),
         .unary => |u| inferUnaryOp(u.op, inferExprType(ctx, u.expr)),
         .binary => |b| inferBinaryOp(b.op, inferExprType(ctx, b.left), inferExprType(ctx, b.right)),
-        .and_expr, .or_expr => .bool,
+        .and_expr, .or_expr => .{ .tag = .bool },
         .if_expr => |v| inferIfType(
             inferExprType(ctx, v.then_expr),
             if (v.else_expr) |e| inferExprType(ctx, e) else null,
@@ -557,35 +564,35 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args, call.implicit_self),
         .field => |field| ctx.inferFieldType(field.object, field.name),
         .index => |index| inferIndexType(ctx, index.object, index.key),
-        .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params),
+        .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params, fn_expr.doc),
         .block => |exprs| inferBlockResultType(ctx, exprs),
-        .return_expr => .any,
+        .return_expr => .{ .tag = .any },
         .loop_expr => |v| inferExprType(ctx, v.body),
         .for_loop => |v| inferExprType(ctx, v.body),
         .while_loop => |v| inferExprType(ctx, v.body),
-        .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .any,
-        .continue_expr => |c| if (c.value) |v| inferExprType(ctx, v) else .any,
+        .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
+        .continue_expr => |c| if (c.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
         .labeled_block => |lb| inferExprType(ctx, lb.body),
         .try_expr => |inner| blk: {
             const it = inferExprType(ctx, inner);
-            break :blk switch (it) {
+            break :blk switch (it.tag) {
                 .@"union", .tuple => okTypeFrom(it),
                 else => it,
             };
         },
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
         .comp_block => |cb| inferExprType(ctx, cb.expr),
-        .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
+        .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .{ .tag = .any },
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
-        .range_literal, .slice_literal => .number,
-        .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .any,
-        .struct_def => |def| .{ .struct_type = def.name },
+        .range_literal, .slice_literal => .{ .tag = .number },
+        .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .{ .tag = .any },
+        .struct_def => |def| .{ .tag = .{ .struct_type = def.name } },
     };
 }
 
 fn inferTableType(ctx: anytype, entries: []const ast.TableEntry) TypeInfo {
-    var value_type: TypeInfo = .any;
-    var key_type: TypeInfo = .any;
+    var value_type: TypeInfo = .{ .tag = .any };
+    var key_type: TypeInfo = .{ .tag = .any };
     var saw_explicit_key = false;
     var saw_implicit_key = false;
 
@@ -607,23 +614,23 @@ fn inferTableType(ctx: anytype, entries: []const ast.TableEntry) TypeInfo {
         }
     }
 
-    const value_ptr = ctx.alloc.create(TypeInfo) catch return .any;
+    const value_ptr = ctx.alloc.create(TypeInfo) catch return .{ .tag = .any };
     value_ptr.* = value_type;
 
     if (!saw_explicit_key) {
-        return .{ .table = .{ .key = null, .value = value_ptr } };
+        return .{ .tag = .{ .table = .{ .key = null, .value = value_ptr } } };
     }
 
-    if (saw_implicit_key) key_type = mergeInferredType(key_type, .number);
-    const key_ptr = ctx.alloc.create(TypeInfo) catch return .any;
+    if (saw_implicit_key) key_type = mergeInferredType(key_type, .{ .tag = .number });
+    const key_ptr = ctx.alloc.create(TypeInfo) catch return .{ .tag = .any };
     key_ptr.* = key_type;
-    return .{ .table = .{ .key = key_ptr, .value = value_ptr } };
+    return .{ .tag = .{ .table = .{ .key = key_ptr, .value = value_ptr } } };
 }
 
 fn inferTableKeyType(ctx: anytype, key: *const ast.Node, computed: bool) TypeInfo {
     if (!computed) {
         return switch (key.expr) {
-            .ident, .hash => .string,
+            .ident, .hash => .{ .tag = .string },
             else => inferExprType(ctx, key),
         };
     }
@@ -631,29 +638,29 @@ fn inferTableKeyType(ctx: anytype, key: *const ast.Node, computed: bool) TypeInf
 }
 
 fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
-    if (current == .any) return next;
-    if (next == .any) return current;
+    if (current.tag == .any) return next;
+    if (next.tag == .any) return current;
     if (current.eql(next)) return current;
-    if ((current == .number and next == .number) or (current == .number and next == .number)) return .number;
-    return .any;
+    if ((current.tag == .number and next.tag == .number) or (current.tag == .number and next.tag == .number)) return .{ .tag = .number };
+    return .{ .tag = .any };
 }
 
 pub fn inferTupleType(ctx: anytype, items: []const *ast.Node) TypeInfo {
-    if (items.len == 0) return .{ .tuple = &.{} };
-    const types = ctx.alloc.alloc(TypeInfo, items.len) catch return .any;
+    if (items.len == 0) return .{ .tag = .{ .tuple = &.{} } };
+    const types = ctx.alloc.alloc(TypeInfo, items.len) catch return .{ .tag = .any };
     for (items, types) |item, *dst| dst.* = inferExprType(ctx, item);
-    return .{ .tuple = types };
+    return .{ .tag = .{ .tuple = types } };
 }
 
 pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Node) TypeInfo {
     if (key.expr == .range_literal or key.expr == .slice_literal) {
-        return switch (inferExprType(ctx, object)) {
-            .string => .string,
-            .tuple => |items| .{ .tuple = items },
-            else => .any,
+        return switch (inferExprType(ctx, object).tag) {
+            .string => .{ .tag = .string },
+            .tuple => |items| .{ .tag = .{ .tuple = items } },
+            else => .{ .tag = .any },
         };
     }
-    return switch (inferExprType(ctx, object)) {
+    return switch (inferExprType(ctx, object).tag) {
         .tuple => |items| if (key.expr == .number) blk: {
             const key_num = key.expr.number.value;
             if (std.math.isFinite(key_num) and @floor(key_num) == key_num and key_num >= 0) {
@@ -665,15 +672,15 @@ pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Nod
                     break :blk items[idx];
                 }
             }
-            break :blk .any;
-        } else .any,
-        .string => .string,
-        else => .any,
+            break :blk .{ .tag = .any };
+        } else .{ .tag = .any },
+        .string => .{ .tag = .string },
+        else => .{ .tag = .any },
     };
 }
 
 pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
-    if (exprs.len == 0) return .any;
+    if (exprs.len == 0) return .{ .tag = .any };
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
@@ -688,33 +695,33 @@ pub fn bindTypeParams(subst: anytype, params: []const TypeInfo, arg_types: []con
 }
 
 fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
-    switch (param) {
-        .type_var => |name| if (arg != .any) try subst.put(name, arg),
+    switch (param.tag) {
+        .type_var => |name| if (arg.tag != .any) try subst.put(name, arg),
         .tuple => |items| {
-            if (arg != .tuple) return;
-            if (arg.tuple.len != items.len) return;
-            for (items, arg.tuple) |p, a| try bindTypeParam(subst, p, a);
+            if (arg.tag != .tuple) return;
+            if (arg.tag.tuple.len != items.len) return;
+            for (items, arg.tag.tuple) |p, a| try bindTypeParam(subst, p, a);
         },
         .table => |tbl| {
-            if (arg != .table) return;
-            try bindTypeParam(subst, tbl.value.*, arg.table.value.*);
-            if (tbl.key) |k| if (arg.table.key) |ak| try bindTypeParam(subst, k.*, ak.*);
+            if (arg.tag != .table) return;
+            try bindTypeParam(subst, tbl.value.*, arg.tag.table.value.*);
+            if (tbl.key) |k| if (arg.tag.table.key) |ak| try bindTypeParam(subst, k.*, ak.*);
         },
         .function => |fsig| {
-            if (arg != .function) return;
-            try bindTypeParams(subst, fsig.params, arg.function.params);
-            try bindTypeParam(subst, fsig.return_type, arg.function.return_type);
+            if (arg.tag != .function) return;
+            try bindTypeParams(subst, fsig.params, arg.tag.function.params);
+            try bindTypeParam(subst, fsig.return_type, arg.tag.function.return_type);
         },
         // tagged unions only: match each param variant to the arg variant with
         // the same discriminator atom
         .@"union" => |variants| {
-            if (arg != .@"union") return;
+            if (arg.tag != .@"union") return;
             for (variants) |pv| {
-                if (pv.types.len == 0 or pv.types[0] != .atom) continue;
-                for (arg.@"union") |av| {
+                if (pv.types.len == 0 or pv.types[0].tag != .atom) continue;
+                for (arg.tag.@"union") |av| {
                     if (av.types.len != pv.types.len) continue;
-                    if (av.types[0] != .atom or av.types[0].atom.len == 0) continue;
-                    if (!std.mem.eql(u8, atomPayload(pv.types[0].atom), atomPayload(av.types[0].atom))) continue;
+                    if (av.types[0].tag != .atom or av.types[0].tag.atom.len == 0) continue;
+                    if (!std.mem.eql(u8, atomPayload(pv.types[0].tag.atom), atomPayload(av.types[0].tag.atom))) continue;
                     for (pv.types[1..], av.types[1..]) |p, a| try bindTypeParam(subst, p, a);
                     break;
                 }
@@ -727,12 +734,12 @@ fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
 /// substitute type params in a TypeInfo tree
 /// subst is any type with `get(key: []const u8) ?TypeInfo`
 pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anytype) !TypeInfo {
-    return switch (ti) {
-        .type_var => |name| subst.get(name) orelse .any,
+    return switch (ti.tag) {
+        .type_var => |name| subst.get(name) orelse .{ .tag = .any },
         .tuple => |items| blk: {
             const new_items = try alloc.alloc(TypeInfo, items.len);
             for (items, new_items) |item, *dst| dst.* = try substituteTypeParams(alloc, item, subst);
-            break :blk TypeInfo{ .tuple = new_items };
+            break :blk .{ .tag = .{ .tuple = new_items } };
         },
         .function => |fsig| blk: {
             const new_params = try alloc.alloc(TypeInfo, fsig.params.len);
@@ -745,66 +752,66 @@ pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anyty
                 .param_names = fsig.param_names,
                 .type_params = fsig.type_params,
             };
-            break :blk TypeInfo{ .function = new_sig };
+            break :blk .{ .tag = .{ .function = new_sig } };
         },
         else => ti,
     };
 }
 
 test "types: TypeInfo equality" {
-    const int_type: revo.lang.compiler.types.TypeInfo = .number;
-    const any_type: revo.lang.compiler.types.TypeInfo = .any;
+    const int_type: revo.lang.compiler.types.TypeInfo = .{ .tag = .number };
+    const any_type: revo.lang.compiler.types.TypeInfo = .{ .tag = .any };
 
-    try std.testing.expect(int_type.eql(.number));
-    try std.testing.expect(int_type.eql(.number));
-    try std.testing.expect(any_type.eql(.any));
+    try std.testing.expect(int_type.eql(.{ .tag = .number }));
+    try std.testing.expect(int_type.eql(.{ .tag = .number }));
+    try std.testing.expect(any_type.eql(.{ .tag = .any }));
 }
 
 test "types: numeric type check" {
-    try std.testing.expect(.number == .number);
-    try std.testing.expect(.string != .number);
-    try std.testing.expect(.any != .number);
+    try std.testing.expect(.{ .tag = .number }.tag == .number);
+    try std.testing.expect(.{ .tag = .string }.tag != .number);
+    try std.testing.expect(.{ .tag = .any }.tag != .number);
 }
 
 test "types: type coercion" {
     const types = revo.lang.compiler.types;
-    try std.testing.expect(types.canCoerce(.number, .number));
-    try std.testing.expect(!types.canCoerce(.string, .number));
-    try std.testing.expect(types.canCoerce(.number, .any)); // anything to any
-    try std.testing.expect(types.canCoerce(.any, .number)); // any to anything (optimistic)
+    try std.testing.expect(types.canCoerce(.{ .tag = .number }, .{ .tag = .number }));
+    try std.testing.expect(!types.canCoerce(.{ .tag = .string }, .{ .tag = .number }));
+    try std.testing.expect(types.canCoerce(.{ .tag = .number }, .{ .tag = .any })); // anything to any
+    try std.testing.expect(types.canCoerce(.{ .tag = .any }, .{ .tag = .number })); // any to anything (optimistic)
 }
 
 test "types: binary op inference - arithmetic" {
     const types = revo.lang.compiler.types;
-    const add_int_int = types.inferBinaryOp(.add, .number, .number);
-    try std.testing.expect(add_int_int.eql(.number));
+    const add_int_int = types.inferBinaryOp(.add, .{ .tag = .number }, .{ .tag = .number });
+    try std.testing.expect(add_int_int.eql(.{ .tag = .number }));
 
-    const add_float_float = types.inferBinaryOp(.add, .number, .number);
-    try std.testing.expect(add_float_float.eql(.number));
+    const add_float_float = types.inferBinaryOp(.add, .{ .tag = .number }, .{ .tag = .number });
+    try std.testing.expect(add_float_float.eql(.{ .tag = .number }));
 
-    const add_int_float = types.inferBinaryOp(.add, .number, .number);
-    try std.testing.expect(add_int_float.eql(.number));
+    const add_int_float = types.inferBinaryOp(.add, .{ .tag = .number }, .{ .tag = .number });
+    try std.testing.expect(add_int_float.eql(.{ .tag = .number }));
 }
 
 test "types: binary op inference - comparison" {
     const types = revo.lang.compiler.types;
-    const cmp = types.inferBinaryOp(.eq, .number, .number);
-    try std.testing.expect(cmp.eql(.bool));
+    const cmp = types.inferBinaryOp(.eq, .{ .tag = .number }, .{ .tag = .number });
+    try std.testing.expect(cmp.eql(.{ .tag = .bool }));
 
-    const cmp2 = types.inferBinaryOp(.lt, .number, .number);
-    try std.testing.expect(cmp2.eql(.bool));
+    const cmp2 = types.inferBinaryOp(.lt, .{ .tag = .number }, .{ .tag = .number });
+    try std.testing.expect(cmp2.eql(.{ .tag = .bool }));
 }
 
 test "types: empty tuple/atom sentinel coercion" {
     const types = revo.lang.compiler.types;
-    const empty_tuple: types.TypeInfo = .{ .tuple = &.{} };
-    const int_tuple: types.TypeInfo = .{ .tuple = &.{.number} };
+    const empty_tuple: types.TypeInfo = .{ .tag = .{ .tuple = &.{} } };
+    const int_tuple: types.TypeInfo = .{ .tag = .{ .tuple = &.{.{ .tag = .number }} } };
     try std.testing.expect(types.canCoerce(empty_tuple, int_tuple));
     try std.testing.expect(types.canCoerce(int_tuple, empty_tuple));
     try std.testing.expect(types.canCoerce(empty_tuple, empty_tuple));
 
-    const empty_atom: types.TypeInfo = .{ .atom = "" };
-    const named_atom: types.TypeInfo = .{ .atom = ":foo" };
+    const empty_atom: types.TypeInfo = .{ .tag = .{ .atom = "" } };
+    const named_atom: types.TypeInfo = .{ .tag = .{ .atom = ":foo" } };
     try std.testing.expect(types.canCoerce(empty_atom, named_atom));
     try std.testing.expect(types.canCoerce(named_atom, empty_atom));
     try std.testing.expect(types.canCoerce(empty_atom, empty_atom));
@@ -812,11 +819,11 @@ test "types: empty tuple/atom sentinel coercion" {
 
 test "types: unary op inference" {
     const types = revo.lang.compiler.types;
-    const negate_int = types.inferUnaryOp(.negate, .number);
-    try std.testing.expect(negate_int.eql(.number));
+    const negate_int = types.inferUnaryOp(.negate, .{ .tag = .number });
+    try std.testing.expect(negate_int.eql(.{ .tag = .number }));
 
-    const not_bool = types.inferUnaryOp(.not, .bool);
-    try std.testing.expect(not_bool.eql(.bool));
+    const not_bool = types.inferUnaryOp(.not, .{ .tag = .bool });
+    try std.testing.expect(not_bool.eql(.{ .tag = .bool }));
 }
 
 //
@@ -1691,13 +1698,13 @@ test "comp block infers num from literal" {
 
 test "never collapses in if and orelse inference" {
     // `panic` is `never`: a branch that diverges contributes no type
-    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferIfType(.never, .{ .number = {} }));
-    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferIfType(.{ .number = {} }, .never));
-    try std.testing.expectEqual(TypeInfo{ .never = {} }, inferIfType(.never, .never));
-    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferOrelseType(.never, .{ .number = {} }));
-    try std.testing.expectEqual(TypeInfo{ .number = {} }, inferOrelseType(.{ .number = {} }, .never));
+    try std.testing.expectEqual(TypeInfo{ .tag = .number }, inferIfType(.{ .tag = .never }, .{ .tag = .number }));
+    try std.testing.expectEqual(TypeInfo{ .tag = .number }, inferIfType(.{ .tag = .number }, .{ .tag = .never }));
+    try std.testing.expectEqual(TypeInfo{ .tag = .never }, inferIfType(.{ .tag = .never }, .{ .tag = .never }));
+    try std.testing.expectEqual(TypeInfo{ .tag = .number }, inferOrelseType(.{ .tag = .never }, .{ .tag = .number }));
+    try std.testing.expectEqual(TypeInfo{ .tag = .number }, inferOrelseType(.{ .tag = .number }, .{ .tag = .never }));
     // unknown left stays unknown: the value may be anything or diverge
-    try std.testing.expectEqual(TypeInfo{ .any = {} }, inferOrelseType(.any, .never));
+    try std.testing.expectEqual(TypeInfo{ .tag = .any }, inferOrelseType(.{ .tag = .any }, .{ .tag = .never }));
 }
 
 test "never arms don't poison match result type" {
@@ -1845,21 +1852,21 @@ fn testRuntime() revo.Runtime {
 
 test "types: type_var equality" {
     const TI = revo.lang.compiler.types.TypeInfo;
-    const a = TI{ .type_var = "T" };
-    const b = TI{ .type_var = "T" };
-    const c = TI{ .type_var = "U" };
+    const a = TI{ .tag = .{ .type_var = "T" } };
+    const b = TI{ .tag = .{ .type_var = "T" } };
+    const c = TI{ .tag = .{ .type_var = "U" } };
     try std.testing.expect(a.eql(b));
     try std.testing.expect(!a.eql(c));
-    try std.testing.expect(!a.eql(.number));
+    try std.testing.expect(!a.eql(.{ .tag = .number }));
 }
 
 test "types: type_var coercion" {
     const types = revo.lang.compiler.types;
-    const tv = types.TypeInfo{ .type_var = "T" };
-    try std.testing.expect(types.canCoerce(tv, .number));
-    try std.testing.expect(types.canCoerce(.number, tv));
-    try std.testing.expect(types.canCoerce(tv, .any));
-    try std.testing.expect(types.canCoerce(.any, tv));
+    const tv = types.TypeInfo{ .tag = .{ .type_var = "T" } };
+    try std.testing.expect(types.canCoerce(tv, .{ .tag = .number }));
+    try std.testing.expect(types.canCoerce(.{ .tag = .number }, tv));
+    try std.testing.expect(types.canCoerce(tv, .{ .tag = .any }));
+    try std.testing.expect(types.canCoerce(.{ .tag = .any }, tv));
     try std.testing.expect(types.canCoerce(tv, tv));
 }
 
@@ -1868,10 +1875,10 @@ test "substituteTypeParams direct type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .number);
+    try subst.put("T", .{ .tag = .number });
 
-    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .type_var = "T" }, subst);
-    try std.testing.expect(result.eql(.number));
+    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .tag = .{ .type_var = "T" } }, subst);
+    try std.testing.expect(result.eql(.{ .tag = .number }));
 }
 
 test "substituteTypeParams unknown type var becomes any" {
@@ -1880,8 +1887,8 @@ test "substituteTypeParams unknown type var becomes any" {
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
 
-    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .type_var = "T" }, subst);
-    try std.testing.expect(result.eql(.any));
+    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .tag = .{ .type_var = "T" } }, subst);
+    try std.testing.expect(result.eql(.{ .tag = .any }));
 }
 
 test "substituteTypeParams tuple with type var" {
@@ -1889,15 +1896,15 @@ test "substituteTypeParams tuple with type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .number);
+    try subst.put("T", .{ .tag = .number });
 
-    const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, .string } };
+    const input = types.TypeInfo{ .tag = .{ .tuple = &.{ types.TypeInfo{ .tag = .{ .type_var = "T" } }, .{ .tag = .string } } } };
     const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result == .tuple);
-    try std.testing.expect(result.tuple.len == 2);
-    try std.testing.expect(result.tuple[0].eql(.number));
-    try std.testing.expect(result.tuple[1].eql(.string));
-    alloc.free(result.tuple);
+    try std.testing.expect(result.tag == .tuple);
+    try std.testing.expect(result.tag.tuple.len == 2);
+    try std.testing.expect(result.tag.tuple[0].eql(.{ .tag = .number }));
+    try std.testing.expect(result.tag.tuple[1].eql(.{ .tag = .string }));
+    alloc.free(result.tag.tuple);
 }
 
 test "substituteTypeParams multiple type vars" {
@@ -1905,16 +1912,16 @@ test "substituteTypeParams multiple type vars" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .number);
-    try subst.put("U", .string);
+    try subst.put("T", .{ .tag = .number });
+    try subst.put("U", .{ .tag = .string });
 
-    const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, types.TypeInfo{ .type_var = "U" } } };
+    const input = types.TypeInfo{ .tag = .{ .tuple = &.{ types.TypeInfo{ .tag = .{ .type_var = "T" } }, types.TypeInfo{ .tag = .{ .type_var = "U" } } } } };
     const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result == .tuple);
-    try std.testing.expect(result.tuple.len == 2);
-    try std.testing.expect(result.tuple[0].eql(.number));
-    try std.testing.expect(result.tuple[1].eql(.string));
-    alloc.free(result.tuple);
+    try std.testing.expect(result.tag == .tuple);
+    try std.testing.expect(result.tag.tuple.len == 2);
+    try std.testing.expect(result.tag.tuple[0].eql(.{ .tag = .number }));
+    try std.testing.expect(result.tag.tuple[1].eql(.{ .tag = .string }));
+    alloc.free(result.tag.tuple);
 }
 
 test "substituteTypeParams function sig with type var" {
@@ -1922,23 +1929,23 @@ test "substituteTypeParams function sig with type var" {
     const alloc = std.testing.allocator;
     var subst = std.StringHashMap(types.TypeInfo).init(alloc);
     defer subst.deinit();
-    try subst.put("T", .number);
+    try subst.put("T", .{ .tag = .number });
 
     const sig = try alloc.create(types.FunctionSignature);
     sig.* = .{
-        .params = &.{types.TypeInfo{ .type_var = "T" }},
-        .return_type = types.TypeInfo{ .type_var = "T" },
+        .params = &.{types.TypeInfo{ .tag = .{ .type_var = "T" } }},
+        .return_type = types.TypeInfo{ .tag = .{ .type_var = "T" } },
         .param_names = &.{"x"},
     };
-    const input = types.TypeInfo{ .function = sig };
+    const input = types.TypeInfo{ .tag = .{ .function = sig } };
     const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result == .function);
-    try std.testing.expect(result.function.params.len == 1);
-    try std.testing.expect(result.function.params[0].eql(.number));
-    try std.testing.expect(result.function.return_type.eql(.number));
+    try std.testing.expect(result.tag == .function);
+    try std.testing.expect(result.tag.function.params.len == 1);
+    try std.testing.expect(result.tag.function.params[0].eql(.{ .tag = .number }));
+    try std.testing.expect(result.tag.function.return_type.eql(.{ .tag = .number }));
     alloc.destroy(sig);
-    alloc.free(result.function.params);
-    alloc.destroy(result.function);
+    alloc.free(result.tag.function.params);
+    alloc.destroy(result.tag.function);
 }
 
 test "generics identity fn enables add_int" {

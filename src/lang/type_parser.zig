@@ -13,7 +13,7 @@ const TokenType = Lexer.TokenType;
 ///     ctx must support .alloc and .resolveTypeAlias(name) -> ?TypeInfo
 pub fn parseTypeString(ctx: anytype, s: []const u8) !TypeInfo {
     const trimmed = if (std.mem.endsWith(u8, s, "...")) s[0 .. s.len - 3] else s;
-    if (trimmed.len == 0) return .any;
+    if (trimmed.len == 0) return .{ .tag = .any };
     const tokens = try Lexer.lexAt(ctx.alloc, trimmed, .{});
     var pos: usize = 0;
     const te = try parse(tokens, &pos, ctx.alloc);
@@ -223,19 +223,19 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
     switch (te.kind) {
         // "number" -> int (from type_name_map), "MyStruct" -> struct_type
         .named => |name| {
-            if (ctx.isTypeParam(name)) return TypeInfo{ .type_var = name };
+            if (ctx.isTypeParam(name)) return .{ .tag = .{ .type_var = name } };
             if (types.type_name_map.get(name)) |res| return res;
             if (ctx.resolveTypeAlias(name)) |aliased| return aliased;
-            return .{ .struct_type = name };
+            return .{ .tag = .{ .struct_type = name } };
         },
         // ":nil", ":ok" -> atom
-        .atom => |name| return TypeInfo{ .atom = name },
+        .atom => |name| return .{ .tag = .{ .atom = name } },
         // "(int, string)" -> tuple(@[int, string])
         .tuple => |items| {
             var resolved = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, items.len);
             errdefer resolved.deinit(ctx.alloc);
             for (items) |item| try resolved.append(ctx.alloc, try evalTypeExpr(ctx, item));
-            return TypeInfo{ .tuple = try resolved.toOwnedSlice(ctx.alloc) };
+            return .{ .tag = .{ .tuple = try resolved.toOwnedSlice(ctx.alloc) } };
         },
         // "int | :nil" -> union(@[{name="", types=@[int]}, {name="", types=@[:nil]}])
         // "number?" -> union_of(named("number"), atom(":nil")) from parseAtom
@@ -246,19 +246,19 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
                 const inner = try evalTypeExpr(ctx, v);
                 try types.collectVariants(ctx.alloc, inner, &collected);
             }
-            return TypeInfo{ .@"union" = try collected.toOwnedSlice(ctx.alloc) };
+            return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(ctx.alloc) } };
         },
         // "fn(int) -> bool" -> function(param_types=@[int], return_type=bool)
         .function => |f| {
             var param_types = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, f.params.len);
             errdefer param_types.deinit(ctx.alloc);
             for (f.params) |p| {
-                try param_types.append(ctx.alloc, if (p.type_name) |tn| try evalTypeExpr(ctx, tn) else .any);
+                try param_types.append(ctx.alloc, if (p.type_name) |tn| try evalTypeExpr(ctx, tn) else .{ .tag = .any });
             }
             var param_names = try std.ArrayList([]const u8).initCapacity(ctx.alloc, f.params.len);
             errdefer param_names.deinit(ctx.alloc);
             for (f.params) |p| try param_names.append(ctx.alloc, p.name);
-            const return_type = if (f.return_type) |rt| try evalTypeExpr(ctx, rt) else .any;
+            const return_type = if (f.return_type) |rt| try evalTypeExpr(ctx, rt) else TypeInfo{ .tag = .any };
             const sig = try ctx.alloc.create(types.FunctionSignature);
             sig.* = .{
                 .param_names = try param_names.toOwnedSlice(ctx.alloc),
@@ -266,7 +266,7 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
                 .return_type = return_type,
                 .required_count = param_types.items.len,
             };
-            return TypeInfo{ .function = sig };
+            return .{ .tag = .{ .function = sig } };
         },
         // "table<int>" -> table(key=null, value=int), "table<string, int>" -> table(key=string, value=int)
         .parameterized => |p| {
@@ -278,29 +278,29 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
                 if (resolved.len == 1) {
                     const v = try ctx.alloc.create(TypeInfo);
                     v.* = resolved[0];
-                    return TypeInfo{ .table = .{ .key = null, .value = v } };
+                    return .{ .tag = .{ .table = .{ .key = null, .value = v } } };
                 }
                 if (resolved.len == 2) {
                     const k = try ctx.alloc.create(TypeInfo);
                     k.* = resolved[0];
                     const v = try ctx.alloc.create(TypeInfo);
                     v.* = resolved[1];
-                    return TypeInfo{ .table = .{ .key = k, .value = v } };
+                    return .{ .tag = .{ .table = .{ .key = k, .value = v } } };
                 }
             }
-            return .any;
+            return .{ .tag = .any };
         },
         // "!int" -> union(@[{name="", types=@[:ok, int]}, {name="", types=@[:err, any]}])
         // the same shape the literal `(:ok, int) | (:err, any)` produces
         .error_union => |inner| {
             const t = try evalTypeExpr(ctx, inner);
-            const ok_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .atom = ":ok" }, t });
-            const err_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .atom = ":err" }, TypeInfo.any });
+            const ok_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .tag = .{ .atom = ":ok" } }, t });
+            const err_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .tag = .{ .atom = ":err" } }, .{ .tag = .any } });
             const variants = try ctx.alloc.dupe(UnionVariant, &.{
                 .{ .name = "", .types = ok_types },
                 .{ .name = "", .types = err_types },
             });
-            return TypeInfo{ .@"union" = variants };
+            return .{ .tag = .{ .@"union" = variants } };
         },
     }
 }

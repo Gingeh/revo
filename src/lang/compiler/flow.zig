@@ -122,35 +122,35 @@ pub fn compileRangeLoopBody(
         value_slot = try state.declareLocal(self, params[0].name, false);
         if (params[0].type_name) |tn| {
             const declared = try type_check.evalTypeExpr(self, tn);
-            if (declared != .number) {
+            if (declared.tag != .number) {
                 const msg = try std.fmt.allocPrint(
                     self.alloc,
                     "range loop variable must be num, got {s}",
-                    .{@tagName(declared)},
+                    .{@tagName(declared.tag)},
                 );
                 try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
                 return error.LoweringFailed;
             }
         }
-        state.setLocalType(self, value_slot.?, .number);
-        try state.setLocalTypeHint(self, params[0].name, .number);
+        state.setLocalType(self, value_slot.?, .{ .tag = .number });
+        try state.setLocalTypeHint(self, params[0].name, .{ .tag = .number });
     }
     if (params.len == 2 and !ast.isDiscardName(params[1].name)) {
         index_slot = try state.declareLocal(self, params[1].name, false);
         if (params[1].type_name) |tn| {
             const declared = try type_check.evalTypeExpr(self, tn);
-            if (declared != .number) {
+            if (declared.tag != .number) {
                 const msg = try std.fmt.allocPrint(
                     self.alloc,
                     "range loop variable must be num, got {s}",
-                    .{@tagName(declared)},
+                    .{@tagName(declared.tag)},
                 );
                 try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
                 return error.LoweringFailed;
             }
         }
-        state.setLocalType(self, index_slot.?, .number);
-        try state.setLocalTypeHint(self, params[1].name, .number);
+        state.setLocalType(self, index_slot.?, .{ .tag = .number });
+        try state.setLocalTypeHint(self, params[1].name, .{ .tag = .number });
     }
 
     // L_body: the top of the loop body, where range_loop backbranches
@@ -777,27 +777,27 @@ fn typeCompareHint(type_expr: *const Node, value_expr: *const Node) ?TypeHint {
 
 fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
     if (std.mem.eql(u8, name, "num") or std.mem.eql(u8, name, "number")) return .{
-        .@"union" = &.{
-            .{ .name = "", .types = &.{.number} },
-            .{ .name = "", .types = &.{.number} },
-        },
+        .tag = .{ .@"union" = &.{
+            .{ .name = "", .types = &.{.{ .tag = .number }} },
+            .{ .name = "", .types = &.{.{ .tag = .number }} },
+        } },
     };
     return types_mod.type_name_map.get(name);
 }
 
 fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
     return switch (pattern.expr) {
-        .number => .number,
-        .string, .multiline_string => .string,
-        .hash => |name| .{ .atom = name },
+        .number => .{ .tag = .number },
+        .string, .multiline_string => .{ .tag = .string },
+        .hash => |name| .{ .tag = .{ .atom = name } },
         .tuple_pattern => |items| blk: {
             var types = std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, items.len) catch break :blk null;
             defer types.deinit(self.alloc);
             for (items) |item| {
-                types.append(self.alloc, patternTypeInfo(self, item) orelse .any) catch break :blk null;
+                types.append(self.alloc, patternTypeInfo(self, item) orelse types_mod.TypeInfo{ .tag = .any }) catch break :blk null;
             }
             const tuple_items = types.toOwnedSlice(self.alloc) catch break :blk null;
-            break :blk types_mod.TypeInfo{ .tuple = tuple_items };
+            break :blk .{ .tag = .{ .tuple = tuple_items } };
         },
         .ident => |name| {
             // look up the variable type from hints or local state
@@ -805,7 +805,7 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
             _ = name;
             return null;
         },
-        .nil => .{ .atom = ":nil" },
+        .nil => .{ .tag = .{ .atom = ":nil" } },
         else => null,
     };
 }
@@ -817,7 +817,7 @@ fn narrowMatchPattern(
     pattern: *const Node,
     subject_type: types_mod.TypeInfo,
 ) !void {
-    if (subject_type != .@"union") return;
+    if (subject_type.tag != .@"union") return;
 
     if (pattern.expr != .tuple_pattern) return;
     const items = pattern.expr.tuple_pattern;
@@ -826,18 +826,18 @@ fn narrowMatchPattern(
     const first = items[0];
     const tag = if (first.expr == .hash) first.expr.hash else return;
 
-    for (subject_type.@"union") |variant| {
+    for (subject_type.tag.@"union") |variant| {
         const vt = variant.types;
-        if (vt.len == 0 or vt[0] != .atom) continue;
+        if (vt.len == 0 or vt[0].tag != .atom) continue;
 
-        const variant_tag = types_mod.atomPayload(vt[0].atom);
+        const variant_tag = types_mod.atomPayload(vt[0].tag.atom);
         const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
         if (!std.mem.eql(u8, variant_tag, pattern_tag)) continue;
 
         const payload = vt[1..];
         for (items[1..], 0..) |item, i| {
             if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
-                const narrowed = if (i < payload.len) payload[i] else .any;
+                const narrowed = if (i < payload.len) payload[i] else types_mod.TypeInfo{ .tag = .any };
                 try state.setLocalTypeHint(self, item.expr.ident, narrowed);
             }
         }

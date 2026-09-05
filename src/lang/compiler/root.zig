@@ -679,7 +679,7 @@ pub const Compiler = struct {
                 const left_type = type_check.inferExprType(self, b.left);
                 const right_type = type_check.inferExprType(self, b.right);
 
-                const both_numeric = left_type == .number and right_type == .number;
+                const both_numeric = left_type.tag == .number and right_type.tag == .number;
 
                 const specialized_op: Opcode = if (both_numeric)
                     switch (b.op) {
@@ -1064,16 +1064,16 @@ pub const Compiler = struct {
     ) InternalLowerError!bool {
         if (call.implicit_self or call.type_args.len > 0) return false;
         const callee_type = type_check.inferExprType(self, call.callee);
-        if (callee_type != .struct_type) return false;
+        if (callee_type.tag != .struct_type) return false;
         const type_id = self.vm.struct_types.findTypeByName(
-            callee_type.struct_type,
+            callee_type.tag.struct_type,
         ) orelse return false;
 
         if (call.args.len > 1) {
             const msg = try std.fmt.allocPrint(
                 self.alloc,
                 "struct `{s}` expects at most 1 init table, got {d}",
-                .{ callee_type.struct_type, call.args.len },
+                .{ callee_type.tag.struct_type, call.args.len },
             );
             return self.fail(.CompileError, call.callee, msg);
         }
@@ -1097,7 +1097,7 @@ pub const Compiler = struct {
         const module_name = switch (type_check.inferExprType(
             self,
             field.object,
-        )) {
+        ).tag) {
             .string => "string",
             .tuple => "tuple",
             .table => "table",
@@ -1302,13 +1302,13 @@ pub const Compiler = struct {
         const min_args = @min(sig.param_types.len, reordered_args.len);
         for (0..min_args) |i| {
             const expected_type = sig.param_types[i];
-            if (expected_type == .any) continue;
+            if (expected_type.tag == .any) continue;
             const actual_type = type_check.inferExprType(
                 self,
                 reordered_args[i],
             );
             // type params (generics) are .type_var, skip type check
-            if (expected_type == .type_var) continue;
+            if (expected_type.tag == .type_var) continue;
             type_check.checkType(
                 expected_type,
                 actual_type,
@@ -1373,7 +1373,7 @@ pub const Compiler = struct {
             // type-check the inserted defaults
             for (reordered_args.len..sig.param_types.len) |idx| {
                 const expected_type = sig.param_types[idx];
-                if (expected_type == .any or expected_type == .type_var) continue;
+                if (expected_type.tag == .any or expected_type.tag == .type_var) continue;
                 const actual_type = type_check.inferExprType(self, full_args[idx]);
                 type_check.checkType(expected_type, actual_type) catch |err| switch (err) {
                     error.TypeError => {
@@ -1435,7 +1435,7 @@ pub const Compiler = struct {
         field_name: []const u8,
     ) ?usize {
         if (object.expr != .ident) return null;
-        return switch (type_check.inferExprType(self, object)) {
+        return switch (type_check.inferExprType(self, object).tag) {
             .struct_type => |type_name| blk: {
                 const type_id = self.vm.struct_types.findTypeByName(type_name) orelse break :blk null;
                 const desc = self.vm.struct_types.getType(type_id) orelse break :blk null;
