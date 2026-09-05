@@ -14,11 +14,14 @@ pub declare table.rawset = fn(self: table, key: any, value: any) -> table
 #* sets the metatable of the table, `:nil` clears it *#
 pub declare table.set_meta = fn(self: table, meta: :nil|table) -> table
 
+#* returns metatable of value or :undef *#
+pub declare table.get_meta = fn(self: table) -> table | :undef
+
 #* unwraps result tuple, panics if not :ok *#
 pub declare table.unwrap = fn(self: table) -> any
 
 #* inserts value at position, shifting elements right *#
-pub declare table.insert = fn(self: table, pos: num, value: any) -> atom
+pub declare table.insert = fn(self: table, pos: num, value: any) -> :ok
 
 #* inserts elements as last *#
 pub declare table.push = fn(self: table, values: any...) -> table

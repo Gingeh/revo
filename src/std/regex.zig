@@ -65,9 +65,6 @@ fn compileFn(args: []const Data, vm: *VM) !HostResult {
 
     try table.putRaw(try vm.dataAtom("_pattern"), args[0], vm);
 
-    const mt_id = try vm.tables.create();
-    const mt = try vm.tables.get(mt_id);
-
     const gc_fn_id = try vm.installHost("__regex_gc", .{
         .arity = 1,
         .param_types = &.{.table},
@@ -76,8 +73,6 @@ fn compileFn(args: []const Data, vm: *VM) !HostResult {
         .ret_type = .any,
     });
 
-    try mt.putRaw(try vm.dataAtom("__gc"), Data.new.function(gc_fn_id), vm);
-    try vm.setTableMetatable(tid, mt_id);
     try vm.registerFinalizer(tid, Data.new.function(gc_fn_id));
 
     return .okData(Data.new.table(tid));
@@ -127,9 +122,6 @@ fn findAllFn(args: []const Data, vm: *VM) !HostResult {
         try vm.registerFinalizer(it_id, Data.new.function(gc_fn_id));
     }
 
-    const mt_id = try vm.tables.create();
-    const mt = try vm.tables.get(mt_id);
-
     const next_fn_id = try vm.installHost("__regex_next", .{
         .arity = 1,
         .param_types = &.{.table},
@@ -137,8 +129,7 @@ fn findAllFn(args: []const Data, vm: *VM) !HostResult {
         .variadic = false,
         .ret_type = .any,
     });
-    try mt.putRaw(try vm.dataAtom("__call"), Data.new.function(next_fn_id), vm);
-    try vm.setTableMetatable(it_id, mt_id);
+    try it.putRaw(try vm.dataAtom("__call"), Data.new.function(next_fn_id), vm);
 
     return .okData(Data.new.table(it_id));
 }

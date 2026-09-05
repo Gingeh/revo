@@ -1629,20 +1629,20 @@ pub fn callRegister(
         };
     }
 
-    // try __call mm on non-fn callees
+    // try __call on non-fn callees: table fields first, then metatables
     if (callee.asTable()) |_| {
         @branchHint(.unlikely);
-        // branch check explicit __call mm
-        if (try self.getMetamethodByAtom(
+        if (try self.resolveField(
             callee,
-            revo.core_atoms.atomId(.__call),
-        )) |mm| {
+            Data.new.atom(revo.core_atoms.atomId(.__call)),
+            null,
+        )) |field| {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
             const args = fiber.registers[args_start..args_end];
             const result = try self.callFunctionParts(
-                mm,
+                field.value,
                 callee,
                 args,
                 instr.c,

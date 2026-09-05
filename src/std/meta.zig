@@ -12,7 +12,7 @@ pub fn set_debug(args: []const Data, vm: *VM) !HostResult {
 // get metatable
 pub fn get_metatable_(args: []const Data, vm: *VM) !HostResult {
     const mt = try vm.getMetatableId(args[0]);
-    return if (mt) |id| .{ .ok = Data.new.table(id) } else .{ .ok = revo.Data.new.core(.missing) };
+    return if (mt) |id| .{ .ok = Data.new.table(id) } else .{ .ok = revo.Data.new.core(.undef) };
 }
 
 /// > set_metatable(tbl: table, meta: table) -> table

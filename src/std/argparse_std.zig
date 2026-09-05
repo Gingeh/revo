@@ -135,26 +135,21 @@ fn parseFn(args: []const Data, vm: *VM) !HostResult {
     try builder.putRawAtom(try vm.internAtom("_args_ptr"), Data.new.foreign(arg_defs), vm);
     try builder.putRawAtom(try vm.internAtom("_cmds_ptr"), Data.new.foreign(cmd_defs), vm);
 
-    // builder metatable
-    const mt_id = try vm.tables.create();
-    const mt = try vm.tables.get(mt_id);
-
     const install = struct {
-        fn go(vm_: *VM, mt_: anytype, comptime name: []const u8, func: root.HostFn) !void {
+        fn go(vm_: *VM, tbl: anytype, comptime name: []const u8, func: root.HostFn) !void {
             const fn_id = try vm_.installHost(name, .{
                 .arity = 1,
                 .variadic = true,
                 .param_types = &.{.any},
                 .func = func,
             });
-            try mt_.putRawAtom(try vm_.internAtom(name), Data.new.function(fn_id), vm_);
+            try tbl.putRawAtom(try vm_.internAtom(name), Data.new.function(fn_id), vm_);
         }
     };
-    try install.go(vm, mt, "flag", builderFlagFn);
-    try install.go(vm, mt, "option", builderOptionFn);
-    try install.go(vm, mt, "command", builderCommandFn);
-    try install.go(vm, mt, "positional", builderPositionalFn);
-    try vm.setTableMetatable(builder_id, mt_id);
+    try install.go(vm, builder, "flag", builderFlagFn);
+    try install.go(vm, builder, "option", builderOptionFn);
+    try install.go(vm, builder, "command", builderCommandFn);
+    try install.go(vm, builder, "positional", builderPositionalFn);
 
     // call user callback
     _ = try vm.callFunctionParts(args[0], null, &[_]Data{Data.new.table(builder_id)}, null);

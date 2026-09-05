@@ -300,25 +300,25 @@ pub fn sum_fn(args: []const Data, vm: *VM) !HostResult {
 }
 
 /// __call handler for iterator tables
-/// reads the kind from the metatable and advances the matching state machine
+/// reads the kind from the table and advances the matching state machine
 fn iteratorNext(args: []const Data, vm: *VM) !HostResult {
-    const mt_id = (try vm.getMetatableId(args[0])) orelse
+    const table_id = args[0].asTable() orelse
         return .okData(revo.Data.new.core(.done));
-    const kind_val = (try vm.tables.get(mt_id)).getRawAtom(revo.core_atoms.kind.atomId(), vm) orelse
+    const kind_val = (try vm.tables.get(table_id)).getRawAtom(revo.core_atoms.kind.atomId(), vm) orelse
         return .okData(revo.Data.new.core(.done));
     const kind_num = kind_val.asNum() orelse return .okData(revo.Data.new.core(.done));
     const kind: Kind = @enumFromInt(@as(usize, @intFromFloat(kind_num)));
     return switch (kind) {
-        .seq => seqNext(mt_id, vm),
-        .map => mapNext(mt_id, vm),
-        .filter => filterNext(mt_id, vm),
-        .take => takeNext(mt_id, vm),
-        .drop => dropNext(mt_id, vm),
-        .enumerate => enumerateNext(mt_id, vm),
-        .chunk => chunkNext(mt_id, vm),
-        .zip => zipNext(mt_id, vm),
-        .flat_map => flatMapNext(mt_id, vm),
-        .range => rangeNext(mt_id, vm),
+        .seq => seqNext(table_id, vm),
+        .map => mapNext(table_id, vm),
+        .filter => filterNext(table_id, vm),
+        .take => takeNext(table_id, vm),
+        .drop => dropNext(table_id, vm),
+        .enumerate => enumerateNext(table_id, vm),
+        .chunk => chunkNext(table_id, vm),
+        .zip => zipNext(table_id, vm),
+        .flat_map => flatMapNext(table_id, vm),
+        .range => rangeNext(table_id, vm),
     };
 }
 
@@ -470,7 +470,7 @@ fn wrapIterable(vm: *VM, obj: Data) !?Data {
     if (obj.isFunction()) return obj;
     if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atomId())) |mm|
         return try vm.callFunctionParts(mm, null, &[_]Data{obj}, null);
-    if (obj.isTable() and try vm.getMetamethodByAtom(obj, revo.core_atoms.__call.atomId()) != null)
+    if (obj.isTable() and try vm.resolveField(obj, Data.new.atom(revo.core_atoms.atomId(.__call)), null) != null)
         return obj;
     if (obj.isString() or obj.isTuple() or obj.isTable()) return obj;
     return null;
@@ -481,7 +481,7 @@ fn wrapIterable(vm: *VM, obj: Data) !?Data {
 fn toCallable(vm: *VM, obj: Data) !?Data {
     const w = (try wrapIterable(vm, obj)) orelse return null;
     if (w.isFunction()) return w;
-    if (w.isTable() and try vm.getMetamethodByAtom(w, revo.core_atoms.__call.atomId()) != null)
+    if (w.isTable() and try vm.resolveField(w, Data.new.atom(revo.core_atoms.atomId(.__call)), null) != null)
         return w;
     const it_id = try makeIterator(vm, .seq);
     try putState(vm, it_id, .up, w);
@@ -511,25 +511,29 @@ fn makeSeqIterator(vm: *VM, obj: Data) !HostResult {
     return .okData(Data.new.table(it_id));
 }
 
-/// creates an empty iterator table whose metatable holds state and __call
+/// creates an iterator table with state and __call stored directly in the table
 fn makeIterator(vm: *VM, kind: Kind) !mem.TableID {
     const it_id = try vm.tables.create();
-    const mt_id = try vm.tables.create();
-    const mt = try vm.tables.get(mt_id);
-    try mt.putRawAtom(revo.core_atoms.kind.atomId(), Data.new.num(@as(f64, @floatFromInt(@intFromEnum(kind)))), vm);
+    const it = try vm.tables.get(it_id);
+    try it.putRawAtom(revo.core_atoms.kind.atomId(), Data.new.num(@as(f64, @floatFromInt(@intFromEnum(kind)))), vm);
     const next_id = try vm.installHost("iter_next", .{
         .arity = 1,
         .param_types = &.{.any},
         .func = iteratorNext,
     });
-    try mt.putRawAtom(revo.core_atoms.__call.atomId(), Data.new.function(next_id), vm);
-    try vm.setTableMetatable(it_id, mt_id);
+    try it.putRawAtom(revo.core_atoms.__call.atomId(), Data.new.function(next_id), vm);
+    //
+    // set tihs module as metatable for method chaining
+    if (vm.stdlib_globals.get(try vm.internAtom("iter"))) |iter_val| {
+        if (iter_val.asTable()) |iter_tid| {
+            try vm.setTableMetatable(it_id, iter_tid);
+        }
+    }
     return it_id;
 }
 
 fn putState(vm: *VM, it_id: mem.TableID, comptime k: revo.core_atoms, val: Data) !void {
-    const mt_id = (try vm.getMetatableId(Data.new.table(it_id))).?;
-    try (try vm.tables.get(mt_id)).putRawAtom(k.atomId(), val, vm);
+    try (try vm.tables.get(it_id)).putRawAtom(k.atomId(), val, vm);
 }
 
 /// advances the state machine one element; out_idx is the index (or key for
@@ -539,7 +543,7 @@ fn pullStep(vm: *VM, st_id: mem.TableID, out: *Data, out_idx: *Data) !bool {
     const up = st.getRawAtom(revo.core_atoms.up.atomId(), vm) orelse return false;
 
     const callable = up.isFunction() or
-        (up.isTable() and try vm.getMetamethodByAtom(up, revo.core_atoms.__call.atomId()) != null);
+        (up.isTable() and try vm.resolveField(up, Data.new.atom(revo.core_atoms.atomId(.__call)), null) != null);
     if (callable) {
         const v = try vm.callFunctionParts(up, null, &.{}, null);
         if (isDone(v)) return false;
@@ -843,8 +847,8 @@ test "iter index callbacks and state hiding" {
 
     try testing.topNumber(
         \\ const it = iter.map((1, 2, 3), fn(x) x)
-        \\ len(it:keys()) + it:len()
-    , 0);
+        \\ it:len()
+    , 4);
 
     try testing.topString(
         \\ const out = {}
@@ -889,4 +893,29 @@ test "iter Host closures can allocate tables without corrupting pools" {
         \\     acc + 1
         \\ end, 0)
     , 3);
+}
+
+test "iter method chaining" {
+    try testing.topNumber(
+        \\ to_iter((1, 2, 3, 4, 5))
+        \\   :map(fn(x) x * 2)
+        \\   :filter(fn(x) x / 1.5 > 3)
+        \\   :collect()
+        \\   |> iter.sum()
+    , 24);
+
+    try testing.topNumber(
+        \\ (1, 2, 3, 4, 5)
+        \\   |> iter.map(fn(x) x * 2)
+        \\   |> iter.filter(fn(x) x / 1.5 > 3)
+        \\   |> iter.collect()
+        \\   |> iter.sum()
+    , 24);
+
+    try testing.topNumber(
+        \\ iter.range(5)
+        \\   :map(fn(x) x + 1)
+        \\   :collect()
+        \\   |> iter.sum()
+    , 15);
 }

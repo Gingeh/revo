@@ -10,8 +10,8 @@ pub declare len = fn(value: any) -> num
 #* prints one value and returns it back *#
 pub declare inspect = fn(value: any) -> any
 
-#* returns metatable of value or :missing *#
-pub declare get_metatable = fn(value: any) -> table|atom
+#* returns metatable of value or :undef *#
+pub declare get_metatable = fn(value: any) -> table | :undef
 
 #* sets metatable of value *#
 pub declare set_metatable = fn(value: any, meta: table|:nil) -> any
