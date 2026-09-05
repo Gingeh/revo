@@ -1,5 +1,5 @@
-// diagnostics borrow their text and source slices from arena-backed storage
-// do not manually free anything
+//! diagnostics borrow their text and source slices from arena-backed storage
+//! do not manually free anything
 
 const std = @import("std");
 
@@ -71,8 +71,8 @@ pub const Report = struct {
 
     pub fn deinit(self: *Report, alloc: std.mem.Allocator) void {
         if (self.message.len != 0) alloc.free(self.message);
-        if (self.source_name) |source_name| alloc.free(source_name);
-        if (self.source) |source| alloc.free(source);
+        if (self.source_name) |sn| alloc.free(sn);
+        if (self.source) |src| alloc.free(src);
         for (self.parts) |part| switch (part) {
             .@"error" => |err| alloc.free(err),
             .tip => |tip| alloc.free(tip),
@@ -80,23 +80,20 @@ pub const Report = struct {
             .note => |note| alloc.free(note),
             .span => |span| {
                 if (span.message.len != 0) alloc.free(span.message);
-                if (span.source_name) |source_name| alloc.free(source_name);
-                if (span.source) |source| alloc.free(source);
+                if (span.source_name) |sn| alloc.free(sn);
+                if (span.source) |src| alloc.free(src);
             },
             .trace => |trace| {
                 alloc.free(trace.function_name);
-                if (trace.source_name) |source_name| alloc.free(source_name);
-                if (trace.source) |source| alloc.free(source);
+                if (trace.source_name) |sn| alloc.free(sn);
+                if (trace.source) |src| alloc.free(src);
             },
         };
         alloc.free(self.parts);
     }
 
     /// deep copy borrowed text into `alloc`
-    pub fn copy(
-        report: Report,
-        alloc: std.mem.Allocator,
-    ) !Report {
+    pub fn copy(report: Report, alloc: std.mem.Allocator) !Report {
         const message = try alloc.dupe(u8, report.message);
         errdefer alloc.free(message);
         const parts = try alloc.dupe(Part, report.parts);
@@ -108,18 +105,18 @@ pub const Report = struct {
             .warn => |warn| part.* = .{ .warn = try alloc.dupe(u8, warn) },
             .note => |note| part.* = .{ .note = try alloc.dupe(u8, note) },
             .span => |span| {
-                var copied = span;
-                if (copied.message.len != 0) copied.message = try alloc.dupe(u8, copied.message);
-                if (copied.source_name) |source_name| copied.source_name = try alloc.dupe(u8, source_name);
-                if (copied.source) |source| copied.source = try alloc.dupe(u8, source);
-                part.* = .{ .span = copied };
+                var c = span;
+                if (c.message.len != 0) c.message = try alloc.dupe(u8, c.message);
+                if (c.source_name) |sn| c.source_name = try alloc.dupe(u8, sn);
+                if (c.source) |src| c.source = try alloc.dupe(u8, src);
+                part.* = .{ .span = c };
             },
             .trace => |frame| {
-                var copied = frame;
-                copied.function_name = try alloc.dupe(u8, copied.function_name);
-                if (copied.source_name) |source_name| copied.source_name = try alloc.dupe(u8, source_name);
-                if (copied.source) |source| copied.source = try alloc.dupe(u8, source);
-                part.* = .{ .trace = copied };
+                var c = frame;
+                c.function_name = try alloc.dupe(u8, c.function_name);
+                if (c.source_name) |sn| c.source_name = try alloc.dupe(u8, sn);
+                if (c.source) |src| c.source = try alloc.dupe(u8, src);
+                part.* = .{ .trace = c };
             },
         };
 
@@ -142,28 +139,20 @@ pub fn Diagnostic(comptime Kind: type) type {
 
 /// primary span if the report has one
 pub fn primarySpan(report: Report) ?SpanPart {
+    var fallback: ?SpanPart = null;
     for (report.parts) |part| {
-        switch (part) {
-            .span => |span| if (span.role == .primary) return span,
-            else => {},
+        if (part == .span) {
+            if (part.span.role == .primary) return part.span;
+            if (fallback == null) fallback = part.span;
         }
     }
-    for (report.parts) |part| {
-        switch (part) {
-            .span => return part.span,
-            else => {},
-        }
-    }
-    return null;
+    return fallback;
 }
 
 /// first error message if the report has one
 pub fn firstError(report: Report) ?[]const u8 {
     for (report.parts) |part| {
-        switch (part) {
-            .@"error" => |msg| return msg,
-            else => {},
-        }
+        if (part == .@"error") return part.@"error";
     }
     return null;
 }
@@ -191,22 +180,13 @@ pub fn renderReport(
                 try pretty.printError(writer, "{s}", .{message});
                 error_seen = true;
             },
-            .span => |span| switch (span.role) {
-                .primary => try renderSpanBlock(
-                    alloc,
-                    writer,
-                    span.source_name orelse source_name,
-                    span.source orelse source,
-                    span.span,
-                    if (span.message.len == 0) null else span.message,
-                ),
-                .secondary => try renderSecondarySpan(
-                    writer,
-                    span.source_name orelse source_name,
-                    span.span,
-                    if (span.message.len == 0) null else span.message,
-                ),
-                else => {},
+            .span => |span| {
+                const msg = if (span.message.len == 0) null else span.message;
+                switch (span.role) {
+                    .primary => try renderSpanBlock(alloc, writer, span.source_name orelse source_name, span.source orelse source, span.span, msg),
+                    .secondary => try renderSecondarySpan(writer, span.source_name orelse source_name, span.span, msg),
+                    else => {},
+                }
             },
             .tip => |tip| try writer.print("  = tip: {s}\n", .{tip}),
             .warn => |warn| try writer.print("  = warning: {s}\n", .{warn}),
@@ -238,48 +218,40 @@ pub fn renderAt(
     var parts = try alloc.alloc(Part, part_count);
     defer alloc.free(parts);
 
-    var part_index: usize = 0;
-    parts[part_index] = .{ .@"error" = message };
-    part_index += 1;
+    var i: usize = 0;
+    parts[i] = .{ .@"error" = message };
+    i += 1;
     if (span) |s| {
-        parts[part_index] = .{ .span = .{ .span = s, .role = .primary, .source_name = source_name, .source = source } };
-        part_index += 1;
+        parts[i] = .{ .span = .{ .span = s, .role = .primary, .source_name = source_name, .source = source } };
+        i += 1;
     }
     for (labels) |label| {
-        parts[part_index] = .{ .span = .{
-            .span = label.span,
-            .role = .secondary,
-            .message = label.message,
-            .source_name = source_name,
-            .source = source,
-        } };
-        part_index += 1;
+        parts[i] = .{ .span = .{ .span = label.span, .role = .secondary, .message = label.message, .source_name = source_name, .source = source } };
+        i += 1;
     }
     for (notes) |note| {
-        parts[part_index] = .{ .note = note.message };
-        part_index += 1;
+        parts[i] = .{ .note = note.message };
+        i += 1;
     }
 
-    const report: Report = .{
+    try renderReport(alloc, writer, .{
         .message = message,
         .parts = parts,
         .source_name = source_name,
         .source = source,
-    };
-    try renderReport(alloc, writer, report);
+    });
 }
 
 fn renderTrace(writer: *std.Io.Writer, frame: TraceFrame, idx: usize) !void {
     const frame_source = frame.source_name orelse "<source>";
     try writer.print("  {d}: {s}", .{ idx, frame.function_name });
     if (frame.span) |span| {
-        try writer.print(" at {s}:{d}:{d}", .{ frame_source, span.line, span.column });
+        try writer.print(" at {s}:{d}:{d}\n", .{ frame_source, span.line, span.column });
     } else if (frame.pc) |pc| {
-        try writer.print(" at {s}:pc={d}", .{ frame_source, pc });
+        try writer.print(" at {s}:pc={d}\n", .{ frame_source, pc });
     } else {
-        try writer.print(" at {s}", .{frame_source});
+        try writer.print(" at {s}\n", .{frame_source});
     }
-    try writer.writeByte('\n');
 }
 
 const SpanLine = struct {
@@ -290,11 +262,167 @@ const SpanLine = struct {
     span_col: u32,
 };
 
-// not good: renderSpanBlock and renderBoxSpanBlock share ~80% of their
-// context-extraction and bookend logic but are separate codepaths
+const ExtractedSpan = struct {
+    lines: []SpanLine,
+    ctx_before: [2]SpanLine,
+    ctx_before_len: usize,
+    ctx_after: [2]SpanLine,
+    ctx_after_len: usize,
+    line_width: usize,
+    buf: []SpanLine,
 
-// columns are byte-counted by
-// the lexer, so tabs must be expanded or carets drift left
+    pub fn deinit(self: ExtractedSpan, alloc: std.mem.Allocator) void {
+        alloc.free(self.buf);
+    }
+};
+
+fn extractSpan(
+    alloc: std.mem.Allocator,
+    source: []const u8,
+    location: ast.Span,
+    start_line: u32,
+    start_column: u32,
+) !?ExtractedSpan {
+    const clamped_start = @min(location.start, source.len);
+    const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
+    var line_byte: usize = if (line1_before == 0) 0 else line1_before + 1;
+    var line_num: u32 = start_line;
+    const line_cap = countSpanLines(source, location.start, location.end) + 1;
+    const render_end = if (location.end <= line_byte) @min(line_byte + 1, source.len) else location.end;
+
+    var buf = try alloc.alloc(SpanLine, line_cap);
+    errdefer alloc.free(buf);
+    var total: usize = 0;
+
+    while (line_byte < render_end and line_byte < source.len) {
+        const line_end_rel = std.mem.findScalar(u8, source[line_byte..], '\n') orelse (source.len - line_byte);
+        const line_end = line_byte + line_end_rel;
+        buf[total] = .{
+            .num = line_num,
+            .text = source[line_byte..line_end],
+            .span_start = if (line_num == start_line) location.start else line_byte,
+            .span_end = @min(render_end, line_end),
+            .span_col = if (line_num == start_line) start_column else 1,
+        };
+        total += 1;
+        line_byte = line_end + 1;
+        line_num += 1;
+    }
+
+    if (total == 0) {
+        alloc.free(buf);
+        return null;
+    }
+
+    const lines = buf[0..total];
+    var ctx_before: [2]SpanLine = undefined;
+    var ctx_before_len: usize = 0;
+
+    if (line1_before > 0) {
+        var prev_end: usize = line1_before;
+        var ctx_num: u32 = start_line;
+        while (ctx_before_len < 2 and prev_end > 0) {
+            const prev_nl = std.mem.findScalarLast(u8, source[0..prev_end], '\n') orelse 0;
+            const ctx_start = if (prev_nl == 0) 0 else prev_nl + 1;
+            const ctx_text = source[ctx_start..prev_end];
+            if (ctx_num == 0) break;
+            ctx_num -= 1;
+            if (std.mem.trim(u8, ctx_text, " \t\r").len != 0) {
+                ctx_before[ctx_before_len] = .{
+                    .num = ctx_num,
+                    .text = ctx_text,
+                    .span_start = 0,
+                    .span_end = 0,
+                    .span_col = 0,
+                };
+                ctx_before_len += 1;
+            }
+            prev_end = prev_nl;
+        }
+    }
+
+    var ctx_after: [2]SpanLine = undefined;
+    var ctx_after_len: usize = 0;
+    var ctx_pos: usize = line_byte;
+    var ctx_num: u32 = line_num;
+
+    while (ctx_after_len < 2) {
+        if (ctx_pos >= source.len) break;
+        const next_nl = std.mem.findScalar(u8, source[ctx_pos..], '\n') orelse (source.len - ctx_pos);
+        const ctx_text = source[ctx_pos .. ctx_pos + next_nl];
+        if (std.mem.trim(u8, ctx_text, " \t\r").len == 0) {
+            ctx_pos = ctx_pos + next_nl + 1;
+            ctx_num += 1;
+            continue;
+        }
+        ctx_after[ctx_after_len] = .{
+            .num = ctx_num,
+            .text = ctx_text,
+            .span_start = 0,
+            .span_end = 0,
+            .span_col = 0,
+        };
+        ctx_after_len += 1;
+        ctx_pos = ctx_pos + next_nl + 1;
+        ctx_num += 1;
+    }
+
+    const max_line_num = blk: {
+        var max_line = start_line;
+        for (ctx_before[0..ctx_before_len]) |cl| {
+            if (cl.num > max_line)
+                max_line = cl.num;
+        }
+        for (lines) |cl| {
+            if (cl.num > max_line) max_line = cl.num;
+        }
+        for (ctx_after[0..ctx_after_len]) |cl| {
+            if (cl.num > max_line) max_line = cl.num;
+        }
+        break :blk max_line;
+    };
+
+    return .{
+        .lines = lines,
+        .ctx_before = ctx_before,
+        .ctx_before_len = ctx_before_len,
+        .ctx_after = ctx_after,
+        .ctx_after_len = ctx_after_len,
+        .line_width = @max(countDigits(max_line_num), @as(usize, 2)),
+        .buf = buf,
+    };
+}
+
+fn renderContextBefore(writer: *std.Io.Writer, extracted: ExtractedSpan, comptime dim: bool) !void {
+    var before_idx: usize = extracted.ctx_before_len;
+    while (before_idx > 0) {
+        before_idx -= 1;
+        const cl = extracted.ctx_before[before_idx];
+        if (dim and pretty.supports_color) try writer.writeAll(COLOR_DIM);
+        try writeLineNumber(writer, cl.num, extracted.line_width);
+        try writeExpanded(writer, cl.text, 0);
+        try writer.writeByte('\n');
+        if (dim and pretty.supports_color) try writer.writeAll(COLOR_RESET);
+    }
+    if (extracted.ctx_before_len > 0) {
+        try writeBlankPipeLine(writer, extracted.line_width, 0);
+    }
+}
+
+fn renderContextAfter(writer: *std.Io.Writer, extracted: ExtractedSpan, comptime dim: bool) !void {
+    if (extracted.ctx_after_len > 0) {
+        try writeBlankPipeLine(writer, extracted.line_width, 0);
+    }
+    for (extracted.ctx_after[0..extracted.ctx_after_len]) |cl| {
+        if (dim and pretty.supports_color) try writer.writeAll(COLOR_DIM);
+        try writeLineNumber(writer, cl.num, extracted.line_width);
+        try writeExpanded(writer, cl.text, 0);
+        try writer.writeByte('\n');
+        if (dim and pretty.supports_color) try writer.writeAll(COLOR_RESET);
+    }
+}
+
+// columns are byte-counted by the lexer, so tabs must be expanded or carets drift left
 const tab_width = 2;
 
 /// display columns `text` occupies, tabs snap to the next tab stop
@@ -331,8 +459,7 @@ fn countDigits(value: u32) usize {
 fn leadingWhitespaceLen(text: []const u8) usize {
     var idx: usize = 0;
     while (idx < text.len) : (idx += 1) {
-        const ch = text[idx];
-        if (ch != ' ' and ch != '\t') break;
+        if (text[idx] != ' ' and text[idx] != '\t') break;
     }
     return idx;
 }
@@ -360,6 +487,11 @@ fn writeBoxPrefix(writer: *std.Io.Writer, line_width: usize, indent: usize) !voi
 fn writeBlankPipeLine(writer: *std.Io.Writer, line_width: usize, indent: usize) !void {
     try writeBoxPrefix(writer, line_width, indent);
     try writer.writeByte('\n');
+}
+
+fn writeIndentAndPipe(writer: *std.Io.Writer, line_width: usize) !void {
+    for (0..line_width) |_| try writer.writeByte(' ');
+    try writer.writeAll(" |  ");
 }
 
 fn countSpanLines(source: []const u8, start: usize, end: usize) usize {
@@ -394,149 +526,29 @@ fn renderSpanBlock(
 ) !void {
     const start_line = if (location.line == 0) 1 else location.line;
     const start_column = if (location.column == 0) 1 else location.column;
-    const span_lines = countSpanLines(source, location.start, location.end);
 
-    if (span_lines > 1) {
-        try renderBoxSpanBlock(
-            alloc,
-            writer,
-            source_name,
-            source,
-            location,
-            label_message,
-            start_line,
-            start_column,
-        );
-        return;
+    if (countSpanLines(source, location.start, location.end) > 1) {
+        return renderBoxSpanBlock(alloc, writer, source_name, source, location, label_message);
     }
 
     try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, start_line, start_column });
 
-    const clamped_start = @min(location.start, source.len);
-    const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
-    var line_byte: usize = if (line1_before == 0) 0 else line1_before + 1;
-    var line_num: u32 = start_line;
-    const line_cap = countSpanLines(source, location.start, location.end);
-    const render_end = if (location.end <= line_byte) @min(line_byte + 1, source.len) else location.end;
+    const extracted = try extractSpan(alloc, source, location, start_line, start_column) orelse return;
+    defer extracted.deinit(alloc);
 
-    var lines = try alloc.alloc(SpanLine, line_cap);
-    defer alloc.free(lines);
-    var total: usize = 0;
+    try renderContextBefore(writer, extracted, false);
 
-    while (line_byte < render_end and line_byte < source.len) {
-        const line_end_rel = std.mem.findScalar(u8, source[line_byte..], '\n') orelse (source.len - line_byte);
-        const line_end = line_byte + line_end_rel;
-        lines[total] = .{
-            .num = line_num,
-            .text = source[line_byte..line_end],
-            .span_start = if (line_num == start_line) location.start else line_byte,
-            .span_end = @min(render_end, line_end),
-            .span_col = if (line_num == start_line) start_column else 1,
-        };
-        total += 1;
-        line_byte = line_end + 1;
-        line_num += 1;
-    }
-    if (total == 0) return;
-    const lines_view = lines[0..total];
-    var ctx_before: [2]SpanLine = undefined;
-    var ctx_before_len: usize = 0;
-
-    if (total > 0 and line1_before > 0) {
-        var prev_end: usize = line1_before;
-        var ctx_num: u32 = start_line;
-        while (ctx_before_len < 2 and prev_end > 0) {
-            const prev_nl = std.mem.findScalarLast(u8, source[0..prev_end], '\n') orelse 0;
-            const ctx_start = if (prev_nl == 0) 0 else prev_nl + 1;
-            const ctx_text = source[ctx_start..prev_end];
-            if (ctx_num == 0) break;
-            ctx_num -= 1;
-            if (std.mem.trim(u8, ctx_text, " \t\r").len != 0) {
-                ctx_before[ctx_before_len] = .{
-                    .num = ctx_num,
-                    .text = ctx_text,
-                    .span_start = 0,
-                    .span_end = 0,
-                    .span_col = 0,
-                };
-                ctx_before_len += 1;
-            }
-            prev_end = prev_nl;
-        }
-    }
-
-    var ctx_after: [2]SpanLine = undefined;
-    var ctx_after_len: usize = 0;
-
-    if (total > 0) {
-        var ctx_pos: usize = line_byte;
-        var ctx_num: u32 = line_num;
-        while (ctx_after_len < 2) {
-            if (ctx_pos >= source.len) break;
-            const next_nl = std.mem.findScalar(u8, source[ctx_pos..], '\n') orelse (source.len - ctx_pos);
-            const ctx_text = source[ctx_pos .. ctx_pos + next_nl];
-            const trimmed = std.mem.trim(u8, ctx_text, " \t\r");
-            if (trimmed.len == 0) {
-                ctx_pos = ctx_pos + next_nl + 1;
-                ctx_num += 1;
-                continue;
-            }
-            ctx_after[ctx_after_len] = .{
-                .num = ctx_num,
-                .text = ctx_text,
-                .span_start = 0,
-                .span_end = 0,
-                .span_col = 0,
-            };
-            ctx_after_len += 1;
-            ctx_pos = ctx_pos + next_nl + 1;
-            ctx_num += 1;
-            if (ctx_pos >= source.len) break;
-        }
-    }
-
-    const max_line_num = blk: {
-        var max_line: u32 = start_line;
-        for (ctx_before[0..ctx_before_len]) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        for (lines_view) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        for (ctx_after[0..ctx_after_len]) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        break :blk max_line;
-    };
-    const line_width = @max(countDigits(max_line_num), @as(usize, 2));
-
-    // render ctx before: plain lines above the span
-    var before_idx: usize = ctx_before_len;
-    while (before_idx > 0) {
-        before_idx -= 1;
-        const cl = ctx_before[before_idx];
-        try writeLineNumber(writer, cl.num, line_width);
-        try writeExpanded(writer, cl.text, 0);
-        try writer.writeByte('\n');
-    }
-    if (ctx_before_len > 0) {
-        try writeBlankPipeLine(writer, line_width, 0);
-    }
-
-    // render span lines: the source block itself and its edge markers
     const bookend_threshold = 10;
+    const total = extracted.lines.len;
     const tail_cut = if (total > bookend_threshold) 5 else total;
     const tail_start = if (total > bookend_threshold and total >= 10) total - 5 else total;
     var bookend_printed = false;
 
-    for (lines_view, 0..) |cl, i| {
+    for (extracted.lines, 0..) |cl, i| {
         const is_first = i == 0;
         const is_last = i + 1 == total;
-        const in_head = i < tail_cut;
-        const in_tail = i >= tail_start;
 
-        // bookend
-        if (total > bookend_threshold and !in_head and !in_tail) {
+        if (total > bookend_threshold and i >= tail_cut and i < tail_start) {
             if (!bookend_printed) {
                 try writer.print("   ... {d} lines ...\n", .{total - tail_cut - (total - tail_start)});
                 bookend_printed = true;
@@ -544,26 +556,21 @@ fn renderSpanBlock(
             continue;
         }
 
-        // this is the actual code row in the box
-        try writeLineNumber(writer, cl.num, line_width);
-        // try writer.writeAll(source_bracket);
+        try writeLineNumber(writer, cl.num, extracted.line_width);
         try writeExpanded(writer, cl.text, 0);
         try writer.writeByte('\n');
 
-        // underline marker: only the first and last rows get it
-        if (is_first or is_last or (is_first and is_last)) {
+        if (is_first or is_last) {
             const col = cl.span_col;
             const before_len = @min(@as(usize, col -| 1), cl.text.len);
             const pad = displayWidth(cl.text[0..before_len], 0);
             const span_here = cl.span_end -| cl.span_start;
             const clamped = @min(span_here, cl.text.len -| before_len);
             const highlight = @max(displayWidth(cl.text[before_len..][0..clamped], before_len), 1);
-            const ul_bracket_spaces: usize = if (is_first and is_last) 2 else if (is_last) 2 else 2;
-            for (0..line_width) |_| try writer.writeByte(' ');
-            try writer.writeByte(' ');
-            try writer.writeByte('|');
-            for (0..ul_bracket_spaces) |_| try writer.writeByte(' ');
+
+            try writeIndentAndPipe(writer, extracted.line_width);
             for (0..pad) |_| try writer.writeByte(' ');
+
             if (is_first and is_last) {
                 try writer.writeByte('^');
                 if (highlight > 1) {
@@ -574,10 +581,8 @@ fn renderSpanBlock(
             } else if (is_first) {
                 try writer.writeByte('^');
                 if (highlight > 1) for (0..highlight - 1) |_| try writer.writeByte('~');
-            } else if (is_last) {
-                if (highlight > 1) {
-                    for (0..highlight - 1) |_| try writer.writeByte('~');
-                }
+            } else {
+                if (highlight > 1) for (0..highlight - 1) |_| try writer.writeByte('~');
                 try writer.writeByte('^');
                 if (label_message) |msg| try writer.print(" {s}", .{msg});
             }
@@ -585,15 +590,7 @@ fn renderSpanBlock(
         }
     }
 
-    // render ctx after: plain lines below the span
-    if (ctx_after_len > 0) {
-        try writeBlankPipeLine(writer, line_width, 0);
-    }
-    for (ctx_after[0..ctx_after_len]) |cl| {
-        try writeLineNumber(writer, cl.num, line_width);
-        try writeExpanded(writer, cl.text, 0);
-        try writer.writeByte('\n');
-    }
+    try renderContextAfter(writer, extracted, false);
 }
 
 fn renderBoxSpanBlock(
@@ -603,135 +600,31 @@ fn renderBoxSpanBlock(
     source: []const u8,
     location: ast.Span,
     label_message: ?[]const u8,
-    start_line: u32,
-    start_column: u32,
 ) !void {
+    const start_line = if (location.line == 0) 1 else location.line;
+    const start_column = if (location.column == 0) 1 else location.column;
+
     try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, start_line, start_column });
     if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
     try writePipePrefix(writer, 0);
     try writer.writeByte('\n');
     if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
 
-    const clamped_start = @min(location.start, source.len);
-    const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
-    var line_byte: usize = if (line1_before == 0) 0 else line1_before + 1;
-    var line_num: u32 = start_line;
-    const line_cap = countSpanLines(source, location.start, location.end);
-    const render_end = if (location.end <= line_byte) @min(line_byte + 1, source.len) else location.end;
+    const extracted = try extractSpan(alloc, source, location, start_line, start_column) orelse return;
+    defer extracted.deinit(alloc);
 
-    var lines = try alloc.alloc(SpanLine, line_cap);
-    defer alloc.free(lines);
-    var total: usize = 0;
-    while (line_byte < render_end and line_byte < source.len) {
-        const line_end_rel = std.mem.findScalar(u8, source[line_byte..], '\n') orelse (source.len - line_byte);
-        const line_end = line_byte + line_end_rel;
-        lines[total] = .{
-            .num = line_num,
-            .text = source[line_byte..line_end],
-            .span_start = if (line_num == start_line) location.start else line_byte,
-            .span_end = @min(render_end, line_end),
-            .span_col = if (line_num == start_line) start_column else 1,
-        };
-        total += 1;
-        line_byte = line_end + 1;
-        line_num += 1;
-    }
-    if (total == 0) return;
-    const lines_view = lines[0..total];
-
-    var ctx_before: [2]SpanLine = undefined;
-    var ctx_before_len: usize = 0;
-    if (total > 0 and line1_before > 0) {
-        var prev_end: usize = line1_before;
-        var ctx_num: u32 = start_line;
-        while (ctx_before_len < 2 and prev_end > 0) {
-            const prev_nl = std.mem.findScalarLast(u8, source[0..prev_end], '\n') orelse 0;
-            const ctx_start = if (prev_nl == 0) 0 else prev_nl + 1;
-            const ctx_text = source[ctx_start..prev_end];
-            if (ctx_num == 0) break;
-            ctx_num -= 1;
-            if (std.mem.trim(u8, ctx_text, " \t\r").len != 0) {
-                ctx_before[ctx_before_len] = .{
-                    .num = ctx_num,
-                    .text = ctx_text,
-                    .span_start = 0,
-                    .span_end = 0,
-                    .span_col = 0,
-                };
-                ctx_before_len += 1;
-            }
-            prev_end = prev_nl;
-        }
-    }
-
-    var ctx_after: [2]SpanLine = undefined;
-    var ctx_after_len: usize = 0;
-    if (total > 0) {
-        var ctx_pos: usize = line_byte;
-        var ctx_num: u32 = line_num;
-        while (ctx_after_len < 2) {
-            if (ctx_pos >= source.len) break;
-            const next_nl = std.mem.findScalar(u8, source[ctx_pos..], '\n') orelse (source.len - ctx_pos);
-            const ctx_text = source[ctx_pos .. ctx_pos + next_nl];
-            const trimmed = std.mem.trim(u8, ctx_text, " \t\r");
-            if (trimmed.len == 0) {
-                ctx_pos = ctx_pos + next_nl + 1;
-                ctx_num += 1;
-                continue;
-            }
-            ctx_after[ctx_after_len] = .{
-                .num = ctx_num,
-                .text = ctx_text,
-                .span_start = 0,
-                .span_end = 0,
-                .span_col = 0,
-            };
-            ctx_after_len += 1;
-            ctx_pos = ctx_pos + next_nl + 1;
-            ctx_num += 1;
-            if (ctx_pos >= source.len) break;
-        }
-    }
-
-    const max_line_num = blk: {
-        var max_line: u32 = start_line;
-        for (ctx_before[0..ctx_before_len]) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        for (lines_view) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        for (ctx_after[0..ctx_after_len]) |cl| {
-            if (cl.num > max_line) max_line = cl.num;
-        }
-        break :blk max_line;
-    };
-    const line_width = @max(countDigits(max_line_num), @as(usize, 2));
-
-    var before_idx: usize = ctx_before_len;
-    while (before_idx > 0) {
-        before_idx -= 1;
-        const cl = ctx_before[before_idx];
-        if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
-        try writeLineNumber(writer, cl.num, line_width);
-        try writeExpanded(writer, cl.text, 0);
-        try writer.writeByte('\n');
-        if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
-    }
-    if (ctx_before_len > 0) {
-        try writeBlankPipeLine(writer, line_width, 0);
-    }
+    try renderContextBefore(writer, extracted, true);
 
     const bookend_threshold = 10;
+    const total = extracted.lines.len;
     const tail_cut = if (total > bookend_threshold) 5 else total;
     const tail_start = if (total > bookend_threshold and total >= 10) total - 5 else total;
     var bookend_printed = false;
 
     const common_indent = blk: {
         var min_indent: usize = std.math.maxInt(usize);
-        for (lines_view) |cl| {
+        for (extracted.lines) |cl| {
             if (std.mem.trim(u8, cl.text, " \t\r").len == 0) continue;
-            // shared indent: keep the box anchored to the source block
             const indent = leadingWhitespaceLen(cl.text);
             if (indent < min_indent) min_indent = indent;
         }
@@ -739,48 +632,40 @@ fn renderBoxSpanBlock(
     };
     const display_trim = common_indent;
 
-    const first_line = lines_view[0];
-    const last_line = lines_view[lines_view.len - 1];
-    // display widths of the shared indent
-    // tabs make it wider than its byte count
+    const first_line = extracted.lines[0];
+    const last_line = extracted.lines[total - 1];
     const first_trim_w = displayWidth(first_line.text[0..@min(display_trim, first_line.text.len)], 0);
     const last_trim_w = displayWidth(last_line.text[0..@min(display_trim, last_line.text.len)], 0);
-    // marker rows sit one column further left than code rows
-    const marker_offset = first_trim_w -| 5;
+
+    const marker_offset = first_trim_w -| 4;
     const first_span_off = @min(@as(usize, first_line.span_col -| 1), first_line.text.len);
     const top_dashes = displayWidth(first_line.text[0..first_span_off], 0) -| first_trim_w;
     const total_w = displayWidth(first_line.text, 0) -| first_trim_w;
     const top_vs = @max(@as(usize, 1), total_w -| top_dashes);
+
     const last_span_len = @min(last_line.span_end -| last_line.span_start, last_line.text.len);
-    const bottom_dashes = @max(@as(usize, 1), (displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w) -| 1);
-    // top edge: box header and caret stem
-    try writeBoxPrefix(writer, line_width, 3);
+    const bottom_dashes = @max(@as(usize, 1), displayWidth(last_line.text[0..last_span_len], 0) -| last_trim_w);
+
+    try writeBoxPrefix(writer, extracted.line_width, 2);
     for (0..marker_offset) |_| try writer.writeByte(' ');
     try writer.writeByte('+');
-    for (0..top_dashes) |_| try writer.writeByte('-');
+    for (0..top_dashes + 1) |_| try writer.writeByte('-');
     for (0..top_vs) |_| try writer.writeByte('v');
     try writer.writeByte('\n');
 
-    for (lines_view, 0..) |cl, i| {
-        const in_head = i < tail_cut;
-        const in_tail = i >= tail_start;
-        if (total > bookend_threshold and !in_head and !in_tail) {
+    for (extracted.lines, 0..) |cl, i| {
+        if (total > bookend_threshold and i >= tail_cut and i < tail_start) {
             if (!bookend_printed) {
-                // middle collapse: dimmed summary for skipped rows
                 if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
-                try writeBoxPrefix(writer, line_width, 3);
+                try writeBoxPrefix(writer, extracted.line_width, 2);
                 for (0..marker_offset) |_| try writer.writeByte(' ');
-                try writer.writeAll("...");
-                try writer.print(" {d} lines ", .{total - tail_cut - (total - tail_start)});
-                try writer.writeAll("...");
-                try writer.writeByte('\n');
+                try writer.print("... {d} lines ...\n", .{total - tail_cut - (total - tail_start)});
                 if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
                 bookend_printed = true;
             }
             continue;
         }
-        // source row: keep the original indent inside the box
-        try writeLineNumber(writer, cl.num, line_width);
+        try writeLineNumber(writer, cl.num, extracted.line_width);
         const row_trim_w = displayWidth(cl.text[0..@min(display_trim, cl.text.len)], 0);
         for (0..row_trim_w -| 4) |_| try writer.writeByte(' ');
         try writer.writeAll("| ");
@@ -788,8 +673,7 @@ fn renderBoxSpanBlock(
         try writer.writeByte('\n');
     }
 
-    // bottom edge: close the box under the final source row
-    try writeBoxPrefix(writer, line_width, 3);
+    try writeBoxPrefix(writer, extracted.line_width, 2);
     for (0..marker_offset) |_| try writer.writeByte(' ');
     try writer.writeByte('+');
     for (0..bottom_dashes) |_| try writer.writeByte('-');
@@ -797,16 +681,7 @@ fn renderBoxSpanBlock(
     if (label_message) |msg| try writer.print(" {s}", .{msg});
     try writer.writeByte('\n');
 
-    if (ctx_after_len > 0) {
-        try writeBlankPipeLine(writer, line_width, 0);
-    }
-    for (ctx_after[0..ctx_after_len]) |cl| {
-        if (pretty.supports_color) try writer.writeAll(COLOR_DIM);
-        try writeLineNumber(writer, cl.num, line_width);
-        try writeExpanded(writer, cl.text, 0);
-        try writer.writeByte('\n');
-        if (pretty.supports_color) try writer.writeAll(COLOR_RESET);
-    }
+    try renderContextAfter(writer, extracted, true);
 }
 
 test "single line span" {
@@ -878,16 +753,16 @@ test "report copy preserves multiple error parts" {
             .@"error" => |msg| alloc.free(msg),
             .span => |span| {
                 if (span.message.len != 0) alloc.free(span.message);
-                if (span.source_name) |source_name| alloc.free(source_name);
-                if (span.source) |source| alloc.free(source);
+                if (span.source_name) |sn| alloc.free(sn);
+                if (span.source) |src| alloc.free(src);
             },
             .tip => |tip| alloc.free(tip),
             .warn => |warn| alloc.free(warn),
             .note => |note| alloc.free(note),
             .trace => |trace| {
                 alloc.free(trace.function_name);
-                if (trace.source_name) |source_name| alloc.free(source_name);
-                if (trace.source) |source| alloc.free(source);
+                if (trace.source_name) |sn| alloc.free(sn);
+                if (trace.source) |src| alloc.free(src);
             },
         };
         alloc.free(copied.parts);

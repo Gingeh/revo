@@ -12,12 +12,6 @@ const signal_c = if (build_options.isocline and builtin.link_libc)
 else
     struct {};
 
-const libc = if (builtin.link_libc) @cImport({
-    @cInclude("stdlib.h");
-    @cInclude("string.h");
-    @cInclude("unistd.h");
-}) else struct {};
-
 const IsoclineContext = struct {
     vm: *VM,
     gpa: Allocator,
@@ -78,8 +72,6 @@ fn splashSeed(vm: *VM, banner_buffer: *[128]u8, out: *std.Io.Writer) usize {
     seed ^= @intFromPtr(banner_buffer);
     seed ^= @intFromPtr(out);
     seed ^= @intFromPtr(&splash_texts);
-    if (builtin.link_libc)
-        seed ^= @as(u64, @intCast(libc.getpid())) << 32;
     seed ^= @as(u64, @intFromPtr(&splashSeed)) >> 1;
     var rng = std.Random.SplitMix64.init(seed);
     return @intCast(rng.next());
@@ -89,7 +81,7 @@ fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u
     if (cenv == null) return;
     const ctx = isocline_ctx orelse return;
 
-    const plen = libc.strlen(prefix);
+    const plen = std.mem.len(prefix);
     const pslice = prefix[0..plen];
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -138,7 +130,7 @@ fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u
 
 fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     if (henv == null) return;
-    const input_len = libc.strlen(input);
+    const input_len = std.mem.len(input);
     if (input_len == 0) return;
     const input_slice = input[0..input_len];
 
@@ -470,8 +462,8 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     const writer = &out.interface;
 
     try writer.print(
-        "revo {s} repl -- type :q to exit, :h <name> for docs\n",
-        .{build_options.version},
+        "revo {s} repl ({s} for {s})\n> :q to exit, :h <name> for docs, <C-j> to start new line\n",
+        .{build_options.version, build_options.git_commit, try builtin.target.linuxTriple(gpa)},
     );
     try writer.print("\x1b[0;95m# {s}\x1b[0m\n", .{
         splashText(splashSeed(vm, &banner_buffer, writer)),
