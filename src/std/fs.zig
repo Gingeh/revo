@@ -10,6 +10,7 @@ pub const impls: []const api.Impl = &.{
     .{ .name = "write", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, write_fn) },
     .{ .name = "append", .f = if (@import("build_options").is_freestanding) root.defineStubVariadic(&.{ .any, .any }) else root.defineVariadic(&.{ .any, .any }, append_fn) },
     .{ .name = "stat", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, stat_fn) },
+    .{ .name = "lstat", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, lstat_fn) },
     .{ .name = "close", .f = if (@import("build_options").is_freestanding) root.defineStub(&.{.any}) else root.define(&.{.any}, close_fn) },
 };
 
@@ -201,10 +202,20 @@ fn append_fn(args: []const Data, vm: *VM) !HostResult {
 }
 
 /// > file:stat() -> !table
-/// get file metadata as a table
+/// get file metadata as a table (follows symlinks)
 fn stat_fn(args: []const Data, vm: *VM) !HostResult {
     const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
     const stat = Dir.cwd().statFile(vm.runtime.io, handle.path, .{}) catch |err| {
+        return try HostResult.Err(vm, mapIOError(err));
+    };
+    return try HostResult.Ok(vm, try makeStatTable(vm, stat));
+}
+
+/// > file:lstat() -> !table
+/// get file metadata as a table (doesn't follow symlinks)
+fn lstat_fn(args: []const Data, vm: *VM) !HostResult {
+    const handle = parseFileHandle(args[0], vm) catch return try HostResult.Err(vm, "InvalidFile");
+    const stat = Dir.cwd().statFile(vm.runtime.io, handle.path, .{ .follow_symlinks = false }) catch |err| {
         return try HostResult.Err(vm, mapIOError(err));
     };
     return try HostResult.Ok(vm, try makeStatTable(vm, stat));

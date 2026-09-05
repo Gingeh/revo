@@ -39,8 +39,11 @@ optional permissions default to the platform file default
 *#
 pub declare file.append = fn(self: table, data: any, permissions: atom|num?...) -> !num
 
-#* get file metadata as a table *#
+#* get file metadata as a table (follows symlinks) *#
 pub declare file.stat = fn(self: table) -> !table
+
+#* get file metadata as a table (doesn't follow symlinks) *#
+pub declare file.lstat = fn(self: table) -> !table
 
 #*
 closes a file handle table
