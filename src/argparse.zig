@@ -20,14 +20,6 @@
 //! a single optional leading "command" word (compile/repl/bench5/etc)
 //! can be matched before flags are even considered
 //!
-//! todo
-//! [x] long --args
-//! [x] short -aRgS
-//! [x] leftover / passthrough argv
-//! [x] leading command word (flat, not nested subcommand trees)
-//! [x] stop-parsing-flags-after-first-positional (needed for `revo script.rv -i`
-//!     to hand `-i` to the script instead of eating it as revo's own flag)
-//!
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -272,7 +264,7 @@ pub fn usage(allocator: Allocator, args: []const Arg, commands: []const Command)
     // commands
     if (commands.len > 0) {
         try buf.append(allocator, '\n');
-        try buf.appendSlice(allocator, "Commands:\n");
+        try buf.appendSlice(allocator, "commands:\n");
         for (commands) |cmd| {
             try buf.appendSlice(allocator, "  ");
             try buf.appendSlice(allocator, cmd.name);
