@@ -37,7 +37,7 @@
                   pname = "revo-deps";
                   version = "git";
                   fetchAll = true;
-                  hash = "sha256-oB7MGokL4FsfHt03wI5orl0yaYwQR+VqQtMvRGXE1lQ=";
+                  hash = "sha256-eXzXkv2ncitipYoRorPXj1zmJckAKS+pyCDMaCmU6bw=";
                   # NOTE: this hash has to be updated whenever dependencies are updated
                 };
               in
