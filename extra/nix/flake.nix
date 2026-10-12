@@ -24,26 +24,29 @@
     {
       overlays.default = final: _prev: {
         revo = final.callPackage (
-          { stdenv, zig }:
-          stdenv.mkDerivation {
-            name = "revo";
-            version = "git";
-            src = ../../.;
-            nativeBuildInputs = [ zig ];
-            preBuild =
-              let
-                zigDeps = zig.fetchDeps {
-                  src = ../../.;
-                  pname = "revo-deps";
-                  version = "git";
-                  fetchAll = true;
-                  hash = "sha256-eXzXkv2ncitipYoRorPXj1zmJckAKS+pyCDMaCmU6bw=";
-                  # NOTE: this hash has to be updated whenever dependencies are updated
-                };
-              in
-              "ln -s ${zigDeps} $ZIG_GLOBAL_CACHE_DIR/p";
-          }
-        ) { };
+          { stdenv, ... }:
+          let
+            zig = final.zig_0_17;
+          in
+            stdenv.mkDerivation {
+              name = "revo";
+              version = "git";
+              src = ../../.;
+              nativeBuildInputs = [ zig ];
+              preBuild =
+                let
+                  zigDeps = zig.fetchDeps {
+                    src = ../../.;
+                    pname = "revo-deps";
+                    version = "git";
+                    fetchAll = true;
+                    hash = "sha256-eXzXkv2ncitipYoRorPXj1zmJckAKS+pyCDMaCmU6bw=";
+                    # NOTE: this hash has to be updated whenever dependencies are updated
+                  };
+                in
+                "ln -s ${zigDeps} $ZIG_GLOBAL_CACHE_DIR/p";
+            }
+          ) { };
 
         revo-small = final.revo.overrideAttrs {
           zigBuildFlags = [
@@ -100,8 +103,8 @@
         _: pkgs: {
           default = pkgs.mkShellNoCC {
             packages = with pkgs; [
-              zig
-              zls
+              zig_0_17
+              zls # 0.17 not currently on nixpkgs
             ];
           };
         }
