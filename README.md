@@ -102,7 +102,7 @@ revo
 
 ### made with revo
 
-- [hachem-wtf/revel](https://github.com/hachem-wtf/revel) -- a unix-like kernel
+- [revel by hachem-wtf](https://git.hachem.wtf/revel/about/) -- a unix-like kernel
 - [hiccup.revo](https://github.com/0riginaln0/hiccup.revo) -- an html rendering library\
 - [rover](https://codeberg.org/doomy/rover) -- parser generators\
 
