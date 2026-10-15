@@ -33,6 +33,9 @@
               version = "git";
               src = ../../.;
               nativeBuildInputs = [ zig ];
+              zigBuildFlags = [
+                "-Dfeatures=lsp"    
+              ];
               preBuild =
                 let
                   zigDeps = zig.fetchDeps {
