@@ -12,6 +12,7 @@ const HostResult = root.host.HostResult;
 const Table = revo.table.Table;
 const testing = revo.lang.test_helpers;
 const table_methods = table_std.Impl;
+const root_methods = root.Impl;
 
 // type Dataframe = table<string, table<any>>
 fn len_internal(vm: *VM, frame_table: Table) !usize {
@@ -120,7 +121,7 @@ pub const Impl = struct {
         return HostResult.data(Value.new.table(result_table_id));
     }
 
-    // frame.sort(Dataframe, function) -> Dataframe
+    // dataframe.sort(Dataframe, function) -> Dataframe
         // Apply the function to each row in the DF as a new list of (idx, res)
         // Sort the list by result
         // Create a new result Dataframe with empty copied columns
@@ -130,25 +131,25 @@ pub const Impl = struct {
             // Append them to the result dataframe
         // Return the result dataframe
 
-    // frame.stack(table<Dataframe>) -> Dataframe
+    // dataframe.stack(table<Dataframe>) -> Dataframe
         // Ensure each Dataframe in the input table has matching column names and types
         // Create a result dataframe with the same columns
         // For each Dataframe in the input table
             // Append that Dataframe's columns to the current result columns
         // Return the result dataframe
 
-    // frame.filter(Dataframe, function) -> Dataframe
+    // dataframe.filter(Dataframe, function) -> Dataframe
         // Create a result dataframe with the same columns as the input Dataframe
         // For each row in the input Dataframe for which the function returns true
             // Append that row's values to the result Dataframe
         // Return the result dataframe
 
-    // frame.rename(Dataframe, string, string) -> Dataframe
+    // dataframe.rename(Dataframe, string, string) -> Dataframe
         // Create a result dataframe with every column copied except the renamed one
         // Copy the source column with the new name
         // Return the result dataframe
 
-    // frame.inner_join(table<Dataframe>, string) -> Dataframe
+    // dataframe.inner_join(table<Dataframe>, string) -> Dataframe
         // Ensure the input dataframes all have a join column named the input string of matching type
         // Pull out the first Dataframe's join column as a list
         // Create a result Dataframe and add the join column as an array table
@@ -161,16 +162,24 @@ pub const Impl = struct {
                             // continue
         // Return the result dataframe
 
+    // dataframe.unique(Dataframe, table<string>) -> Dataframe
+        // Initiate a AutoHashMap of <f64, bool> to track seen row values
+        // Initiate a result Dataframe
+        // For each row in the input Dataframe
+            // Set an accumulator to the root.hash() of the first column in the string table
+            // For each other column in the string table
+                // Mod the accumulator with the root.hash() of that value
+            // If the resulting hash is in the seen hashmap, continue
+            // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
+        // Return the result dataframe
+
 
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val;
 
-// frame.rename(Frame) -> Dataframe
-// frame.unique(Frame) -> Dataframe
-// frame.summarize(Frame) -> Dataframe
-// frame.group_by(Frame) -> Dataframe
-// frame.gather(Frame) -> Dataframe
+// dataframe.group_by(Frame) -> Dataframe
+// dataframe.transpose(Frame) -> Dataframe
 
 test "frame functions and methods" {
     try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.select({\"foos\", \"bazzes\"}) == {\"foos\" = {1, 2, 3}, \"bazzes\" = {7, 8, 9}}");
