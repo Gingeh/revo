@@ -368,6 +368,10 @@ pub declare dataframe = {
   maps a function over the rows of the dataframe to a new column with the given column name; each row in the passed function is a small table where column keys map to the row values
   *#
   map: fn(input: table<string, table<any>>, new_col: string, fn: function) -> table<string, table<any>>,
+  #*
+  sorts a dataframe using the result of a given function mapped over the dataframe's rows
+  *#
+  sort: fn(input: table<string, table<any>>, fn: function) -> table<string, table<any>>,
 }
 
 

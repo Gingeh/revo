@@ -1,3 +1,4 @@
+const std = @import("std");
 const revo = @import("revo");
 const root = @import("root.zig");
 const specs = @import("specs.zig");
@@ -122,14 +123,66 @@ pub const Impl = struct {
     }
 
     // dataframe.sort(Dataframe, function) -> Dataframe
+    pub fn sort(vm: *VM, frame_table_id: Args.table, f: Args.function) !HostResult {
+        const frame_table = try vm.tables.get(@backingInt(frame_table_id));
+        const frame_table_len: usize = try len_internal(vm, frame_table.*);
+        var frame_table_iter = frame_table.hash.orderedIterator();
+
         // Apply the function to each row in the DF as a new list of (idx, res)
-        // Sort the list by result
+        const RowResult = struct {idx: u64, f_result: Value};
+        var row_results_list: std.ArrayList(RowResult) = .empty;
+        defer row_results_list.deinit(vm.runtime.alloc);
+
+        // For each row in the frame table
+        for (0..frame_table_len) |i| {
+            // Extract the values into a tuple table where the atom keys are the column names
+            const row_table_id = try vm.tables.create();
+            const row_table = try vm.tables.get(row_table_id);
+
+            while (frame_table_iter.next()) |kv| {
+                const col_table_id = kv.value.asTable().?;
+                const col_table = try vm.tables.get(col_table_id);
+                try row_table.put(row_table_id, vm, kv.key, col_table.getRaw(Value.new.num(i), vm).?);
+            }
+
+            // Apply the function to the row
+            const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{Value.new.table(row_table_id)}, null);
+            // Add the f result to the new column table
+            try row_results_list.append(vm.runtime.alloc, .{.idx = i, .f_result = map_res});
+        }
+
+        // Sort the list by f result
+        const Context = struct {
+            vm_: *VM,
+            pub fn lessThanFn(ctx: @This(), lhs: RowResult, rhs: RowResult) bool {
+                return ctx.vm_.compare(lhs.f_result, rhs.f_result) == .lt;
+            }
+        };
+        std.mem.sort(RowResult, row_results_list.items, Context{ .vm_ = vm }, Context.lessThanFn);
+
         // Create a new result Dataframe with empty copied columns
+        const result_table_id = try vm.tables.create();
+        const result_table = try vm.tables.get(result_table_id);
+        while (frame_table_iter.next()) |kv| {
+            try result_table.put(result_table_id, vm, kv.key, Value.new.table(try vm.tables.create()));
+        }
+
         // For each result
-            // Find the index in the results list
-            // Get the elements at that index
-            // Append them to the result dataframe
+        for (row_results_list.items) |row_result| {
+            // Get the elements at the result's index
+            while (frame_table_iter.next()) |kv| {
+                const col_table_id = kv.value.asTable().?;
+                const col_table = try vm.tables.get(col_table_id);
+                const result_col_table_id = result_table.getRaw(kv.key, vm).?.asTable().?;
+                const result_col_table = try vm.tables.get(result_col_table_id);
+                // Append them to the result dataframe
+                try result_col_table.put(result_col_table_id, vm, kv.key, col_table.getRaw(Value.new.num(row_result.idx), vm).?);
+            }
+        }
+
         // Return the result dataframe
+        return HostResult.data(Value.new.table(result_table_id));
+    }
 
     // dataframe.stack(table<Dataframe>) -> Dataframe
         // Ensure each Dataframe in the input table has matching column names and types
@@ -185,4 +238,5 @@ test "frame functions and methods" {
     try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.select({\"foos\", \"bazzes\"}) == {\"foos\" = {1, 2, 3}, \"bazzes\" = {7, 8, 9}}");
     try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.len() == 3");
     try testing.topTrue("dataframe.map({\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}}, \"bazzes\", fn (row) row[\"foos\"] * row[\"bars\"]) == {\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {4, 10, 18}}");
+    try testing.topTrue("dataframe.sort({\"foos\" = {3, 1, 2}, \"bars\" = {4, 5, 6}}, fn (row) row[\"foos\"]) == {\"foos\" = {1, 2, 3}, \"bars\" = {5, 6, 4}}");
 }
