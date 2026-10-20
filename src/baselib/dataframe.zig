@@ -139,6 +139,7 @@ pub const Impl = struct {
             const row_table_id = try vm.tables.create();
             const row_table = try vm.tables.get(row_table_id);
 
+            frame_table_iter = frame_table.hash.orderedIterator();
             while (frame_table_iter.next()) |kv| {
                 const col_table_id = kv.value.asTable().?;
                 const col_table = try vm.tables.get(col_table_id);
@@ -163,20 +164,25 @@ pub const Impl = struct {
         // Create a new result Dataframe with empty copied columns
         const result_table_id = try vm.tables.create();
         const result_table = try vm.tables.get(result_table_id);
+        frame_table_iter = frame_table.hash.orderedIterator();
         while (frame_table_iter.next()) |kv| {
             try result_table.put(result_table_id, vm, kv.key, Value.new.table(try vm.tables.create()));
         }
 
         // For each result
         for (row_results_list.items) |row_result| {
-            // Get the elements at the result's index
+            // For each column
+            frame_table_iter = frame_table.hash.orderedIterator();
             while (frame_table_iter.next()) |kv| {
+                // Get the element at the result's index
                 const col_table_id = kv.value.asTable().?;
                 const col_table = try vm.tables.get(col_table_id);
+                const col_ele = col_table.getRaw(Value.new.num(row_result.idx), vm).?;
+
+                // Append it to the result dataframe's column
                 const result_col_table_id = result_table.getRaw(kv.key, vm).?.asTable().?;
                 const result_col_table = try vm.tables.get(result_col_table_id);
-                // Append them to the result dataframe
-                try result_col_table.put(result_col_table_id, vm, kv.key, col_table.getRaw(Value.new.num(row_result.idx), vm).?);
+                try result_col_table.array.append(vm.runtime.alloc, col_ele);
             }
         }
 
