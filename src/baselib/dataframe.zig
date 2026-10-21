@@ -17,11 +17,11 @@ const root_methods = root.Impl;
 
 // type Dataframe = table<string, table<any>>
 fn len_internal(vm: *VM, frame_table: Table) !usize {
-    var frame_table_iter = frame_table.hash.orderedIterator();
+    var df_cols_itr = frame_table.hash.orderedIterator();
     var col_array_table: *Table = undefined;
     var count: usize = 0;
 
-    while (frame_table_iter.next()) |kv| {
+    while (df_cols_itr.next()) |kv| {
         if (count != 0) {
             col_array_table = try vm.tables.get(kv.value.asTable().?);
             if (col_array_table.array.items.len != count) {
@@ -36,16 +36,46 @@ fn len_internal(vm: *VM, frame_table: Table) !usize {
     return count;
 }
 
+const DFRowIterator = struct {
+    frame_table: *const Table,
+    len: usize,
+    cur_idx: usize,
+    vm: *VM,
+
+    pub fn next(itr: *DFRowIterator) !?Value {
+        if (itr.cur_idx == itr.len) return null;
+
+        // Extract the values into a tuple table where the atom keys are the column names
+        const row_table_id = try itr.vm.tables.create();
+        const row_table = try itr.vm.tables.get(row_table_id);
+        var df_cols_itr = itr.frame_table.hash.orderedIterator();
+
+        while (df_cols_itr.next()) |kv| {
+            const col_table_id = kv.value.asTable().?;
+            const col_table = try itr.vm.tables.get(col_table_id);
+            try row_table.put(row_table_id, itr.vm, kv.key, col_table.getRaw(Value.new.num(itr.cur_idx), itr.vm).?);
+        }
+
+        itr.cur_idx += 1;
+        return Value.new.table(row_table_id);
+    }
+};
+
+fn getDFRowIterator(frame_table: *const Table, vm: *VM) !DFRowIterator {
+    const frame_table_len: usize = try len_internal(vm, frame_table.*);
+    return .{ .frame_table = frame_table, .len = frame_table_len, .cur_idx = 0, .vm = vm };
+}
+
 pub const Impl = struct {
 
     // dataframe.len(Dataframe) -> num
     pub fn len(vm: *VM, frame_table_id: Args.table) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
-        var frame_table_iter = frame_table.hash.orderedIterator();
+        var df_cols_itr = frame_table.hash.orderedIterator();
         var col_array_table: *Table = undefined;
         var count: ?usize = null;
 
-        while (frame_table_iter.next()) |kv| {
+        while (df_cols_itr.next()) |kv| {
             if (count) |count_val| {
                 col_array_table = try vm.tables.get(kv.value.asTable().?);
                 if (col_array_table.array.items.len != count_val) {
@@ -87,25 +117,14 @@ pub const Impl = struct {
     // dataframe.map(Dataframe, function) -> Dataframe
     pub fn map(vm: *VM, frame_table_id: Args.table, new_col_name: Args.string, f: Args.function) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
-        const frame_table_len: usize = try len_internal(vm, frame_table.*);
+        var df_rows_itr = try getDFRowIterator(frame_table, vm);
         const new_col_table_id = try vm.tables.create();
         const new_col_table = try vm.tables.get(new_col_table_id);
 
         // For each row in the frame table
-        for (0..frame_table_len) |i| {
-            // Extract the values into a tuple table where the atom keys are the column names
-            const row_table_id = try vm.tables.create();
-            const row_table = try vm.tables.get(row_table_id);
-            var frame_table_iter = frame_table.hash.orderedIterator();
-
-            while (frame_table_iter.next()) |kv| {
-                const col_table_id = kv.value.asTable().?;
-                const col_table = try vm.tables.get(col_table_id);
-                try row_table.put(row_table_id, vm, kv.key, col_table.getRaw(Value.new.num(i), vm).?);
-            }
-
+        while (try df_rows_itr.next()) |row_table| {
             // Apply the function to the row
-            const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{Value.new.table(row_table_id)}, null);
+            const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{row_table}, null);
             // Add the result to the new column table
             try new_col_table.push(vm.runtime.alloc, map_res);
         }
@@ -125,31 +144,22 @@ pub const Impl = struct {
     // dataframe.sort(Dataframe, function) -> Dataframe
     pub fn sort(vm: *VM, frame_table_id: Args.table, f: Args.function) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
-        const frame_table_len: usize = try len_internal(vm, frame_table.*);
-        var frame_table_iter = frame_table.hash.orderedIterator();
+        var df_rows_itr = try getDFRowIterator(frame_table, vm);
+        var df_cols_itr = frame_table.hash.orderedIterator();
 
         // Apply the function to each row in the DF as a new list of (idx, res)
         const RowResult = struct {idx: u64, f_result: Value};
         var row_results_list: std.ArrayList(RowResult) = .empty;
         defer row_results_list.deinit(vm.runtime.alloc);
 
+        var row_idx: usize = 0;
         // For each row in the frame table
-        for (0..frame_table_len) |i| {
-            // Extract the values into a tuple table where the atom keys are the column names
-            const row_table_id = try vm.tables.create();
-            const row_table = try vm.tables.get(row_table_id);
-
-            frame_table_iter = frame_table.hash.orderedIterator();
-            while (frame_table_iter.next()) |kv| {
-                const col_table_id = kv.value.asTable().?;
-                const col_table = try vm.tables.get(col_table_id);
-                try row_table.put(row_table_id, vm, kv.key, col_table.getRaw(Value.new.num(i), vm).?);
-            }
-
+        while (try df_rows_itr.next()) |row_table| {
             // Apply the function to the row
-            const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{Value.new.table(row_table_id)}, null);
+            const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{row_table}, null);
             // Add the f result to the new column table
-            try row_results_list.append(vm.runtime.alloc, .{.idx = i, .f_result = map_res});
+            try row_results_list.append(vm.runtime.alloc, .{.idx = row_idx, .f_result = map_res});
+            row_idx += 1;
         }
 
         // Sort the list by f result
@@ -164,16 +174,16 @@ pub const Impl = struct {
         // Create a new result Dataframe with empty copied columns
         const result_table_id = try vm.tables.create();
         const result_table = try vm.tables.get(result_table_id);
-        frame_table_iter = frame_table.hash.orderedIterator();
-        while (frame_table_iter.next()) |kv| {
+        df_cols_itr = frame_table.hash.orderedIterator();
+        while (df_cols_itr.next()) |kv| {
             try result_table.put(result_table_id, vm, kv.key, Value.new.table(try vm.tables.create()));
         }
 
         // For each result
         for (row_results_list.items) |row_result| {
             // For each column
-            frame_table_iter = frame_table.hash.orderedIterator();
-            while (frame_table_iter.next()) |kv| {
+            df_cols_itr = frame_table.hash.orderedIterator();
+            while (df_cols_itr.next()) |kv| {
                 // Get the element at the result's index
                 const col_table_id = kv.value.asTable().?;
                 const col_table = try vm.tables.get(col_table_id);
