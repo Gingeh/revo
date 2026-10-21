@@ -90,6 +90,19 @@ pub const Impl = struct {
         return .data(Value.new.num(@as(f64, @floatFromInt(count.?))));
     }
 
+    // dataframe.row(Dataframe, num) -> table
+    pub fn row(vm: *VM, frame_table_id: Args.table, idx: Args.number) !HostResult {
+        const frame_table = try vm.tables.get(@backingInt(frame_table_id));
+        var df_rows_itr = try getDFRowIterator(frame_table, vm);
+        var row_idx: usize = 0;
+        // For each row in the frame table
+        while (try df_rows_itr.next()) |row_table| {
+            if (row_idx == @as(usize, @intFromFloat(idx))) return .data(row_table);
+            row_idx += 1;
+        }
+        return .errType(0, "dataframe with len > requested row index", "dataframe row index out of range");
+    }
+
     // dataframe.select(Dataframe, table<string>) -> Dataframe
     pub fn select(vm: *VM, frame_table_id: Args.table, names_table_id: Args.table) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
@@ -251,6 +264,7 @@ pub const impls: []const specs.Impl = root.host.impls(Impl).val;
 // dataframe.transpose(Frame) -> Dataframe
 
 test "frame functions and methods" {
+    try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.row(1) == {\"foos\" = 2, \"bars\" = 5, \"bazzes\" = 8}");
     try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.select({\"foos\", \"bazzes\"}) == {\"foos\" = {1, 2, 3}, \"bazzes\" = {7, 8, 9}}");
     try testing.topTrue("{\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {7, 8, 9}} |> dataframe.len() == 3");
     try testing.topTrue("dataframe.map({\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}}, \"bazzes\", fn (row) row[\"foos\"] * row[\"bars\"]) == {\"foos\" = {1, 2, 3}, \"bars\" = {4, 5, 6}, \"bazzes\" = {4, 10, 18}}");

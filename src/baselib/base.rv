@@ -361,6 +361,10 @@ pub declare dataframe = {
   *#
   len: fn(input: table<string, table<any>>) -> num,
   #*
+  returns the dataframe row at the given index
+  *#
+  row: fn(input: table<string, table<any>>, idx: num) -> table<string, any>,
+  #*
   selects only the given columns for a new dataframe, in the input order
   *#
   select: fn(input: table<string, table<any>>, columns: table<string>) -> table<string, table<any>>,
