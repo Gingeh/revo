@@ -260,23 +260,26 @@ pub fn usage(allocator: Allocator, args: []const Arg, commands: []const Command)
     var buf = try std.ArrayList(u8).initCapacity(allocator, 256);
     errdefer buf.deinit(allocator);
 
-    // for alignment
-    var max_flag: usize = 0;
     var flag_buf: [16]u8 = undefined;
+
+    // for alignment
+    var max_len: usize = 0;
     for (args) |arg| {
         const fs = arg.flagString(&flag_buf);
-        if (fs.len > max_flag) max_flag = fs.len;
+        max_len = @max(max_len, fs.len);
+    }
+    for (commands) |cmd| {
+        max_len = @max(max_len, cmd.name.len);
     }
 
     //
     // commands
     if (commands.len > 0) {
-        try buf.append(allocator, '\n');
-        try buf.appendSlice(allocator, "commands:\n");
+        try buf.appendSlice(allocator, "\ncommands:\n");
         for (commands) |cmd| {
             try buf.appendSlice(allocator, "  ");
             try buf.appendSlice(allocator, cmd.name);
-            for (0..max_flag + 2 - cmd.name.len) |_| try buf.append(allocator, ' ');
+            for (0..max_len + 2 - cmd.name.len) |_| try buf.append(allocator, ' ');
             try buf.appendSlice(allocator, cmd.description);
             try buf.append(allocator, '\n');
         }
@@ -284,15 +287,17 @@ pub fn usage(allocator: Allocator, args: []const Arg, commands: []const Command)
 
     //
     // options section (and skip positionals)
-    try buf.appendSlice(allocator, "\noptions:\n");
-    for (args) |arg| {
-        if (arg.kind == .positional) continue;
-        const fs = arg.flagString(&flag_buf);
-        try buf.appendSlice(allocator, "  ");
-        try buf.appendSlice(allocator, fs);
-        for (0..max_flag + 2 - fs.len) |_| try buf.append(allocator, ' ');
-        try buf.appendSlice(allocator, arg.description);
-        try buf.append(allocator, '\n');
+    if (args.len > 0) {
+        try buf.appendSlice(allocator, "\noptions:\n");
+        for (args) |arg| {
+            if (arg.kind == .positional) continue;
+            const fs = arg.flagString(&flag_buf);
+            try buf.appendSlice(allocator, "  ");
+            try buf.appendSlice(allocator, fs);
+            for (0..max_len + 2 - fs.len) |_| try buf.append(allocator, ' ');
+            try buf.appendSlice(allocator, arg.description);
+            try buf.append(allocator, '\n');
+        }
     }
 
     return try buf.toOwnedSlice(allocator);
