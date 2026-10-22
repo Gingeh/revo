@@ -39,7 +39,7 @@ pub const Impl = struct {
         defer client.deinit();
 
         // build fetch request options
-        var request: std.http.Client.FetchOptions = .{ .location = .{ .url = url_string }, .method = method, .redirect_behavior = redirect_behavior };
+        var request: std.http.Client.FetchOptions = .{ .location = .{ .url = url_string }, .method = method, .redirect_behavior = redirect_behavior, .keep_alive = false };
 
         // add body to the request, if provided
         const body = try buildBody(method, opts.value, vm);
