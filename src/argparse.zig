@@ -275,8 +275,7 @@ pub fn usage(allocator: Allocator, args: []const Arg, commands: []const Command)
     //
     // commands
     if (commands.len > 0) {
-        try buf.append(allocator, '\n');
-        try buf.appendSlice(allocator, "commands:\n");
+        try buf.appendSlice(allocator, "\ncommands:\n");
         for (commands) |cmd| {
             try buf.appendSlice(allocator, "  ");
             try buf.appendSlice(allocator, cmd.name);
@@ -288,15 +287,17 @@ pub fn usage(allocator: Allocator, args: []const Arg, commands: []const Command)
 
     //
     // options section (and skip positionals)
-    try buf.appendSlice(allocator, "\noptions:\n");
-    for (args) |arg| {
-        if (arg.kind == .positional) continue;
-        const fs = arg.flagString(&flag_buf);
-        try buf.appendSlice(allocator, "  ");
-        try buf.appendSlice(allocator, fs);
-        for (0..max_len + 2 - fs.len) |_| try buf.append(allocator, ' ');
-        try buf.appendSlice(allocator, arg.description);
-        try buf.append(allocator, '\n');
+    if (args.len > 0) {
+        try buf.appendSlice(allocator, "\noptions:\n");
+        for (args) |arg| {
+            if (arg.kind == .positional) continue;
+            const fs = arg.flagString(&flag_buf);
+            try buf.appendSlice(allocator, "  ");
+            try buf.appendSlice(allocator, fs);
+            for (0..max_len + 2 - fs.len) |_| try buf.append(allocator, ' ');
+            try buf.appendSlice(allocator, arg.description);
+            try buf.append(allocator, '\n');
+        }
     }
 
     return try buf.toOwnedSlice(allocator);
