@@ -111,7 +111,7 @@ pub const Impl = struct {
             if (row_idx == @as(usize, @intFromFloat(idx))) return .data(row_table);
             row_idx += 1;
         }
-        return .errType(0, "dataframe with len > requested row index", "dataframe row index out of range");
+        return .errType(1, "dataframe with len > requested row index", "dataframe row index out of range");
     }
 
     // dataframe.select(Dataframe, table<string>) -> Dataframe
@@ -178,6 +178,7 @@ pub const Impl = struct {
         while (try df_rows_itr.next()) |row_table_val| {
             // Apply the function to the row
             const filter_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{row_table_val}, null);
+            if (!filter_res.isAtom()) return .errType(1, "filter predicate that returns boolean :true or :false", "filter predicate doesn't return boolean");
             const filter_res_id = filter_res.asAtom().?;
 
             // If the function returns true
